@@ -1,4 +1,8 @@
-# labloop — secure ML experimentation lab
+# Lab Loop™ — a research automation engine for empirical work
+
+Hypotheses, designed experiments, evidence and conclusions as
+durable state — built for researchers, applications and AI agents
+across any empirical domain.
 
 Two projects, side by side. Each folder is self-contained and usable
 on its own.
