@@ -1,4 +1,4 @@
-# Lab Loop™ — a research automation engine for empirical work
+# Lab Loop™: a research automation environment for empirical work
 
 Hypotheses, designed experiments, evidence and conclusions as
 durable state — built for researchers, applications and AI agents
@@ -44,10 +44,7 @@ for the full workflow including publishing VM images.
 ## Download a prebuilt image
 
 Released VM images live in the public Hugging Face bucket:
-
-```text
-https://huggingface.co/buckets/cloudcell/LabLoop
-```
+[https://huggingface.co/buckets/cloudcell/LabLoop](https://huggingface.co/buckets/cloudcell/LabLoop)
 
 Download an image plus its checksum, verify it, then import it with
 the script in `ml-labloop/release-package/`:
