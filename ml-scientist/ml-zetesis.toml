@@ -1,0 +1,67 @@
+# ml-zetesis-mcp configuration — Loop 1, the search loop.
+#
+# Upstream channels are wired here — a *product* is a concrete MCP
+# server filling a protocol role (swappable; the role is the
+# contract). Product bindings live only in config, never in code.
+# All are optional: absent means absent (pulls to an
+# unwired source fail clearly; minting reports claim_status "disabled";
+# the server still serves its own state). A configured-but-down
+# channel is retried by the connectivity supervisor — run-ml-*.sh
+# launch order does not matter — and reported as a violation by the
+# upstream_connectivity integrity check.
+
+# Shared upstream-channel knobs (server internals — never
+# client-settable). reconnect_seconds — the connectivity supervisor's
+# retry cadence for configured-but-down channels (0 disables retries).
+# Default: 15. call_timeout_seconds — bounds one upstream MCP call so
+# a dead peer can never wedge a tool call forever (per-channel
+# override allowed inside [adaptors.<channel>]). Default: 30.
+[adaptors]
+# reconnect_seconds = 15
+# call_timeout_seconds = 30
+
+# Loop-0 evidence — the read-only channel into ml-episteme.
+# pull_evidence(source="loop0") proxies whitelisted read tools only.
+[adaptors.evidence]
+transport = "streamable-http"
+url = "http://localhost:38080/mcp"
+
+# Loop-0 promotion — the write channel into ml-episteme's insert-only
+# lineage surfaces (register_candidate, create_evaluation_contract,
+# record_promotion_decision). Separate role from evidence: the read
+# path can never grow a write. Same endpoint, different whitelist.
+[adaptors.promotion]
+transport = "streamable-http"
+url = "http://localhost:38080/mcp"
+
+# Claims memory — anamnesis. Reads via pull_evidence(source="anamnesis");
+# writes happen only at conclude_investigation, which mints each live
+# finding as a `methodological` claim with derived_from edges to the
+# Loop-0 entities consulted.
+[adaptors.claims]
+transport = "streamable-http"
+url = "http://localhost:38090/mcp"
+
+# Integrity layer — check_invariants tool + /health/deep route.
+# Every check run appends to <db_dir>/logs/check-<YYYY-MM-DD>.jsonl
+# (one JSON line per run, a new file at each UTC midnight); the GUI's
+# /integrity view renders those logs read-only (it never runs checks).
+# log_max_files — how many check logs to retain (0 disables logging).
+# stale_investigation_seconds — an open investigation idle longer than
+# this is flagged by the stale_open_investigations check.
+# check_interval_seconds — startup sweep + periodic sweeps
+# (0 disables periodic; startup still logs). On by default.
+# prior_confidence_max — the prior ceiling: findings recorded without
+# evidence_ref_ids may not exceed this confidence (record_finding
+# write-time gate). Default: 0.3.
+# [integrity]
+# log_max_files = 100
+# stale_investigation_seconds = 3600
+# check_interval_seconds = 300
+# prior_confidence_max = 0.3
+
+# Observability GUI nav-widget poll cadences (health pill, integrity
+# badge).
+# [observability]
+# health_poll_seconds = 10
+# integrity_poll_seconds = 30

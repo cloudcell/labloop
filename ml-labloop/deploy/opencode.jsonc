@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Local vLLM server on the host, reached via the libvirt default-network
+  // gateway. Empty "models" = opencode auto-discovers whatever the server
+  // exposes at /v1/models, so swapping the served model needs no edit here.
+  // In the model picker these appear grouped under "Local vLLM (host)".
+  "provider": {
+    "vllm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local vLLM (host)",
+      "options": {
+        "baseURL": "http://192.168.122.1:8002/v1"
+      },
+      "models": {}
+    }
+  }
+}

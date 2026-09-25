@@ -1,0 +1,25 @@
+#!/bin/sh
+# labloop executor channel — invoked as `sudo -u exp /usr/local/sbin/labloop-exec <cmd...>`
+# (see deploy/labloop.sudoers). Pins the environment so the exec into
+# the hostile-zone container does not depend on the caller's cwd/HOME:
+#   - `sudo -i` would validate the *shell*, not podman — bypassing the
+#     NOPASSWD rule, so callers must use plain `sudo -u exp`
+#   - without this wrapper, `sudo -u exp podman exec` fails chdir'ing
+#     into /home/lab and finds lab's container store, not exp's
+export HOME=/home/exp
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+cd /
+# audit: every exec through the channel lands in the root-owned
+# journal — lab/agent can read it (adm) but cannot erase it
+logger -t labloop-exec -- "$*"
+# --user $(id -u): under --userns=keep-id, host `exp` maps to the
+# SAME uid inside the container. The image's `USER exp` is uid 1000,
+# which maps to an unrelated subuid — running execs as it leaves the
+# exp-owned /exchange + /experiments mounts unwritable. $(id -u) is
+# always the keep-id target regardless of the actual host uid.
+# -e HOME: uid 1001 has no passwd entry inside the image, so exec'd
+# processes would get HOME=/ — on the read-only rootfs that breaks
+# pip/caches/tools (observed: pip failing on '/.local'). The quadlet
+# mounts a tmpfs at /home/exp so this HOME is writable scratch.
+exec /usr/bin/podman exec --user "$(id -u)" -e HOME=/home/exp \
+    lab-cnt-exp "$@"

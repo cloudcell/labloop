@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# labloop-export — staged, pull-only data export from the lab VM.
+# Installed at /usr/local/sbin/labloop-export (root:root 0755).
+# See docs/se-plans/plan-20260923-2038Z--secure-data-extraction.md.
+#
+# Two disjoint modes:
+#
+#   labloop-export <path> [path...]   (as lab) — export selected paths,
+#       each of which MUST resolve inside /srv/lab/exchange. Everyday
+#       "pull results out" channel.
+#
+#   sudo labloop-export --all         (arg-pinned sudoers, runs as root)
+#       — the hardcoded lab-work set: exchange, experiments, mcp-state,
+#       mcp+exp podman volumes, full journal + rendered logs, workspace,
+#       agent state (opencode + VSCodium), opt-local volume. No
+#       user-supplied paths: root's read set cannot be steered.
+#
+# Both modes build into /var/lib/labloop-export/{user,root}/ (provisioned
+# by tmpfiles.d/labloop.conf — hostile zone cannot write there), freeze
+# a copy, then emit:
+#   manifest.json   mode, per-file {path, sha256, size}, tarball hash
+#   export.tar.gz   deterministic tar of the frozen staging tree
+# The host pulls those two fixed paths over qemu-guest-agent; nothing
+# here listens, pushes, or contacts the host.
+set -euo pipefail
+
+TAG=labloop-export
+EXCHANGE=/srv/lab/exchange
+BASE=/var/lib/labloop-export   # real disk — workspace alone can exceed /run tmpfs
+CAP_PATH=$((4 * 1024 * 1024 * 1024))   # path-mode staging cap
+CAP_ALL=$((8 * 1024 * 1024 * 1024))    # --all staging cap
+
+die()  { logger -t "$TAG" -- "refused: $*"; echo "labloop-export: $*" >&2; exit 1; }
+note() { logger -t "$TAG" -- "$*"; echo "labloop-export: $*" >&2; }
+
+MODE=path
+[ "${1:-}" = "--all" ] && { MODE=all; shift; }
+
+# ---------------------------------------------------------------
+# staging root: created by tmpfiles at boot (or a prior root run).
+# Verify ownership — a wrong-owner staging dir means tampering; the
+# hostile zone must never be able to pre-seed it.
+# ---------------------------------------------------------------
+[ "$MODE" = all ] && { STAGE="$BASE/root"; WANT_UID=0; CAP=$CAP_ALL; } \
+                  || { STAGE="$BASE/user"; WANT_UID=$(id -u); CAP=$CAP_PATH; }
+# root mode self-provisions the tree (only root can create under /var/lib);
+# path mode relies on tmpfiles — a missing user dir fails closed.
+if [ "$MODE" = all ]; then
+    install -d -m 0711 -o root -g root "$BASE"
+    install -d -m 0700 -o lab  -g lab  "$BASE/user"
+    install -d -m 0700 -o root -g root "$BASE/root"
+fi
+[ -d "$STAGE" ] || die "staging dir $STAGE missing (tmpfiles.d/labloop.conf not applied?)"
+[ "$(stat -c %u "$STAGE")" = "$WANT_UID" ] || die "$STAGE owned by wrong uid — refusing"
+
+# serialize exports — a racing second run would interleave the frozen
+# staging copy of the first
+exec 9>"$STAGE/.lock"
+flock -n 9 || die "another labloop-export is already running"
+
+# --all is NOPASSWD-invocable by lab (agents included): it quiesces
+# both containers and stages gigabytes, so it must not be loopable.
+# A bounded min-interval makes it a deliberate, not an automated, act.
+if [ "$MODE" = all ]; then
+    MARK="$BASE/.last-all"
+    if [ -e "$MARK" ]; then
+        last=$(stat -c %Y "$MARK")
+        now=$(date +%s)
+        [ $((now - last)) -lt 300 ] \
+            && die "--all ran $((now - last))s ago — min interval is 300s (it quiesces the lab)"
+    fi
+    touch "$MARK"   # stamped on ATTEMPT: even a failed run stopped containers
+fi
+
+rm -rf "$STAGE/stage" "$STAGE/export.tar.gz" "$STAGE/manifest.json"
+install -d -m 0700 "$STAGE/stage"
+
+copy_in() {   # copy_in <abs-src> <stage-relpath> — missing source is skipped
+    [ -e "$1" ] || { note "skip (absent): $1"; return 0; }
+    mkdir -p "$STAGE/stage/$(dirname "$2")"
+    cp -a -- "$1" "$STAGE/stage/$2"
+}
+
+# ---------------------------------------------------------------
+# collect
+# ---------------------------------------------------------------
+restart_mcp=0; restart_exp=0
+cleanup() {   # restart quadlets we stopped, even on failure
+    [ "$restart_mcp" = 1 ] && su - mcp -c \
+        'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start lab-cnt-mcp' 2>/dev/null || true
+    [ "$restart_exp" = 1 ] && su - exp -c \
+        'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start lab-cnt-exp' 2>/dev/null || true
+}
+
+if [ "$MODE" = path ]; then
+    [ "$#" -ge 1 ] || die "usage: labloop-export <path...> | --all"
+    n=0
+    for p in "$@"; do
+        rp=$(realpath -e -- "$p" 2>/dev/null) \
+            || die "not found or unresolvable: $p"
+        case "$rp" in
+            "$EXCHANGE" | "$EXCHANGE"/*) ;;
+            *) die "outside $EXCHANGE: $p -> $rp" ;;
+        esac
+        n=$((n + 1))
+        rel=exchange
+        [ "$rp" != "$EXCHANGE" ] && rel="exchange/$(basename "$rp")"
+        copy_in "$rp" "$rel"
+    done
+    note "path mode: staged $n path(s) under $EXCHANGE"
+
+else
+    [ "$(id -u)" = "0" ] || die "--all requires root (sudo labloop-export --all)"
+    [ "$#" -eq 0 ] || die "--all takes no further arguments"
+    trap cleanup EXIT
+
+    # --- quiesce writers before reading (review A1) ---------------
+    # sqlite-backed MCP state is only guaranteed consistent while the
+    # container is down; stopping lab-cnt-exp also freezes hostile
+    # writers on the exchange/experiments bind mounts for the duration.
+    for u in mcp exp; do
+        if su - "$u" -c 'XDG_RUNTIME_DIR=/run/user/$(id -u) \
+                systemctl --user stop lab-cnt-'"$u" 2>/dev/null; then
+            eval "restart_${u}=1"
+        else
+            note "lab-cnt-$u not stopped (not running or still starting — nothing to quiesce)"
+        fi
+    done
+
+    # --- filesystem artifacts -------------------------------------
+    copy_in /srv/lab/exchange    exchange
+    copy_in /srv/lab/experiments experiments
+    copy_in /srv/lab/mcp-state   mcp-state
+    copy_in /home/lab/workspace  workspace
+    copy_in /srv/lab/opt-local   opt-local   # legacy path; named volume below is canonical
+
+    # --- podman named volumes (each owner reads its own store) -----
+    # `podman volume export` writes to /dev/stdout which does not exist
+    # under `su -` — use --output into a per-user mktemp dir (a shared
+    # /tmp path would let a hostile uid pre-plant a symlink and steer
+    # the owner's write). Root then moves the finished tarball.
+    install -d -m 0700 "$STAGE/stage/mcp-volumes" "$STAGE/stage/opt-local"
+    vol_export() {   # vol_export <owner> <volume> <dest>
+        local u=$1 v=$2 dest=$3 vtmp
+        vtmp=$(su - "$u" -c 'mktemp -d' 2>/dev/null) || return 1
+        if su - "$u" -c "podman volume export --output '$vtmp/v.tar' '$v'" 2>/dev/null; then
+            mv "$vtmp/v.tar" "$dest" && rmdir "$vtmp" && return 0
+        fi
+        rm -rf "$vtmp"; return 1
+    }
+    for v in $(su - mcp -c 'podman volume ls --format "{{.Name}}"' 2>/dev/null); do
+        vol_export mcp "$v" "$STAGE/stage/mcp-volumes/$v.tar" \
+            || note "volume export failed: $v"
+    done
+    if su - exp -c 'podman volume exists labloop-opt' 2>/dev/null; then
+        vol_export exp labloop-opt "$STAGE/stage/opt-local/labloop-opt.tar" \
+            || note "volume export failed: labloop-opt"
+    fi
+
+    # --- logs ------------------------------------------------------
+    install -d -m 0700 "$STAGE/stage/logs" "$STAGE/stage/logs/var-log"
+    journalctl -o export > "$STAGE/stage/logs/journal.export" 2>/dev/null || true
+    journalctl -t labloop-exec -t labloop-build -t labloop-export \
+        > "$STAGE/stage/logs/labloop.log" 2>/dev/null || true
+    # conmon tags container stdout with the container NAME as the
+    # journal identifier — -t is the selector that actually matches
+    # (verified on lab-vm-pub-8: --user-unit returns no entries)
+    journalctl -t lab-cnt-mcp -t lab-cnt-exp \
+        > "$STAGE/stage/logs/mcp-containers.log" 2>/dev/null || true
+    # the forwarder is a byte-pipe that logs nothing itself; this is a
+    # best-effort grep of podman-exec/conmon records mentioning it
+    journalctl 2>/dev/null | grep -i 'llm\|forward' \
+        > "$STAGE/stage/logs/llm-forward.log" || true
+    # /var/log minus the journal dir (already covered by journal.export)
+    tar -cf - --exclude='./journal' -C /var/log . 2>/dev/null \
+        | tar -xf - -C "$STAGE/stage/logs/var-log" 2>/dev/null || true
+
+    # --- agent state (contains credentials — 0600 all the way) -----
+    copy_in /home/lab/.local/share/opencode agent-state/opencode
+    copy_in /home/lab/.config/VSCodium/User/globalStorage agent-state/VSCodium/globalStorage
+    copy_in /home/lab/.config/VSCodium/logs agent-state/VSCodium/logs
+
+    cleanup; trap - EXIT   # restart containers before slow tar/manifest
+fi
+
+# ---------------------------------------------------------------
+# cap check — refuse oversized exports rather than filling the disk
+# ---------------------------------------------------------------
+staged=$(du -sb "$STAGE/stage" | cut -f1)
+[ "$staged" -le "$CAP" ] || die "staged $staged bytes exceeds cap $CAP"
+
+# ---------------------------------------------------------------
+# tarball (deterministic) + manifest
+# ---------------------------------------------------------------
+tar --sort=name --owner=0 --group=0 --numeric-owner \
+    -czf "$STAGE/export.tar.gz" -C "$STAGE/stage" .
+chmod 0600 "$STAGE/export.tar.gz"
+
+STAGE_DIR="$STAGE" MODE="$MODE" python3 - <<'PY'
+import hashlib, json, os, socket
+from datetime import datetime, timezone
+sd, mode = os.environ["STAGE_DIR"], os.environ["MODE"]
+files = []
+for root, _, names in os.walk(os.path.join(sd, "stage")):
+    for n in names:
+        p = os.path.join(root, n)
+        if os.path.isfile(p) and not os.path.islink(p):
+            rel = os.path.relpath(p, os.path.join(sd, "stage"))
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            files.append({"path": rel, "sha256": h.hexdigest(),
+                          "size": os.path.getsize(p)})
+files.sort(key=lambda f: f["path"])
+tb = os.path.join(sd, "export.tar.gz")
+h = hashlib.sha256()
+with open(tb, "rb") as f:
+    for chunk in iter(lambda: f.read(1 << 20), b""):
+        h.update(chunk)
+manifest = {
+    "format": 1,
+    "mode": mode,
+    "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "hostname": socket.gethostname(),
+    "files": files,
+    "total_bytes": sum(f["size"] for f in files),
+    "tarball": {"name": "export.tar.gz", "sha256": h.hexdigest(),
+                "size": os.path.getsize(tb)},
+}
+with open(os.path.join(sd, "manifest.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+PY
+chmod 0600 "$STAGE/manifest.json"
+
+# drop the frozen copy — manifest + tarball are the product, keeping
+# stage/ would double the disk footprint until the next run
+rm -rf "$STAGE/stage"
+
+n=$(python3 -c "import json;print(len(json.load(open('$STAGE/manifest.json'))['files']))")
+note "$MODE export complete: $n files, $staged bytes staged -> $STAGE/export.tar.gz"

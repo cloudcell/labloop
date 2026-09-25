@@ -1,0 +1,54 @@
+# Trusted zone — all five ml-* MCP servers as separate processes in one
+# deployment unit. ADR-0001's one-server-per-loop is preserved at the
+# process level; the container is packaging, not a security boundary —
+# the VM is the boundary (docs/sb-architecture/sb-01-secure-encapsulation.md).
+#
+# The server sources live in the ml-scientist repo, so stage a build
+# context first:
+#
+#   ctx=$(mktemp -d)
+#   git clone <ml-scientist-url-or-path> "$ctx/ml-scientist"
+#   cp containers/mcp/entrypoint.sh "$ctx/"
+#   sudo -u lab podman build -t lab-img-mcp \
+#       -f containers/mcp/Containerfile "$ctx"
+#
+# KNOWN GAP: the ml-* servers do not yet enforce bearer-token auth —
+# the Authorization header in Cline's config is currently inert.
+# Isolation rests on network separation (loopback publish + lab-net-mcp)
+# until auth lands server-side or behind an authenticating proxy.
+FROM docker.io/library/python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bubblewrap strace curl ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /opt/ml-scientist
+COPY ml-scientist/ /opt/ml-scientist/
+RUN uv sync --frozen --no-dev
+
+# git does not carry empty dirs: episteme's observability app mounts
+# StaticFiles on a dir that is empty upstream and therefore absent in
+# a fresh clone. Create defensively for all five.
+# NB: RUN is /bin/sh (dash) — no brace expansion.
+RUN for s in agora arete zetesis episteme anamnesis; do \
+        mkdir -p "/opt/ml-scientist/src/ml_${s}_mcp/observability/static"; \
+    done
+
+# `uv run` re-resolves per entrypoint at container start (runtime logs
+# showed downloads + a local build). Pin the cache outside HOME so it
+# survives the HOME=/state switch, then warm it per entrypoint so
+# launches need no egress.
+ENV UV_CACHE_DIR=/opt/uv-cache
+RUN for s in agora arete zetesis episteme anamnesis; do \
+        uv run "ml-${s}-mcp" --help >/dev/null 2>&1 || true; done
+
+COPY entrypoint.sh /usr/local/bin/labloop-mcp
+RUN chmod 755 /usr/local/bin/labloop-mcp
+
+# Durable state under one mount: servers write ~/.ml-<name>/.
+ENV HOME=/state
+VOLUME ["/state"]
+
+ENTRYPOINT ["/usr/local/bin/labloop-mcp"]

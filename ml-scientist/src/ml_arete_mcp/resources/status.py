@@ -1,0 +1,246 @@
+"""Status digest — improver://status.
+
+The machine-readable slice of the session protocol: where the loop
+stands, what is open, what is blocked, and the recommended next
+action. Computed live on every read. The same digest is embedded in
+``improver://session`` and rendered by the ``status_report`` prompt —
+one source of truth, three surfaces.
+
+The digest is the cross-server contract — every product in the lab
+emits the same shape.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from ..integrity.checks import log_dir_for
+from ..integrity.log import list_check_logs
+from ..state.store import ImproverStore
+
+# Which tools a down channel blocks.
+_BLOCKED_TOOLS = {
+    "loop0-read": ["pull_evidence"],
+    "loop1-read": ["pull_evidence"],
+    "loop1-orchestration": [
+        "open_arm_campaign",
+        "spawn_arm_programme",
+        "pull_arm_evidence",
+        "record_arm_result",
+        "close_arm_campaign",
+        "record_arm_verdict",
+    ],
+    "claims": ["record_meta_decision"],
+}
+
+_STEP_OF_TOOL = {
+    "register_improver": (1, "register_improver"),
+    "create_meta_contract": (2, "create_meta_contract"),
+    "propose_meta_change": (3, "propose_meta_change"),
+    "open_tournament": (4, "open_tournament"),
+    "record_tournament_result": (5, "record_tournament_result"),
+    "close_tournament": (6, "close_tournament"),
+    "record_meta_decision": (7, "record_meta_decision"),
+    "promote_policy": (8, "promote_policy"),
+}
+_LOOP_STEPS = 8
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _upstream_summary(adaptors) -> dict:
+    report = (
+        adaptors.connectivity_report()
+        if adaptors is not None
+        and hasattr(adaptors, "connectivity_report")
+        else []
+    )
+    up = sum(1 for e in report if e.get("state") == "up")
+    down = sum(1 for e in report if e.get("state") == "down")
+    return {
+        "configured": len(report),
+        "up": up,
+        "down": down,
+        "verdict": "ok" if down == 0 else "violations",
+        "channels": report,
+    }
+
+
+def _blockers(adaptors) -> list[dict]:
+    report = (
+        adaptors.connectivity_report()
+        if adaptors is not None
+        and hasattr(adaptors, "connectivity_report")
+        else []
+    )
+    out = []
+    for e in report:
+        if e.get("state") == "down":
+            role = e.get("role") or e.get("channel")
+            out.append({
+                "kind": "upstream_down",
+                "channel": e.get("channel"),
+                "role": role,
+                "blocks": _BLOCKED_TOOLS.get(role, []),
+                "detail": e.get("last_error") or "channel unreachable",
+            })
+    return out
+
+
+def _integrity_summary(store: ImproverStore) -> dict:
+    runs = list_check_logs(log_dir_for(store), limit=1)
+    if not runs:
+        return {
+            "verdict": "no_runs",
+            "violations": None,
+            "last_run_at": None,
+        }
+    last = runs[0]
+    return {
+        "verdict": last.get("status"),
+        "violations": last.get("violations"),
+        "last_run_at": last.get("checked_at"),
+        "trigger": last.get("trigger"),
+    }
+
+
+def _collect_open_work(store: ImproverStore) -> tuple[list[dict], dict]:
+    open_work: list[dict] = []
+    facts = {
+        "no_champion": store.get_champion() is None,
+        "conditional": [], "admitted": [],
+        "tournaments_ready": [], "tournaments_waiting": [],
+    }
+
+    conditional, _ = store.list_proposals(status="conditional", limit=50)
+    admitted, _ = store.list_proposals(status="admitted", limit=50)
+    for p in conditional:
+        open_work.append({
+            "kind": "proposal", "id": p.id, "state": "conditional",
+            "proposer": p.proposer_improver_id,
+        })
+        facts["conditional"].append(p)
+    for p in admitted:
+        open_work.append({
+            "kind": "proposal", "id": p.id, "state": "admitted",
+            "proposer": p.proposer_improver_id,
+        })
+        facts["admitted"].append(p)
+
+    tournaments, _ = store.list_tournaments(status="open", limit=50)
+    for t in tournaments:
+        results = store.list_tournament_results(t.id)
+        parent_n = sum(1 for r in results if r.arm == "parent")
+        cand_n = sum(1 for r in results if r.arm == "candidate")
+        open_work.append({
+            "kind": "tournament", "id": t.id, "state": "open",
+            "parent_results": parent_n,
+            "candidate_results": cand_n,
+        })
+        if parent_n >= 1 and cand_n >= 1:
+            facts["tournaments_ready"].append(t)
+        else:
+            facts["tournaments_waiting"].append(
+                (t, parent_n, cand_n)
+            )
+    return open_work, facts
+
+
+def _recommend(facts: dict, blockers: list[dict]) -> list[dict]:
+    blocked_tools = {
+        t for b in blockers for t in b.get("blocks", [])
+    }
+    recs: list[dict] = []
+
+    def add(tool, refs, reason):
+        entry = {
+            "rank": len(recs) + 1,
+            "action": tool,
+            "tool": tool,
+            "entity_refs": refs,
+            "reason": reason,
+        }
+        if tool in blocked_tools:
+            entry["blocked"] = True
+        recs.append(entry)
+
+    for t in facts["tournaments_ready"]:
+        add(
+            "close_tournament", [t.id],
+            "both arms have results — close to compute "
+            "recursive_gain",
+        )
+    for t, parent_n, cand_n in facts["tournaments_waiting"]:
+        missing = "parent" if parent_n == 0 else "candidate"
+        if parent_n == 0 and cand_n == 0:
+            missing = "either arm"
+        add(
+            "record_tournament_result", [t.id],
+            f"tournament is open — no result yet for {missing}; "
+            "run the arm's evaluation then record it",
+        )
+    for p in facts["conditional"]:
+        add(
+            "record_meta_decision", [p.id],
+            "proposal is conditional — the human gate decides "
+            "(decided_by='human:<name>')",
+        )
+    for p in facts["admitted"]:
+        add(
+            "open_tournament", [p.id],
+            "admitted proposal is the candidate — pair it against "
+            "the champion under a contract",
+        )
+    if facts["no_champion"]:
+        add(
+            "register_improver", [],
+            "no improver registered — genesis bootstraps the "
+            "champion pointer",
+        )
+    if not recs:
+        add(
+            "propose_meta_change", [],
+            "no open work — propose a meta-change or review the "
+            "policy ledger",
+        )
+    return recs
+
+
+def _workflow_position(recs: list[dict]) -> str:
+    if not recs:
+        return "idle"
+    tool = recs[0].get("tool")
+    step = _STEP_OF_TOOL.get(tool)
+    if step:
+        return f"{step[1]} (step {step[0]} of {_LOOP_STEPS})"
+    return tool or "meta lifecycle"
+
+
+def status_digest(store: ImproverStore, adaptors=None) -> dict:
+    """The Loop-2 status digest — the cross-server contract shape."""
+    open_work, facts = _collect_open_work(store)
+    blockers = _blockers(adaptors)
+    recs = _recommend(facts, blockers)
+    return {
+        "server": "ml-arete-mcp",
+        "role": "loop2",
+        "generated_at": _utc_now_iso(),
+        "workflow_position": _workflow_position(recs),
+        "open_work": open_work,
+        "blockers": blockers,
+        "recommended_next": recs,
+        "upstream_summary": _upstream_summary(adaptors),
+        "integrity_summary": _integrity_summary(store),
+    }
+
+
+def register(mcp, store: ImproverStore, adaptors=None) -> None:
+    """Register the status digest resource."""
+
+    @mcp.resource("improver://status")
+    def get_status() -> str:
+        """Compact status digest — open work, blockers, next action."""
+        return json.dumps(status_digest(store, adaptors), indent=2)

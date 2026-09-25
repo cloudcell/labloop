@@ -1,0 +1,19 @@
+#!/bin/sh
+# labloop build channel — invoked as `sudo -u exp /usr/local/sbin/labloop-build`
+# (see deploy/labloop.sudoers). Rebuilds the hostile-zone image from the
+# PINNED build context and restarts lab-cnt-exp on success.
+#
+# This is how agents install SYSTEM packages: edit
+# /srv/lab/workspace/ml-labloop/containers/experiment/Containerfile
+# (workspace is lab-writable), then call this. Provenance lives in the
+# Containerfile, never in runtime mutation — the image is the audit
+# trail. The sandbox properties (read-only rootfs, dropped caps,
+# network fencing) come from the quadlet, which the image cannot change,
+# so a hostile Containerfile cannot weaken the zone.
+export HOME=/home/exp
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+cd /
+logger -t labloop-build -- "image rebuild requested"
+podman build -t lab-img-exp \
+    /srv/lab/workspace/ml-labloop/containers/experiment \
+    && systemctl --user restart lab-cnt-exp

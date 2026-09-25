@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# labloop-update-opencode <version> — deliberate in-VM opencode upgrade.
+#
+#   sudo labloop-update-opencode 2.0.15
+#
+# Installed root:root 0755 at /usr/local/sbin/. The sudoers rule is
+# PASSWORD-required (no NOPASSWD): only a human who knows the lab login
+# password can run it — the agent cannot, and opencode's own
+# "autoupdate" is disabled in ~/.config/opencode/opencode.json, so this
+# wrapper is the ONLY in-VM update path, by design.
+#
+# Why the strict version check: `npm install -g` runs package lifecycle
+# scripts AS ROOT. The package name is hardcoded and the version must be
+# clean semver — nothing else can be steered at npm: no paths, no URLs,
+# no git specs, no option injection, no other package.
+set -euo pipefail
+die() { echo "labloop-update-opencode: $*" >&2; exit 1; }
+
+[ "$(id -u)" -eq 0 ] || die "run via sudo:  sudo labloop-update-opencode <version>"
+
+ver="${1:-}"
+[ $# -eq 1 ] || die "usage: labloop-update-opencode <semver>   (e.g. 2.0.15)"
+[[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] \
+    || die "bad version '$ver' — expected semver like 2.0.15"
+
+echo "labloop-update-opencode: installing @opencode/cli@$ver"
+npm install -g "@opencode/cli@$ver"
+
+now="$(opencode --version 2>/dev/null || true)"
+echo "labloop-update-opencode: opencode now reports '${now:-unknown}'"

@@ -1,0 +1,48 @@
+# ml-agora-mcp configuration — the lab status hub.
+#
+# Agora is a role-filler, not a loop (ADR-0004): its four channels
+# are read-only (resources/read only — the client has no call_tool
+# path). All channels are optional: absent means absent — an unwired
+# server reports "not_configured" in lab://status rather than
+# vanishing. A configured-but-down channel is retried by the
+# connectivity supervisor (launch order does not matter) and
+# reported as a violation by upstream_connectivity.
+
+# Shared upstream-channel knobs. reconnect_seconds — the
+# connectivity supervisor's retry cadence (0 disables retries).
+# call_timeout_seconds — bounds one upstream resources/read.
+[adaptors]
+reconnect_seconds = 15
+call_timeout_seconds = 30
+
+# Semantic memory — the claims endpoint (ml-anamnesis-mcp)
+[adaptors.claims]
+transport = "streamable-http"
+url = "http://localhost:38090/mcp"
+
+# Loop 0 — the experiment loop (ml-episteme-mcp)
+[adaptors.loop0]
+transport = "streamable-http"
+url = "http://localhost:38080/mcp"
+
+# Loop 1 — the search loop (ml-zetesis-mcp)
+[adaptors.loop1]
+transport = "streamable-http"
+url = "http://localhost:38070/mcp"
+
+# Loop 2 — the recursive loop (ml-arete-mcp)
+[adaptors.loop2]
+transport = "streamable-http"
+url = "http://localhost:38060/mcp"
+
+# Integrity layer — check_invariants tool + /health/deep route.
+# Every run appends to <db_dir>/logs/check-<YYYY-MM-DD>.jsonl —
+# agora's ONLY persistence (the product is otherwise state-free).
+# [integrity]
+# log_max_files = 30
+# check_interval_seconds = 300
+
+# Observability GUI nav-widget poll cadences.
+# [observability]
+# health_poll_seconds = 10
+# integrity_poll_seconds = 30

@@ -1,0 +1,10 @@
+#!/bin/sh
+# pip is deliberately absent from the hostile zone — uv is the only
+# package manager (reproducible lockfiles, one cache, consistent with
+# the ml-scientist ecosystem). This shim exists so agent-generated
+# code that blindly calls `pip install ...` gets a clear redirect
+# instead of "command not found".
+echo "pip is disabled in the lab hostile zone." >&2
+echo "use:  uv venv --system-site-packages /experiments/<name>/.venv" >&2
+echo "      uv pip install --python /experiments/<name>/.venv/bin/python <pkg>" >&2
+exit 1

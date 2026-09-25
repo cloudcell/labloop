@@ -1,0 +1,22 @@
+# labloop trusted MCP servers for Hermes Agent (NousResearch).
+#
+# Hermes reads MCP servers from ~/.hermes/config.yaml under the
+# top-level `mcp_servers:` key. This file is a SNIPPET — append it to an
+# existing config.yaml (do NOT overwrite; config.yaml also carries
+# model/gateway/toolset settings), or use it as the whole file on a
+# fresh install before Hermes generates its defaults.
+#
+# Merge rule used by create-lab-template / manual install:
+#   grep -q '^mcp_servers:' ~/.hermes/config.yaml 2>/dev/null \
+#       || cat hermes-mcp.yaml >> ~/.hermes/config.yaml
+#
+# After editing, in a running hermes session: /reload-mcp
+mcp_servers:
+  agora:      { url: "http://127.0.0.1:38050/mcp" }
+  arete:      { url: "http://127.0.0.1:38060/mcp" }
+  zetesis:    { url: "http://127.0.0.1:38070/mcp" }
+  episteme:   { url: "http://127.0.0.1:38080/mcp" }
+  anamnesis:  { url: "http://127.0.0.1:38090/mcp" }
+  duckduckgo-search:
+    command: "/home/lab/.local/bin/uvx"
+    args: ["duckduckgo-mcp-server"]

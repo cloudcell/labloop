@@ -1,0 +1,69 @@
+# Hostile zone — arbitrary experiment execution.
+# Contains no credentials, no sockets, no host paths; built to be
+# burned down. Extend the pip line per actual experiment needs —
+# heavyweight deps (torch, jax) go here or in per-experiment layers.
+FROM docker.io/library/python:3.12-slim
+
+# lean LaTeX set — NOT texlive-full: a ~4 GB image makes the keep-id
+# storage-chown on first start exceed any reasonable timeout. Missing
+# CTAN packages go through `tlmgr --usermode` (see AGENT-LAB-GUIDE).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git wget xz-utils \
+        pandoc latexmk texlive-latex-base texlive-latex-recommended \
+        texlive-fonts-recommended fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir numpy pandas scipy scikit-learn \
+        matplotlib reportlab
+# RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# uv is the ONLY package manager in the hostile zone. pip and
+# ensurepip are removed outright (conda is simply never installed);
+# `pip`/`pip3` become a shim that redirects callers to uv. This is
+# policy, not a wall — the read-only rootfs is the real boundary and
+# public egress exists, so a determined agent could still fetch a
+# wheel by hand. The point is the paved road: one tool, one cache,
+# reproducible venvs.
+COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /uvx /usr/local/bin/
+# rm the base-image `pip`/`pip3` symlinks before COPY — otherwise the
+# copy resolves through the dangling link and lands in the wrong place
+RUN rm -rf /usr/local/lib/python3.12/ensurepip \
+           /usr/local/lib/python3.12/site-packages/pip* \
+           /usr/local/bin/pip /usr/local/bin/pip3*
+COPY pip /usr/local/bin/pip
+RUN chmod 755 /usr/local/bin/pip && ln -sf pip /usr/local/bin/pip3
+
+# --system-site-packages venvs see the baked stack; cache persists on
+# the exp-owned mount; copy mode because tmpfs/bind mounts don't
+# share hardlink domains. only-system: the image python is the
+# interpreter, uv must not download its own.
+ENV UV_CACHE_DIR=/experiments/.uv-cache \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_PREFERENCE=only-system
+
+# micromamba: single static binary giving the whole conda-forge
+# ecosystem (non-Python deps, libs, compilers) WITHOUT root — installs
+# land in the exp-owned prefix, rootfs untouched.
+COPY --from=docker.io/mambaorg/micromamba:2.3.2 /usr/bin/micromamba /usr/local/bin/micromamba
+ENV MAMBA_ROOT_PREFIX=/experiments/.micromamba
+# TEXMFHOME on the persistent exp mount: tlmgr --usermode installs
+# CTAN packages beyond the lean set here.
+# tlmgr needs a downloader (wget baked in) and the matching-release
+# repo: Debian ships TL2025, CTAN's live tlnet is newer, so user-mode
+# installs must pass --repository <historic 2025 tlnet-final>.
+ENV TEXMFHOME=/experiments/.texmf
+# /opt/local is a persistent named volume (see the quadlet) — the
+# agent-owned install area for compiled tools/static binaries. The
+# empty dir must exist in the image or podman creates it root-owned.
+ENV PATH=/opt/local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+# mode 1777: the dir must exist in the image (podman seeds the named
+# volume from it) and the keep-id exec uid (1001) differs from the
+# image user (1000) — single-tenant hostile zone, world-writable is fine
+RUN mkdir -p /opt/local/bin && chmod 777 /opt/local /opt/local/bin
+
+RUN useradd -m -u 1000 exp
+USER exp
+WORKDIR /work
+
+# The container exists to be exec'd into, not to run a service.
+CMD ["sleep", "infinity"]

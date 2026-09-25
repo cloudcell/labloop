@@ -1,0 +1,28 @@
+#!/bin/sh
+# labloop-llm-forward — make the host LLM appear on 127.0.0.1 inside
+# a container. Works for ANY process in the container that expects the
+# LLM on loopback; nothing inside needs reconfiguring.
+#
+# Run inside the VM as the container's OWNING user (podman exec
+# permission), e.g.:
+#   ./llm-forward lab-cnt-exp                      # lab-owned ctr
+#   sudo -iu exp /srv/lab/workspace/ml-labloop/deploy/llm-forward lab-cnt-exp
+#
+# Args:  <container> [loopback-port] [target host:port]
+# Defaults: port 1234, target 192.168.122.1:1234 (VM NAT gateway -> host).
+#
+# NOTE: running this in the hostile zone gives experiment code a path
+# to the LLM endpoint — a deliberate egress exception; record it in
+# the setup protocol if used there.
+set -eu
+
+ctr=${1:?"usage: llm-forward <container> [port] [host:port]"}
+port=${2:-1234}
+target=${3:-192.168.122.1:1234}
+src=$(dirname "$0")/llm-loopback-forward.py
+
+# /tmp is tmpfs — writable even on --read-only containers.
+podman cp "$src" "$ctr":/tmp/llm-loopback-forward.py
+exec podman exec -d \
+    -e LLM_PORT="$port" -e LLM_TARGET="$target" \
+    "$ctr" python3 /tmp/llm-loopback-forward.py

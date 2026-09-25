@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=opencode
+Comment=AI coding agent — labloop driver
+Exec=/usr/local/bin/opencode-lab
+Icon=/home/lab/.local/share/icons/opencode.png
+Path=/home/lab/workspace
+Terminal=true
+Categories=Development;
+StartupNotify=false

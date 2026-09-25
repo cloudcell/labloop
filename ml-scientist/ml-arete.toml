@@ -1,0 +1,78 @@
+# ml-arete-mcp configuration — Loop 2, the recursive loop.
+#
+# Upstream channels are wired here — a *product* is a concrete MCP
+# server filling a protocol role (swappable; the role is the
+# contract). Product bindings live only in config, never in code.
+# All are optional: absent means absent (pulls to an
+# unwired source fail clearly; minting reports claim_status
+# "disabled"; the server still serves its own state). A
+# configured-but-down channel is retried by the connectivity
+# supervisor — run-ml-*.sh launch order does not matter — and
+# reported as a violation by the upstream_connectivity integrity
+# check.
+
+# Shared upstream-channel knobs (server internals — never
+# client-settable). reconnect_seconds — the connectivity supervisor's
+# retry cadence for configured-but-down channels (0 disables retries).
+# Default: 15. call_timeout_seconds — bounds one upstream MCP call so
+# a dead peer can never wedge a tool call forever (per-channel
+# override allowed inside [adaptors.<channel>]). Default: 30.
+[adaptors]
+# reconnect_seconds = 15
+# call_timeout_seconds = 30
+
+# Loop-0 evidence — the read-only channel into ml-episteme.
+# pull_evidence(source="loop0") proxies whitelisted read tools only;
+# descendant-trial evidence lives here until Loop-1's population
+# machinery lands.
+[adaptors.loop0]
+transport = "streamable-http"
+url = "http://localhost:38080/mcp"
+
+# Loop-1 evidence — the read-only channel into ml-zetesis.
+# pull_evidence(source="loop1") proxies whitelisted read tools only;
+# Loop-1 outcomes (which research-system candidates promoted, and
+# at what quality) are Loop-2's declared input.
+[adaptors.loop1]
+transport = "streamable-http"
+url = "http://localhost:38070/mcp"
+
+# Loop-1 orchestration — the write-capable channel into ml-zetesis.
+# Same destination as loop1, different role: this channel carries the
+# campaign-lifecycle verbs (open_campaign, spawn_campaign_programme,
+# pull_campaign_evidence, record_campaign_result, close_campaign,
+# record_promotion_verdict) that drive Loop-1 promotion campaigns
+# from a Loop-2 tournament. Whitelist-enforced at
+# check_orchestration_tool_whitelisted; loop1 stays read-only.
+[adaptors.loop1_orchestration]
+transport = "streamable-http"
+url = "http://localhost:38070/mcp"
+
+# Claims memory — anamnesis. Reads via
+# pull_evidence(source="anamnesis"); writes happen only at
+# record_meta_decision, which mints each decision as a
+# `methodological` claim with derived_from edges to the upstream
+# entities the cited evidence consulted.
+[adaptors.claims]
+transport = "streamable-http"
+url = "http://localhost:38090/mcp"
+
+# Integrity layer — check_invariants tool + /health/deep route.
+# Every check run appends to <db_dir>/logs/check-<YYYY-MM-DD>.jsonl
+# (one JSON line per run, a new file at each UTC midnight); the GUI's
+# /integrity view renders those logs read-only (it never runs checks).
+# log_max_files — how many check logs to retain (0 disables logging).
+# stale_tournament_seconds — an open tournament idle longer than
+# this is flagged by the stale_open_tournaments check.
+# check_interval_seconds — startup sweep + periodic sweeps
+# (0 disables periodic; startup still logs). On by default.
+# [integrity]
+# log_max_files = 100
+# stale_tournament_seconds = 3600
+# check_interval_seconds = 300
+
+# Observability GUI nav-widget poll cadences (health pill, integrity
+# badge).
+# [observability]
+# health_poll_seconds = 10
+# integrity_poll_seconds = 30

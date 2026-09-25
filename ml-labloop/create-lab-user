@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# create-lab-user <name> — clone the frozen lab template into a
+# per-user VM. Phase-9/10 endpoint of
+# docs/se-plans/plan-20260920-0129Z--secure-encapsulation-execution.md
+#
+# Run on the physical host. Requires: libvirt group membership,
+# a shut-off sysprep'd template, and sudo for virt-clone.
+set -euo pipefail
+
+TEMPLATE="${LABLOOP_TEMPLATE:-lab-template-v1}"
+VIRSH="virsh -c qemu:///system"
+
+die() { echo "create-lab-user: $*" >&2; exit 1; }
+
+name="${1:-}"
+[ -n "$name" ] || die "usage: create-lab-user <name>"
+case "$name" in
+    *[!a-z0-9-]*) die "name must be lowercase alnum/dash" ;;
+esac
+
+# sa-02: real users get lab-vm-<owner>; throwaways are created by
+# hand as lab-vm-tmp-N, not through this script.
+vm="lab-vm-${name}"
+
+$VIRSH dominfo "$TEMPLATE" >/dev/null 2>&1 || die "template '$TEMPLATE' not found"
+[ "$($VIRSH domstate "$TEMPLATE" 2>/dev/null)" = "shut off" ] \
+    || die "template '$TEMPLATE' must be shut off (sysprep'd golden image)"
+$VIRSH dominfo "$vm" >/dev/null 2>&1 && die "VM '$vm' already exists"
+
+echo "==> cloning $TEMPLATE -> $vm"
+sudo virt-clone --original "$TEMPLATE" --name "$vm" --auto-clone
+
+# TODO first-boot provisioning (plan Phase 9):
+#   - per-user bearer token generated + injected
+#   - user's repo cloned into /srv/lab/workspace
+#   - labloop.nft + labloop.sudoers installed
+#   - lab-cnt-mcp + lab-cnt-exp quadlets enabled
+#   - hostnamectl set-hostname $vm (hostname = domain name, sa-02)
+# until then: boot, open virt-manager, provision manually.
+
+echo "==> done. next:"
+echo "    $VIRSH start $vm"
+echo "    virt-manager   # console access"

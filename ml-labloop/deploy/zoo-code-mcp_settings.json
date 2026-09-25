@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "ml-agora": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:38050/mcp"
+    },
+    "ml-arete": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:38060/mcp"
+    },
+    "ml-zetesis": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:38070/mcp"
+    },
+    "ml-episteme": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:38080/mcp"
+    },
+    "ml-anamnesis": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:38090/mcp"
+    },
+    "duckduckgo-search": {
+      "type": "stdio",
+      "command": "/home/lab/.local/bin/uvx",
+      "args": ["duckduckgo-mcp-server"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Type=Link
+Name=Dashboard
+Comment=
+Icon=video-display
+URL=http://localhost:38051/
+GenericName=Dashboard

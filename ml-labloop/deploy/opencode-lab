@@ -1,0 +1,3 @@
+#!/bin/bash
+# opencode launcher — always starts in the driver authoring workspace
+cd /home/lab/workspace && exec opencode "$@"

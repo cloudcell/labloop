@@ -1,0 +1,33 @@
+{
+  "autoupdate": false,
+  "instructions": ["/home/lab/AGENT-LAB-GUIDE.md"],
+  "mcp": {
+    "servers": {
+      "agora": {
+        "type": "remote",
+        "url": "http://localhost:38050/mcp",
+        "oauth": false
+      },
+      "arete": {
+        "type": "remote",
+        "url": "http://localhost:38060/mcp",
+        "oauth": false
+      },
+      "zetesis": {
+        "type": "remote",
+        "url": "http://localhost:38070/mcp",
+        "oauth": false
+      },
+      "episteme": {
+        "type": "remote",
+        "url": "http://localhost:38080/mcp",
+        "oauth": false
+      },
+      "anamnesis": {
+        "type": "remote",
+        "url": "http://localhost:38090/mcp",
+        "oauth": false
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+LabLoop
+
+Copyright © 2026 Cloudcell Limited and contributors.
+
+LabLoop is the public distribution of two sibling components:
+
+    ml-labloop/     the KVM isolation harness (VM template builder)
+    ml-scientist/   the ml-* MCP experimentation servers
+
+Both components are distributed under the Apache License 2.0 unless otherwise
+stated. Each directory carries its own LICENSE, NOTICE, and legal/ files.
+
+Third-party components included or installed by this distribution remain
+under their own licenses. See:
+
+    ml-labloop/legal/THIRD-PARTY-NOTICES.md
+    ml-scientist/legal/THIRD-PARTY-NOTICES.md
+
+The name "LabLoop" is a trademark or potential trademark of
+Alexander Bikeyev. The software license does not grant trademark rights.
+See:
+
+    ml-labloop/legal/TRADEMARKS.md
+
+Cloudcell Limited may distribute, maintain, or provide commercial services
+related to LabLoop with permission from the trademark owner.
+
+This notice is provided for attribution, licensing, and trademark clarity.
+It does not modify the terms of the applicable software licenses.

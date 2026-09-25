@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=LabLoop panel clock (UTC, %H:%M %Z)
+Exec=/usr/local/libexec/labloop-panel-clock.sh
+NoDisplay=true
+X-XFCE-Autostart-Enabled=true

@@ -1,0 +1,45 @@
+#!/usr/sbin/nft -f
+# Zone firewall — install INSIDE each lab VM, not on the host.
+#   sudo nft -f labloop.nft        (persist via /etc/nftables.conf include)
+#
+# IMPORTANT — why this is an OUTPUT/owner-uid ruleset, not input/forward:
+# exp and mcp run ROOTLESS podman. Their networks are slirp4netns
+# user-mode NAT — a process in exp's own netns that turns guest packets
+# into ordinary TCP/UDP sockets owned by uid `exp` on the main netns.
+# Nothing is ever forwarded, so input/forward hooks never see hostile
+# traffic. The only hook that does is OUTPUT, matched by owner uid.
+# (An earlier saddr-based version of this file was dead code — the
+#  probes in security-battery.sh are what caught it.)
+#
+# The rule the whole design hangs on: the hostile zone initiates
+# nothing toward the trusted zone, the VM host, the KVM host, or
+# private space. Public egress survives for uv/datasets.
+
+table inet labloop {
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+
+        # DNS must keep working — slirp4netns forwards the guest's
+        # queries to the host resolver (which may live in private
+        # space, e.g. dnsmasq on the libvirt NAT gateway)
+        meta skuid exp udp dport 53 accept
+        meta skuid exp tcp dport 53 accept
+
+        # loopback: trusted MCP ports are published on 127.0.0.1 —
+        # exp-originated connections to them must die. slirp is run
+        # with --disable-host-loopback anyway; this is belt+braces.
+        meta skuid exp ip daddr 127.0.0.0/8 drop
+
+        # all private space: host LAN, the libvirt bridge/dnsmasq on
+        # non-DNS ports, the VM's own external IP, trusted-zone
+        # subnets, link-local, CGNAT
+        meta skuid exp ip daddr {
+            10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+            169.254.0.0/16, 100.64.0.0/10
+        } drop
+
+        # v6 private space likewise
+        meta skuid exp ip6 daddr { ::1/128, fc00::/7, fe80::/10 } drop
+    }
+}

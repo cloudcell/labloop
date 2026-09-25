@@ -1,0 +1,28 @@
+# ml-anamnesis-mcp configuration — semantic memory server.
+#
+# Everything else is CLI-flag configured; the only config-file surface
+# is integrity-log retention. This file is optional — absent means
+# defaults (log_max_files = 100). Also read from
+# ~/.ml-anamnesis/config.toml.
+
+# Integrity layer — check_invariants tool + /health/deep route.
+# Every check run appends to <db_dir>/logs/check-<YYYY-MM-DD>.jsonl
+# (one JSON line per run, a new file at each UTC midnight); the GUI's
+# /integrity view renders those logs read-only (it never runs checks).
+# log_max_files — how many check logs to retain (0 disables logging).
+# check_interval_seconds — startup sweep + periodic sweeps
+# (0 disables periodic; startup still logs). On by default.
+# prior_confidence_max — the prior ceiling: claims asserted without
+# evidence-bearing edges may not exceed this confidence. Governs BOTH
+# the write-time gate (assert_claim) and the
+# unsupported_high_confidence audit — one knob, consistent policy.
+# [integrity]
+# log_max_files = 100
+# check_interval_seconds = 300
+# prior_confidence_max = 0.3
+
+# Observability GUI nav-widget poll cadences (health pill, integrity
+# badge).
+# [observability]
+# health_poll_seconds = 10
+# integrity_poll_seconds = 30

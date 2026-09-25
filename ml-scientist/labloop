@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# labloop — lifecycle for the ml-* loop stack.
+#
+#   labloop start|stop|restart|status [episteme|zetesis|arete|anamnesis|agora|all]
+#   labloop logs <name>
+#
+# `run-ml-*.sh` stay the foreground launchers (Ctrl-C, interactive
+# debugging); labloop is the lifecycle layer on top: `start`
+# backgrounds a server under setsid with stdout appended to
+# ~/.ml-<name>/logs/server.log and a pidfile at
+# ~/.ml-<name>/run/labloop.pid.
+#
+# `start all` brings upstreams up first (anamnesis → episteme →
+# zetesis → arete → agora) and waits for each one's /health before
+# starting the next, so the connectivity supervisors see peers
+# immediately and the integrity log stays free of transient
+# down-channel violations. Agora starts last and stops first — it
+# consumes every server's status channel. `stop all` reverses
+# (consumers die before their peers). Individual names start/stop
+# just that server — launch order doesn't matter; the supervisors
+# converge.
+#
+# A server started outside labloop (e.g. run-ml-*.sh in a terminal)
+# shows as `unmanaged` in status; `stop` will still terminate it by
+# resolving the port listener.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+source ./ports.env
+
+# Start order: upstreams first, the status hub last (it reads them
+# all). Stop order is the reverse — agora dies first.
+components=(anamnesis episteme zetesis arete agora)
+
+run_script() { echo "run-ml-$1.sh"; }
+home_dir()   { echo "$HOME/.ml-$1"; }
+
+mcp_port() {
+    case "$1" in
+        episteme) echo "$ML_EPISTEME_PORT" ;;
+        zetesis)   echo "$ML_ZETESIS_PORT" ;;
+        arete)     echo "$ML_ARETE_PORT" ;;
+        anamnesis) echo "$ML_ANAMNESIS_PORT" ;;
+        agora)     echo "$ML_AGORA_PORT" ;;
+    esac
+}
+
+gui_port() {
+    case "$1" in
+        episteme) echo "$ML_EPISTEME_GUI_PORT" ;;
+        zetesis)   echo "$ML_ZETESIS_GUI_PORT" ;;
+        arete)     echo "$ML_ARETE_GUI_PORT" ;;
+        anamnesis) echo "$ML_ANAMNESIS_GUI_PORT" ;;
+        agora)     echo "$ML_AGORA_GUI_PORT" ;;
+    esac
+}
+
+pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+
+# Listener pid on a TCP port, or empty. Same-user processes only.
+# `|| true` — grep exits 1 on no match; under pipefail+set -e a free
+# port must not kill the script.
+port_pid() {
+    ss -ltnpH "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1 || true
+}
+
+# /health answers 200 → the server is up. Falls back to a bare TCP
+# connect when curl is absent.
+is_up() {
+    local port
+    port=$(mcp_port "$1")
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS -m 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1
+    else
+        (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+    fi
+}
+
+managed_pid() {
+    local f="$1/run/labloop.pid"
+    [ -f "$f" ] && cat "$f" || true
+}
+
+start_one() {
+    local name=$1 dir pidfile log pid
+    dir=$(home_dir "$name")
+    pidfile="$dir/run/labloop.pid"
+    log="$dir/logs/server.log"
+    pid=$(managed_pid "$dir")
+    if pid_alive "$pid"; then
+        echo "$name: already running (pid $pid)"
+        return 0
+    fi
+    local existing
+    existing=$(port_pid "$(mcp_port "$name")")
+    if [ -n "$existing" ]; then
+        echo "$name: already running (pid $existing, unmanaged — not started via labloop)"
+        return 0
+    fi
+    mkdir -p "$dir/run" "$dir/logs"
+    setsid "./$(run_script "$name")" >>"$log" 2>&1 &
+    echo $! > "$pidfile"
+    pid=$!
+    # Wait for /health so `start all` brings upstreams up cleanly
+    # before their consumers. The supervisor makes ordering
+    # unnecessary; this keeps the integrity trail clean.
+    local i
+    for i in $(seq 1 40); do
+        if is_up "$name"; then
+            echo "$name: up (pid $pid, mcp :$(mcp_port "$name"), gui :$(gui_port "$name"))"
+            return 0
+        fi
+        if ! pid_alive "$pid"; then
+            echo "$name: died on startup — see $log" >&2
+            rm -f "$pidfile"
+            return 1
+        fi
+        sleep 0.5
+    done
+    echo "$name: still starting (pid $pid) — see $log"
+}
+
+stop_one() {
+    local name=$1 dir pidfile pid lpid
+    dir=$(home_dir "$name")
+    pidfile="$dir/run/labloop.pid"
+    pid=$(managed_pid "$dir")
+    if pid_alive "$pid"; then
+        # setsid made the child its own process-group leader — kill
+        # the group so uv's python child goes down with the wrapper.
+        kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    else
+        lpid=$(port_pid "$(mcp_port "$name")")
+        if [ -z "$lpid" ]; then
+            echo "$name: not running"
+            rm -f "$pidfile"
+            return 0
+        fi
+        echo "$name: running unmanaged (pid $lpid) — terminating by port"
+        kill "$lpid" 2>/dev/null || true
+        pid=$lpid
+    fi
+    local i
+    for i in $(seq 1 20); do
+        pid_alive "$pid" || break
+        sleep 0.5
+    done
+    if pid_alive "$pid"; then
+        kill -9 -- -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
+    echo "$name: stopped"
+}
+
+status_one() {
+    local name=$1 dir pid lpid state health
+    dir=$(home_dir "$name")
+    pid=$(managed_pid "$dir")
+    if pid_alive "$pid"; then
+        state="up (pid $pid, managed)"
+    else
+        lpid=$(port_pid "$(mcp_port "$name")")
+        if [ -n "$lpid" ]; then
+            state="up (pid $lpid, unmanaged)"
+        else
+            state="down"
+        fi
+    fi
+    if is_up "$name"; then health="health ok"; else health="-"; fi
+    printf "%-10s %-26s mcp :%-5s gui :%-5s %s\n" \
+        "$name" "$state" "$(mcp_port "$name")" "$(gui_port "$name")" "$health"
+}
+
+resolve() {
+    case "${1:-all}" in
+        all) echo "${components[@]}" ;;
+        anamnesis|episteme|zetesis|arete|agora) echo "$1" ;;
+        *)
+            echo "labloop: unknown component '$1'" >&2
+            echo "expected: ${components[*]} | all" >&2
+            exit 2
+            ;;
+    esac
+}
+
+usage() {
+    cat <<'EOF'
+labloop — lifecycle for the ml-* loop stack.
+
+  labloop start   [name|all]   background a server (upstreams first on all)
+  labloop stop    [name|all]   terminate (consumers first on all)
+  labloop restart [name|all]
+  labloop status  [name|all]   pid/ports/health per server (default: all)
+  labloop logs    <name>       tail -f ~/.ml-<name>/logs/server.log
+
+names: anamnesis  episteme  zetesis  arete  agora
+
+status shows each server as:
+  managed    — started via `labloop start`; tracked by pidfile
+               (~/.ml-<name>/run/labloop.pid), logs to
+               ~/.ml-<name>/logs/server.log, full lifecycle control.
+  unmanaged  — running but not started via labloop (e.g. run-ml-*.sh
+               in a terminal); detected by port probe. `stop` still
+               terminates it by resolving the listener pid, but its
+               stdout lives wherever it was launched and it leaves
+               no labloop log.
+EOF
+}
+
+cmd=${1:-}
+target=${2:-all}
+case "$cmd" in
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+    start|stop|status)
+        for n in $(resolve "$target"); do "${cmd}_one" "$n"; done
+        ;;
+    restart)
+        # stop in reverse order, start in forward order
+        mapfile -t order < <(resolve "$target" | tr ' ' '\n' | tac)
+        for n in "${order[@]}"; do stop_one "$n"; done
+        for n in $(resolve "$target"); do start_one "$n"; done
+        ;;
+    logs)
+        [ "$target" = "all" ] && { usage >&2; exit 2; }
+        resolve "$target" >/dev/null
+        exec tail -f "$(home_dir "$target")/logs/server.log"
+        ;;
+    *)
+        usage
+        exit "${1:+2}"
+        ;;
+esac

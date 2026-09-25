@@ -1,0 +1,112 @@
+# ml-episteme-mcp configuration.
+#
+# Unconfigured roles fall back to local adaptors (real work, no external
+# services). [adaptors.claims] wires semantic memory — claims are minted
+# at conclude_hypothesis as a byproduct. A configured-but-down channel
+# is retried by the connectivity supervisor (launch order does not
+# matter) and reported as a violation by upstream_connectivity;
+# unconfigured means absent — supported standalone mode, not flagged.
+
+# Shared upstream-channel knobs (server internals — never
+# client-settable). reconnect_seconds — the connectivity supervisor's
+# retry cadence for configured-but-down channels (0 disables retries;
+# a failed startup connect then stays down until restart). Default: 15.
+# call_timeout_seconds — bounds one upstream MCP call so a dead peer
+# can never wedge a tool call forever (per-channel override allowed
+# inside [adaptors.<channel>]). Default: 30.
+[adaptors]
+# reconnect_seconds = 15
+# call_timeout_seconds = 30
+
+[adaptors.claims]
+transport = "streamable-http"
+url = "http://localhost:38090/mcp"
+
+# Local-executor sandboxing (bubblewrap mount namespaces, Linux only).
+# auto    — full when bwrap is installed; if bwrap is MISSING the trial
+#           FAILS (isolation is required, never silently degraded)
+# none    — explicit opt-out: no isolation beyond cwd/TMPDIR redirection;
+#           the sealed-code overlay cannot apply (seal_enforced=false)
+# minimal — private tmpfs /tmp per trial (shared-scratch races impossible)
+# full    — read-only root; the trial's artifact dir is the ONLY writable
+#           mount (complete isolation; caches auto-redirected)
+# The applied mode is recorded per trial in executor_output.sandbox.
+[executor]
+# sandbox = "full"
+# Extra host caches shared rw under full — beyond the built-in
+# HF_HOME / XDG_CACHE_HOME / TRITON_CACHE_DIR. An existing dir is
+# bind-mounted at its real path; a missing one is skipped and reported
+# in executor_output.shared_caches.missing. Env override:
+# ML_EPISTEME_SHARED_CACHES (comma-separated).
+shared_caches = ["~/.cache/pip", "~/.cache/uv", "~/.cache/torch"]
+# Execution-time code capture: strace the trial's process tree inside
+# the sandbox, record which .py files it actually opened, and capture
+# them as code snippets (executed_code.json trial artifact).
+# trace_reads = "auto"   # auto|on|off — applied mode in
+                         # executor_output.read_trace
+# Per-trial hard deadline in seconds — the process is killed past this.
+# Trials legitimately run for hours; size it to the workload. Env
+# override: ML_EPISTEME_EXECUTOR_TIMEOUT. Default: 300.
+# timeout_seconds = 300
+# Seconds run_trial blocks on the executor before falling back to
+# async dispatch (fire-and-forget + auto-finalize). Server internal —
+# never client-settable. Default: 10.
+# submit_wait_seconds = 10
+# Auto-finalizer poll cadence in seconds — how often the background
+# watcher asks the executor for a terminal status. Server internal.
+# Default: 5.
+# finalize_poll_seconds = 5
+
+# Startup lifecycle repair. A restart kills the executor's in-memory
+# task map — trials left 'running' have no live process and could never
+# finalize. The reaper marks them 'failed' with an interrupted note in
+# executor_output (the actual process outcome is unknown — honest
+# record, not a guess). "off" leaves them running forever.
+# [lifecycle]
+# reap_orphaned_trials = "failed"
+
+# Integrity layer — check_invariants tool + /health/deep route.
+# Every check run appends to <db_dir>/logs/check-<YYYY-MM-DD>.jsonl
+# (one JSON line per run, a new file at each UTC midnight); the GUI's
+# /integrity view renders those logs read-only (it never runs checks).
+# log_max_files — how many check logs to retain (0 disables logging).
+# stalled_trial_seconds — margin past a running trial's enforced
+# deadline (executor timeout) before stalled_running_trials flags it.
+# Deadline-relative, not wall-clock: an hours-long trial inside its
+# deadline is healthy, not stalled.
+# check_interval_seconds — the monitor runs a sweep at startup and
+# then every N seconds (0 disables the periodic sweep; the startup
+# record still lands). Audit logging is on by default.
+# observation_grace_seconds — a completed trial gets this long to
+# receive its observation before completed_without_observation
+# flags it (completed→observe is normal loop order; sessions can
+# run for hours before observations are recorded).
+# [integrity]
+# log_max_files = 100
+# stalled_trial_seconds = 300
+# check_interval_seconds = 300
+# observation_grace_seconds = 86400
+
+# Claims channel (anamnesis). call_timeout_seconds bounds each upstream
+# mint call so a claims outage can never hang a verdict — a dead server
+# must not block conclude_hypothesis. Default: 10.
+# [claims]
+# call_timeout_seconds = 10
+
+# Session protocol resource. stale_programme_hours is how long an
+# active programme may idle before protocol://session marks it stale
+# and hints at resume-or-abandon. Default: 24.
+# require_candidate_attribution makes candidate_version_id mandatory on
+# create_programme — the enforceable half of the warmup protocol
+# (protocol://session warmup). Unattributed programmes are refused with
+# a pointer to register_candidate; zetesis campaign spawns already
+# attribute upstream, so enabling this does not break Loop-1. Default:
+# false.
+[session]
+require_candidate_attribution = true
+
+# Observability GUI nav-widget poll cadences (health pill, integrity
+# badge). Page-level refresh stays under --observability-refresh.
+# [observability]
+# health_poll_seconds = 10
+# integrity_poll_seconds = 30

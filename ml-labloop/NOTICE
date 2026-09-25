@@ -1,0 +1,22 @@
+ML-LabLoop — the LabLoop isolation harness
+
+Copyright © 2026 Cloudcell Limited and contributors.
+
+ML-LabLoop is distributed publicly together with ML-Scientist as the LabLoop
+package. It is licensed under the Apache License 2.0 unless otherwise stated.
+
+This product includes third-party components that are licensed separately from
+ML-LabLoop. See:
+
+    legal/THIRD-PARTY-NOTICES.md
+
+The name "LabLoop" is a trademark or potential trademark of Alexander Bikeyev.
+The software license does not grant trademark rights. See:
+
+    legal/TRADEMARKS.md
+
+Cloudcell Limited may distribute, maintain, or provide commercial services
+related to ML-LabLoop with permission from the trademark owner.
+
+This notice is provided for attribution, licensing, and trademark clarity. It
+does not modify the terms of the applicable software licenses.

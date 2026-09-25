@@ -1,0 +1,39 @@
+# Install to /etc/sudoers.d/labloop inside the VM (mode 0440).
+#
+# The Phase-1 executor channel: lab (the driver uid running
+# VSCodium/Cline) may exec into the hostile-zone container AS exp —
+# a privilege downgrade, not an escalation. The container name is
+# pinned; arguments are free because the target is already hostile.
+#
+# There is deliberately no rule for the reverse direction and no rule
+# touching the `mcp` account — the trusted zone (lab-cnt-mcp, mcp-state)
+# lives in mcp's podman precisely so lab/agent cannot reach it. Admin
+# access is `sudo -iu mcp` (password — human only).
+#
+# The rule pins the WRAPPER, not podman directly:
+#   - `sudo -i`/`sudo -iu` validates the login shell, not podman —
+#     bypassing NOPASSWD and demanding a password
+#   - `sudo -u exp podman ...` inherits cwd/HOME, so it fails on
+#     chdir and looks in lab's container store
+# labloop-exec (deploy/labloop-exec) sets HOME/XDG/cwd deterministically.
+# Invocation: sudo -u exp /usr/local/sbin/labloop-exec <cmd...>
+#
+# labloop-build takes NO arguments — pinned build context, so the rule
+# is a pure capability: "rebuild the hostile image," nothing else.
+lab ALL=(exp) NOPASSWD: /usr/local/sbin/labloop-exec *
+lab ALL=(exp) NOPASSWD: /usr/local/sbin/labloop-build
+
+# labloop-export --all (deploy/labloop-export): the full lab-work export.
+# Arg-pinned to exactly `--all` — no additional arguments match, so the
+# root read set (hardcoded inside the script) can never be steered to
+# /etc/shadow or anywhere else. Path mode needs no rule: it runs AS lab
+# and is confined to /srv/lab/exchange by the script's realpath gate.
+lab ALL=(root) NOPASSWD: /usr/local/sbin/labloop-export --all
+
+# labloop-update-opencode <semver> (deploy/labloop-update-opencode):
+# deliberate in-VM upgrade of the driver-zone agent CLI. The package
+# name is hardcoded and the version semver-validated inside the wrapper
+# because npm install runs lifecycle scripts as root. NO NOPASSWD on
+# purpose — the lab login password gates it, making this a human-only
+# action the agent cannot invoke on its own.
+lab ALL=(root) /usr/local/sbin/labloop-update-opencode *
