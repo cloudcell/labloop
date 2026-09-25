@@ -135,3 +135,79 @@ Templates and tooling were developed and tested on:
 | libvirt / libvirtd | 10.0.0 (`qemu:///system`) |
 | Guest OS | Linux Mint 22.3 Xfce (unattended ISO, `selfbuild/mk-auto-iso.sh`) |
 | Guest container runtime | rootless Podman (quadlets) |
+
+## Appendix C — first boot and the warmup run
+
+### Starting the machine
+
+```bash
+virsh -c qemu:///system start lab-vm-<name>   # or: virt-manager GUI
+```
+
+The desktop autologin opens with a password prompt (local clones:
+`lab`/`lab` → forced change at first login; published images: the OTP
+the importer printed). MCP services and containers start themselves
+via quadlets — nothing to launch by hand. The desktop carries
+launchers for the dashboard (`:38051`), VSCodium and opencode, plus
+`check-lab-ready.sh` for a full readiness + security pass.
+
+### Why a warmup run
+
+Every LLM driver has its own peculiarities — how it sequences tool
+calls, whether it reaches for a shell before an MCP tool, which
+assumptions it makes about paths and zones. The warmup exists to
+surface those quirks on a *small, safe* problem before they can
+contaminate real work — and to produce a reusable note about them.
+
+`GENESIS-RESEARCH-PROMPT.md` is that warmup — it ships in
+`~/workspace/`, so the driver agent should discover and follow it on
+its own: just prompt **"do a warmup run"**. (Only if it doesn't pick
+it up, paste the file contents directly — the file lives at
+`~/GENESIS-RESEARCH-PROMPT.md`.) It runs **one complete scientific
+cycle end-to-end** — a smoke test of the entire apparatus, not just
+connectivity — on an A/B question that finishes in minutes:
+programme → falsifiable hypothesis → ≥2 recorded trials →
+observations → belief update → tournament → verdict → claim →
+staged artifacts.
+
+Two outputs matter beyond the verdict:
+
+- It proves every stage works — execution, recording, memory,
+  tournament — before you trust the lab with a real programme.
+- It ends by having the agent write `<name>-ONBOARDING.md` into
+  `~/workspace/` — *agent-authored* notes on how to drive this
+  system: the call order that mattered, what bit it, the gotchas.
+  Later sessions (of the same model or another) read it first, so
+  each model's quirks get learned once, not re-discovered per run.
+
+If the model changes, run the warmup again — a new driver means new
+peculiarities and a new note.
+
+### Guiding agents that drift away from the MCPs
+
+The common failure mode: the agent falls back to writing files and
+running `python` directly — iterating in a shell instead of
+recording through the tools. Runs done that way are **telemetry, not
+science**: nothing is registered, nothing is reproducible, nothing
+moves a belief. Course corrections that work:
+
+- **Start every session with state rather than intent.** Ask it to call
+  `lab://status` (or the server's `status_report` prompt) *first*.
+  An agent that has read the live state knows the tools exist; one
+  that hasn't improvises.
+- **Name the two planes explicitly.** `design_experiment` →
+  `capture_bundle` → `run_trial` is recorded evidence;
+  `labloop-exec` is for iteration and debugging only. If it wants a
+  quick syntax check, `labloop-exec` — if it wants a result that
+  counts, the episteme executor.
+- **Point at the workspace `AGENTS.md`.** It links to
+  `AGENT-LAB-GUIDE.md` — the zone map and the sanctioned lanes —
+  plus the agent's own `*-ONBOARDING.md` if a previous run left one.
+- **Cite the hard rules.** "Never run experiment code as `lab`" and
+  "`code_ref` must be staged under `/exchange` before
+  `capture_bundle`" resolve most drift — the agent usually wanders
+  because a path or permission surprised it, not because it prefers
+  the shell.
+- **Re-anchor on the record.** If it produces results outside the
+  tools, ask: "which trial id is that under?" — the absence of an id
+  is the cue that it left the loop.
