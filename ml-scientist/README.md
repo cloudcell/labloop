@@ -10,7 +10,7 @@ Lab Loop treats the empirical research loop as a first-class object
 that survives across tools, teams and compute — independent of any
 single notebook, dashboard or agent:
 
-```
+```text
 hypothesis → designed experiment → execution → observation
 → statistical analysis → belief update → next experiment
 ```
@@ -131,7 +131,7 @@ both on Linux (`apt install bubblewrap strace`) or set
 
 Every server speaks streamable-HTTP MCP at:
 
-```
+```text
 http://localhost:<port>/mcp
 ```
 
@@ -156,7 +156,7 @@ four into `lab://status`. Recommended workflow:
 
 The canonical recorded-evidence sequence:
 
-```
+```text
 create_programme          # open a research programme (budget, scope)
 formulate_hypothesis      # falsifiable statement under the programme
 prepare_data              # register a dataset; verify_data checks it
@@ -181,7 +181,7 @@ idempotent results, never a partial failure with a created trial.
 
 ### Loop 1 — zetesis (search)
 
-```
+```text
 open_investigation → pull_evidence → record_finding
 → conclude_investigation
 ```
@@ -192,7 +192,7 @@ Findings can be promoted into the experiment loop (`promotion.py`).
 
 Tournaments between improvers — the loop that changes the protocol:
 
-```
+```text
 open_tournament → register_improver → propose_meta_change
 → create_meta_contract → record_tournament_result
 → record_meta_decision → close_tournament
