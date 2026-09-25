@@ -37,6 +37,9 @@ Requires KVM/libvirt on a Linux host. From `ml-labloop/`:
 ./02-create-vm-from-template.sh <user>  # clone -> lab-vm-<user>
 ```
 
+A locally built VM boots with login `lab` / password `lab` — change it
+after first login.
+
 `create-lab-template` finds the sibling `../ml-scientist` checkout
 automatically (override with `ML_SCIENTIST=`). See `ml-labloop/README.md`
 for the full workflow including publishing VM images.
@@ -56,6 +59,7 @@ sha256sum -c <image>.qcow2.sha256
 ./import-lab-vm.sh <image>.qcow2 <vm-name>
 ```
 
-Published images are sealed — the `lab`/`exp` passwords are locked and
-the import generates a one-time password for first login. See
-`ml-labloop/release-package/import-lab-vm.sh` for details.
+Published images are sealed — unlike a local build, the `lab`/`exp`
+passwords are locked and the import generates a one-time password for
+first login. See `ml-labloop/release-package/import-lab-vm.sh` for
+details.
