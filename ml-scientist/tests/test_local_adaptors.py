@@ -198,6 +198,18 @@ class TestLocalOptimizer:
         assert abs(total - 1.0) < 0.01
 
     @pytest.mark.asyncio
+    async def test_param_importance_reflects_correlation(self):
+        """A parameter that drives the metric dominates importance."""
+        opt = LocalOptimizer(seed=42)
+        await opt.create_study("prog", ["learning_rate", "depth"])
+        for i in range(15):
+            config = await opt.ask("prog")
+            await opt.tell("prog", f"trial-{i}", {"acc": config["depth"] * 0.04})
+        importance = await opt.param_importance("prog")
+        assert importance["depth"] > 0.9
+        assert importance["depth"] > importance["learning_rate"]
+
+    @pytest.mark.asyncio
     async def test_best_trials_minimize_direction(self):
         """The optimizer picks the LOWEST metric when direction='minimize'."""
         opt = LocalOptimizer(seed=42)

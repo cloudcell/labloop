@@ -118,6 +118,7 @@ class LocalOptimizer(OptimizerRole):
                 config[v] = round(_uniform(self._rng, 0.0, 1.0), 4)
 
         config["_trial_number"] = self._ask_count[programme_id]
+        self._trial_configs.setdefault(programme_id, []).append(config)
         return config
 
     async def tell(
@@ -207,17 +208,26 @@ class LocalOptimizer(OptimizerRole):
 
 
 def _abs_correlation(x: list[float], y: list[float]) -> float:
-    """Compute the absolute Pearson correlation coefficient."""
-    n = len(x)
+    """Compute the absolute Pearson correlation coefficient.
+
+    Pairs elements by position — the i-th sampled config pairs with
+    the i-th told result. When ask/tell counts differ the shorter
+    side truncates, so all statistics are computed over the paired
+    prefix only.
+    """
+    pairs = list(zip(x, y))
+    n = len(pairs)
     if n < 2:
         return 0.0
 
-    mean_x = sum(x) / n
-    mean_y = sum(y) / n
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
 
-    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
-    var_x = sum((xi - mean_x) ** 2 for xi in x)
-    var_y = sum((yi - mean_y) ** 2 for yi in y)
+    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in pairs)
+    var_x = sum((xi - mean_x) ** 2 for xi in xs)
+    var_y = sum((yi - mean_y) ** 2 for yi in ys)
 
     if var_x == 0 or var_y == 0:
         return 0.0

@@ -626,12 +626,14 @@ xml = re.sub(r"(<graphics type='spice'[^>]*>)",
              r"\1\n      <clipboard copypaste='no'/>", xml, count=1)
 xml = xml.replace("<clipboard copypaste='yes'/>", "<clipboard copypaste='no'/>")
 # native resolution + VRAM sizing on the qxl model
-# (default 64MB bar starves TTM at 2560x1440 -> frozen display)
+# (vgamem is the per-head framebuffer the guest sees as VRAM —
+#  32 MiB at 2560x1440 makes TTM thrash until the DRM path wedges
+#  and the display freezes; 128 MiB gives ~9 frames of headroom)
 m = re.search(r"<model type='qxl'[^>]*>", xml)
 if m:
     sized = re.sub(r"\bram='\d+'", "ram='262144'",
         re.sub(r"\bvram='\d+'", "vram='131072'",
-        re.sub(r"\bvgamem='\d+'", "vgamem='32768'", m.group(0))))
+        re.sub(r"\bvgamem='\d+'", "vgamem='131072'", m.group(0))))
     xml = xml.replace(m.group(0), sized)
     m = re.search(r"<model type='qxl'[^>]*>", xml)
 if m and "/>" in m.group(0):
