@@ -1,6 +1,6 @@
 # LabLoop™: a research automation environment for empirical work
 
-[![Featured on VibeLeaderboard](https://img.shields.io/endpoint?url=https%3A%2F%2Fwww.vibeleaderboard.ai%2Fapi%2Fv1%2Fapps%2Ff2c98f41-5cbd-4d21-993d-3fefe4a82fc3%2Fbadge)](https://www.vibeleaderboard.ai/app/f2c98f41-5cbd-4d21-993d-3fefe4a82fc3)
+[![Featured on VibeLeaderboard](https://img.shields.io/endpoint?url=https%3A%2F%2Fwww.vibeleaderboard.ai%2Fapi%2Fv1%2Fapps%2Ff2c98f41-5cbd-4d21-993d-3fefe4a82fc3%2Fbadge)](https://www.vibeleaderboard.ai/app/f2c98f41-5cbd-4d21-993d-3fefe4a82fc3) [![Measured on Legit.Show](https://legit.show/badge/gh-labloop.svg)](https://legit.show/s/gh-labloop)
 
 Hypotheses, designed experiments, evidence and conclusions as
 durable state — built for researchers, applications and AI agents
