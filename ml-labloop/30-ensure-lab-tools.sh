@@ -185,7 +185,10 @@ ensure_vm() {
                /srv/lab/workspace/ml-labloop/containers/mcp/entrypoint.sh &&
         test -d /var/lib/labloop-export/user &&
         test -d /var/lib/labloop-export/root &&
-        test -d /srv/lab/incoming$diag_cmp" >/dev/null 2>&1 || need=1
+        test -d /srv/lab/incoming &&
+        su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+            podman exec lab-cnt-mcp /opt/trial-env/bin/python -c \"import numpy\"' \
+            >/dev/null 2>&1$diag_cmp" >/dev/null 2>&1 || need=1
     [ "$need" = 0 ] && { echo "  already current"; return 0; }
 
     note "installing (root side)"
@@ -311,7 +314,15 @@ ensure_vm() {
     # writes go through the mount to the mcp-owned host dir, so the env
     # survives container recreates. Restart after populate so the
     # entrypoint picks it up.
-    if ! qga_exec "$vm" "test -x /srv/lab/trial-env/bin/python" >/dev/null 2>&1; then
+    # the check must run INSIDE lab-cnt-mcp: the venv's bin/python is a
+    # symlink to the container interpreter (/usr/local/bin/python3),
+    # which dangles on the host — a host-side test -x always fails and
+    # repopulating then dies on 'venv already exists'. Import a marker
+    # package too: a bare venv (venv created, packages never installed)
+    # must count as unpopulated.
+    if ! qga_exec "$vm" "su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+            podman exec lab-cnt-mcp /opt/trial-env/bin/python -c \"import numpy\"'" \
+            >/dev/null 2>&1; then
         note "populating /srv/lab/trial-env (uv venv + scientific stack)"
         qga_exec "$vm" "
             install -d -m 0755 -o mcp -g mcp /srv/lab/trial-env &&
@@ -319,7 +330,9 @@ ensure_vm() {
                 systemctl --user restart lab-cnt-mcp' &&
             sleep 5 &&
             su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
-                podman exec lab-cnt-mcp uv venv /opt/trial-env' &&
+                podman exec lab-cnt-mcp sh -c \"
+                    test -x /opt/trial-env/bin/python ||
+                    uv venv /opt/trial-env\"' &&
             su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
                 podman exec lab-cnt-mcp uv pip install \
                     --python /opt/trial-env/bin/python --no-cache \

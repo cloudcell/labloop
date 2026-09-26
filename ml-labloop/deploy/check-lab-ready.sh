@@ -113,7 +113,11 @@ done
 # (mounted from /srv/lab/trial-env) when populated — without it trials
 # run on the slim server venv and numpy imports fail. WARN not FAIL:
 # the env is supplementary, old clones degrade gracefully.
-if [ -x /srv/lab/trial-env/bin/python ]; then
+# NOTE: bin/python is a symlink to the container-internal interpreter
+# (/usr/local/bin/python3) — dangling from the host's view, so test -x
+# on it is permanently false. Check a real installed package instead.
+set -- /srv/lab/trial-env/lib/python*/site-packages/numpy/__init__.py
+if [ -f "$1" ]; then
     ok dir:trial-env "/srv/lab/trial-env -> /opt/trial-env (scientific stack for trials)"
 else
     warn dir:trial-env "/srv/lab/trial-env unpopulated — trials lack numpy/scipy stack"
