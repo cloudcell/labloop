@@ -117,15 +117,20 @@ PART E — Loop 2 (arete: proposal gate, tournament, decision, policy, canary)
 23. Open T-B for real: open_tournament(parent champion vs a registered
     candidate improver). record_tournament_result on BOTH arms (seed
     the metrics so candidate wins or loses deliberately — you choose).
-    close_tournament → closed; confirm recursive_gain computed and
-    sealed. NEGATIVE: void_tournament on the now-closed record →
-    refused. NEGATIVE: void_tournament on a paired-but-open record →
-    refused (close is the honest exit for computable evidence).
+    pull_evidence on context=tournament T-B and KEEP the evidence_ref_id
+    — the decision in 24 must cite one. close_tournament → closed;
+    confirm recursive_gain computed and sealed. NEGATIVE:
+    void_tournament on the now-closed record → refused. NEGATIVE:
+    void_tournament on a paired-but-open record → refused (close is
+    the honest exit for computable evidence). If you reach 24 without
+    an eref: pull_evidence on the CLOSED T-B still works (tournament
+    pulls stay open post-close by design — the gate, not the context,
+    was the F-17 bug); do not report a deadlock for that.
 24. record_meta_decision: NEGATIVE first — a decision citing the VOIDED
     T-A → refused (a voided record is not a comparison). Then a real
-    decision on T-B (verdict=hold is fine if you don't want to promote
-    — it still discharges the debt; verdict=promote if you continue to
-    step 25).
+    decision on T-B citing the eref from 23 (verdict=hold is fine if
+    you don't want to promote — it still discharges the debt;
+    verdict=promote if you continue to step 25).
 25. register_improver a child of the champion naming the admitted
     proposal (proposal_id + parent_id). If you promoted at 24:
     promote_policy → minted→active, champion pointer moves, displaced

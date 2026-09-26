@@ -169,6 +169,37 @@ def _check_closed_have_gain(store) -> dict:
     )
 
 
+def _check_decision_debt(store) -> dict:
+    """Closed tournaments with no linked meta_decision — the live
+    decision-debt set. This is the *named* form of the write gate:
+    while any violation is open, every mutator except the discharge
+    path (record_meta_decision — a 'hold' counts — rollback, and the
+    two evidence miners) is refused. Previously the gate enforced
+    without being observable here (F-17)."""
+    rows = store._fetchall(
+        """SELECT t.id, t.closed_at FROM tournaments t
+           WHERE t.status = 'closed' AND NOT EXISTS (
+               SELECT 1 FROM meta_decisions d
+               WHERE d.tournament_id = t.id
+           ) ORDER BY t.closed_at"""
+    )
+    violations = [
+        {
+            "tournament_id": r["id"],
+            "problem": (
+                "closed tournament lacks a meta_decision — "
+                "mutating tools are gated until adjudicated"
+            ),
+        }
+        for r in rows
+    ]
+    return _res(
+        "decision_debt", violations,
+        f"{len(violations)} closed tournament(s) awaiting a "
+        "meta_decision",
+    )
+
+
 def _check_conditional_human_gate(store) -> dict:
     """Defense-in-depth audit: an active policy whose improver
     implements a conditional proposal must trace to a promote
@@ -406,6 +437,7 @@ async def run_checks(
         _check_stale_open_tournaments(store, stale_tournament_seconds),
         _check_rejected_have_reasons(store),
         _check_closed_have_gain(store),
+        _check_decision_debt(store),
         _check_conditional_human_gate(store),
         _check_decisions_reference_candidates(store),
         await _check_minted_claims_resolve(store, claims),

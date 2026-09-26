@@ -120,6 +120,7 @@ async def _battery_setup(arete_orchestration_server):
     return {
         "arete": arete, "zet": zet, "loop0": loop0,
         "tournament_id": tourn["tournament_id"],
+        "candidate_improver_id": child,
         "contract_id": contract_id,
         "champion": champion,
         "desc_parent": desc_parent,
@@ -325,6 +326,41 @@ class TestOrchestrationGate:
 
     async def test_07_invariants_clean(self, battery):
         arete, zet = battery["arete"], battery["zet"]
+        tourn = battery["tournament_id"]
+
+        # F-17: the closed-but-undecided tournament is decision debt —
+        # a named check now, so invariants report it before discharge.
+        r = await call_tool_http(arete, "check_invariants", {})
+        assert r["status"] == "violations", r
+        chk = next(
+            c for c in r["checks"] if c["name"] == "decision_debt"
+        )
+        assert chk["ok"] is False
+        assert any(
+            v["tournament_id"] == tourn for v in chk["violations"]
+        )
+
+        # Discharge through the live gates: pull evidence on the
+        # closed tournament (legal by design, and reachable again —
+        # this is the step that was deadlocked), then decide.
+        pull = await call_tool_http(arete, "pull_evidence", {
+            "context_type": "tournament", "context_id": tourn,
+            "source": "loop0", "tool": "list_trials",
+            "args": {"programme_id": battery["prog_candidate"]},
+        })
+        assert "error" not in pull, pull
+        d = await call_tool_http(arete, "record_meta_decision", {
+            "candidate_improver_id": battery["candidate_improver_id"],
+            "verdict": "hold",
+            "evidence_refs": [pull["evidence_ref_id"]],
+            "rationale": "candidate did not beat the incumbent — "
+            "hold is a decision",
+            "decided_by": "human:battery",
+            "tournament_id": tourn,
+        })
+        assert "error" not in d, d
+
+        # Re-run refreshes the logged violations view — clean now.
         r = await call_tool_http(arete, "check_invariants", {})
         assert r["status"] == "ok", r
         r = await call_tool_http(zet, "check_invariants", {})

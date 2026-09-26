@@ -78,9 +78,23 @@ REMEDY_TOOLS = {
         "open_tournament", "close_tournament",
         "record_tournament_result",
     },
+    # The full discharge path: decide (hold counts) or rollback, plus
+    # the two evidence miners that mint the evidence_refs a decision
+    # requires. Missing any one re-strands the gate (F-17).
+    "decision_debt": {
+        "record_meta_decision", "rollback",
+        "pull_evidence", "pull_arm_evidence",
+    },
     "orphaned_arm_results": set(),
     "upstream_connectivity": set(),
 }
+
+# Tools that mint the discharge currency for decision debt —
+# record_meta_decision requires ≥1 evidence_ref and only these two
+# produce them. Exempt from the *decision-debt* gate only: a gate
+# must never strand its own remedy's inputs. They remain subject to
+# the violations gate — a separate debt.
+DEBT_DISCHARGE_TOOLS = {"pull_evidence", "pull_arm_evidence"}
 
 
 def _utc_now_iso() -> str:
@@ -168,7 +182,12 @@ def undecided_tournaments(store) -> list[str]:
 def check_no_decision_debt(store, tool_name: str) -> str | None:
     """Decision-debt gate: undecided closed tournaments refuse all
     mutating tools. ``record_meta_decision`` and ``rollback`` are in
-    ALWAYS_EXEMPT upstream — they never reach this gate."""
+    ALWAYS_EXEMPT upstream — they never reach this gate. The two
+    evidence miners are exempt here: a decision needs ≥1
+    evidence_ref and only they mint it — gating them deadlocks the
+    debt it enforces (F-17)."""
+    if tool_name in DEBT_DISCHARGE_TOOLS:
+        return None
     undecided = undecided_tournaments(store)
     if not undecided:
         return None
