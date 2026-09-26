@@ -43,6 +43,7 @@ def create_server(
     executor_config: dict | None = None,
     claims_config: dict | None = None,
     session_config: dict | None = None,
+    enforcement_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer instance with all tools, resources, and prompts
     registered against the given state store and adaptor.
@@ -120,7 +121,10 @@ def create_server(
     from .resources import status as status_resources
 
     status_resources.register(
-        mcp, store, adaptor, stale_programme_hours=stale_hours
+        mcp, store, adaptor, stale_programme_hours=stale_hours,
+        archive_seal_warn_hours=float(
+            (session_config or {}).get("archive_seal_warn_hours", 72.0)
+        ),
     )
     from .resources import graph as graph_resource
 
@@ -160,5 +164,19 @@ def create_server(
                 config=integrity_config, trigger="route",
             )
         )
+
+    # Recurrent self-improvement protocol — consultation-duty gate +
+    # response injection + open-violation gate (plan-20260926-0438Z).
+    # Disabled unless [enforcement] is provided (in-process embedders
+    # stay opt-in); __main__ always forwards it, so the shipped
+    # servers run enabled by default.
+    enf = enforcement_config or {}
+    if enf and enf.get("recurrent_protocol", True):
+        from .enforcement import recurrence
+
+        recurrence.TRACKER.configure(
+            enf.get("status_freshness_seconds", 600)
+        )
+        recurrence.install(mcp, store, recurrence.TRACKER)
 
     return mcp

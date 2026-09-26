@@ -30,7 +30,7 @@ from ..state.models import (
     TournamentStatus,
 )
 from ..state.store import ImproverStore
-from .schemas import coerce_json, fail, ok, CloseTournamentOut, CorrectTournamentResultOut, ListTournamentsOut, OpenTournamentOut, RecordTournamentResultOut, GetTournamentOut
+from .schemas import coerce_json, fail, ok, CloseTournamentOut, CorrectTournamentResultOut, ListTournamentsOut, OpenTournamentOut, RecordTournamentResultOut, GetTournamentOut, VoidTournamentOut
 from typing import Annotated, Literal
 from pydantic import Field
 from mcp.types import CallToolResult
@@ -60,6 +60,7 @@ def _tournament_json(store: ImproverStore, t: Tournament) -> dict:
         "recursive_gain": t.recursive_gain,
         "created_at": t.created_at,
         "closed_at": t.closed_at,
+        "void": t.void,
         "results": {
             "parent": [
                 _result_json(r) for r in results
@@ -293,7 +294,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             if tournament.status != TournamentStatus.open:
                 return fail(json.dumps({
                     "error": f"Tournament {tournament_id} is already "
-                    "closed."
+                    f"{tournament.status.value}."
                 }))
             contract = store.get_meta_contract(tournament.contract_id)
             parent_results = store.list_tournament_results(
@@ -325,6 +326,67 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
+    def void_tournament(
+        tournament_id: Annotated[str, Field(description='ID of the target tournament.')],
+        rationale: Annotated[str, Field(description='Non-empty reason the tournament is dead — recorded on the record; a void without a stated basis is a silent delete.')],
+        decided_by: Annotated[str, Field(description="Attributable decider — 'agent:<name>', 'human:<name>', or an improver id.")],
+    ) -> Annotated[CallToolResult, VoidTournamentOut]:
+        """Void an unpaired open tournament — the dead-record exit.
+
+        open → voided: terminal, computes no recursive_gain, implies
+        no comparison. For tournaments that were opened but can never
+        honestly close — runs that never completed, smoke opens,
+        abandoned evaluations. Refuses a paired tournament (both arms
+        ≥1 result): that record has an honest exit — close_tournament.
+        The rationale and decided_by are recorded on the row, so the
+        record carries why it was abandoned rather than vanishing or
+        sitting open forever.
+        """
+        try:
+            tournament = store.get_tournament(tournament_id)
+            if tournament is None:
+                return fail(json.dumps({
+                    "error": f"Tournament not found: {tournament_id}."
+                }))
+            if tournament.status != TournamentStatus.open:
+                return fail(json.dumps({
+                    "error": f"Tournament {tournament_id} is "
+                             f"{tournament.status.value} — already "
+                             "terminal.",
+                }))
+            if not rationale or not rationale.strip():
+                return fail(json.dumps({
+                    "error": "rationale is required — a void without "
+                             "a stated basis is a silent delete",
+                }))
+            if not decided_by or not decided_by.strip():
+                return fail(json.dumps({
+                    "error": "decided_by is required — attribution "
+                             "is mandatory",
+                }))
+            results = store.list_tournament_results(tournament_id)
+            parent_n = sum(1 for r in results if r.arm == "parent")
+            cand_n = sum(1 for r in results if r.arm == "candidate")
+            if parent_n >= 1 and cand_n >= 1:
+                return fail(json.dumps({
+                    "error": f"Tournament {tournament_id} is paired "
+                             f"({parent_n} parent, {cand_n} candidate "
+                             "results) — close_tournament is the "
+                             "honest exit; voiding would discard "
+                             "computable evidence.",
+                }))
+            voided_at = store.void_tournament(
+                tournament_id, rationale.strip(), decided_by.strip()
+            )
+            return ok({
+                "tournament_id": tournament_id,
+                "status": "voided",
+                "voided_at": voided_at,
+            })
+        except Exception as e:
+            return fail(json.dumps({"error": str(e)}))
+
+    @mcp.tool()
     def get_tournament(tournament_id: Annotated[str, Field(description='ID of the target tournament.')]) -> Annotated[CallToolResult, GetTournamentOut]:
         """Read a tournament with both arms' results and its evidence
         trail."""
@@ -340,7 +402,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
 
     @mcp.tool()
     def list_tournaments(
-        status: Annotated[Literal['open', 'closed'] | None, Field(description='Optional status filter.')] = None,
+        status: Annotated[Literal['open', 'closed', 'voided'] | None, Field(description='Optional status filter.')] = None,
         limit: Annotated[int, Field(description='Max rows to return (pagination).')] = 50,
         offset: Annotated[int, Field(description='Rows to skip before returning (pagination).')] = 0,
     ) -> Annotated[CallToolResult, ListTournamentsOut]:

@@ -166,6 +166,7 @@ TOOL_CATALOG = [
     {"name": "cancel_trial", "category": "trial", "description": "Cancel a running trial (failed) or abandon a designed one"},
     {"name": "mark_retryable", "category": "trial", "description": "Mark a trial as retryable (infra failure)"},
     {"name": "correct_trial_status", "category": "trial", "description": "Correct a mislabeled terminal trial (recorded repair — never hand-edit the DB)"},
+    {"name": "wait_trial", "category": "trial", "description": "Wait server-side for a terminal trial status (≤60s — replaces the get_trial_status polling loop)"},
     {"name": "list_trials", "category": "trial", "description": "List a programme's trials (id recovery)"},
     # Observation
     {"name": "record_observation", "category": "observation", "description": "Record metrics and variance"},
@@ -197,8 +198,10 @@ TOOL_CATALOG = [
     {"name": "verify_archive", "category": "archive", "description": "Verify archive integrity"},
     # Integrity — the invariant audit (report-only, logged per run)
     {"name": "check_invariants", "category": "integrity", "description": "Audit state.db against the loop's invariants"},
-    # Integrity — content-address resolution (read-only, no bytes)
+    {"name": "acknowledge_violation", "category": "integrity", "description": "Acknowledge an open violation (remediated | accepted-with-reason) — clears the write gate"},
+    # Integrity — content-address resolution (read-only)
     {"name": "describe_blob", "category": "integrity", "description": "Resolve a content digest to held bytes across the blob stores"},
+    {"name": "get_blob", "category": "integrity", "description": "Retrieve a blob's verified bytes by digest (base64)"},
 ]
 
 STATE_MACHINE = {

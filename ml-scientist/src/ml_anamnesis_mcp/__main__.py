@@ -102,11 +102,28 @@ def main() -> None:
 
     file_config = load_config()
     integrity_config = file_config.get("integrity", {})
+    # Recurrent protocol ships enabled (plan-20260926-0438Z) —
+    # absent [enforcement] table defaults to on, matching the other
+    # servers' DEFAULTS; recurrent_protocol=false disables.
+    enforcement_config = file_config.get("enforcement") or {
+        "recurrent_protocol": True,
+    }
+
+    # Lab-wide env overrides — shared names across all servers so a
+    # single variable flips the whole stack.
+    import os
+    if env_rp := os.environ.get("ML_RECURRENT_PROTOCOL"):
+        enforcement_config["recurrent_protocol"] = (
+            env_rp.strip().lower() not in ("0", "false", "off", "no")
+        )
+    if env_fs := os.environ.get("ML_STATUS_FRESHNESS_SECONDS"):
+        enforcement_config["status_freshness_seconds"] = float(env_fs)
 
     mcp = create_server(
         store,
         log_tool_args=args.log_tool_args,
         integrity_config=integrity_config,
+        enforcement_config=enforcement_config,
     )
 
     async def _with_integrity_monitor(coro):
@@ -144,10 +161,22 @@ def main() -> None:
         import uvicorn
         from .observability.server import create_observability_app
 
+        # The agora GUI base is deployment knowledge, not a code
+        # constant: TOML [observability] agora_gui_url wins, else the
+        # launcher-exported ML_AGORA_GUI_URL (ports.env-derived).
+        obs_config = dict(file_config.get("observability", {}))
+        if env_url := os.environ.get("ML_AGORA_GUI_URL"):
+            obs_config.setdefault("agora_gui_url", env_url)
+        # Peer GUI bases for claim-edge hyperlinks — same resolution:
+        # TOML <server>_gui_url wins, else the ports.env-derived env.
+        for peer in ("episteme", "zetesis", "arete"):
+            env_key = f"ML_{peer.upper()}_GUI_URL"
+            if env_url := os.environ.get(env_key):
+                obs_config.setdefault(f"{peer}_gui_url", env_url)
         obs_app = create_observability_app(
             store,
             mcp_health_url=f"http://{args.host or '127.0.0.1'}:{args.port}/health",
-            observability_config=file_config.get("observability", {}),
+            observability_config=obs_config,
         )
         obs_server = uvicorn.Server(
             uvicorn.Config(

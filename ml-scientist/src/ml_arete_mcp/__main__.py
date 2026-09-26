@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import socket
 import sys
 from pathlib import Path
@@ -124,6 +125,7 @@ def main() -> None:
         adaptors=adaptors,
         log_tool_args=args.log_tool_args,
         integrity_config=config.get("integrity", {}),
+        enforcement_config=config.get("enforcement", {}),
     )
 
     async def _run_server(coro):
@@ -228,12 +230,18 @@ def main() -> None:
         from .observability.links import upstream_gui_bases
         from .observability.server import create_observability_app
 
+        # The agora GUI base is deployment knowledge, not a code
+        # constant: TOML [observability] agora_gui_url wins, else the
+        # launcher-exported ML_AGORA_GUI_URL (ports.env-derived).
+        obs_config = dict(config.get("observability", {}))
+        if env_url := os.environ.get("ML_AGORA_GUI_URL"):
+            obs_config.setdefault("agora_gui_url", env_url)
         obs_app = create_observability_app(
             store,
             mcp_health_url=(
                 f"http://{host or '127.0.0.1'}:{port}/health"
             ),
-            observability_config=config.get("observability", {}),
+            observability_config=obs_config,
             upstream_gui_bases=upstream_gui_bases(adaptors._channels),
         )
         obs_server = uvicorn.Server(

@@ -226,6 +226,13 @@ class CheckInvariantsOut(TypedDict, total=False):
     log_file: str | None
 
 
+class AcknowledgeViolationOut(TypedDict, total=False):
+    ack_id: str | None
+    status: str | None
+    matched_open_violation: bool | None
+    open_violations: int | None
+
+
 class ListCandidatesOut(TypedDict, total=False):
     candidates: list[dict] | None
     total: int | None

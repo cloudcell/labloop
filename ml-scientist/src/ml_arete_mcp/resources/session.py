@@ -123,6 +123,21 @@ LOOP_STEPS = [
         "outputs": ["recursive_gain"],
     },
     {
+        "step": 6.5,
+        "name": "void_tournament",
+        "tool": "void_tournament",
+        "description": (
+            "The dead-record exit — open → voided for tournaments "
+            "that were opened but can never honestly close (no "
+            "paired results coming). Terminal; computes no "
+            "recursive_gain. Refuses paired tournaments — those "
+            "close. Rationale and decided_by are recorded on the "
+            "row."
+        ),
+        "inputs": ["tournament_id", "rationale", "decided_by"],
+        "outputs": ["voided_at"],
+    },
+    {
         "step": 7,
         "name": "record_meta_decision",
         "tool": "record_meta_decision",

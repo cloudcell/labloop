@@ -27,6 +27,14 @@ import anyio.from_thread
 
 anyio.abc.BlockingPortal = anyio.from_thread.BlockingPortal
 
+# The recurrent self-improvement protocol (freshness gate +
+# governance-debt gates) ships enabled on the __main__ path; the
+# suite exercises pre-protocol call semantics, so subprocess servers
+# inherit a disabled protocol. Dedicated recurrence tests enable it
+# explicitly. os.environ is read by every spawned server (Popen
+# inherits it), covering all per-suite conftests at once.
+os.environ.setdefault("ML_RECURRENT_PROTOCOL", "0")
+
 
 # --- Port allocation ---
 

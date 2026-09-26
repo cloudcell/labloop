@@ -15,6 +15,13 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from ..enforcement import recurrence
+from ..enforcement.recurrence import (
+    TRACKER,
+    improvement_due,
+    open_violations,
+    undecided_tournaments,
+)
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import ImproverStore
@@ -107,7 +114,9 @@ def _integrity_summary(store: ImproverStore) -> dict:
     }
 
 
-def _collect_open_work(store: ImproverStore) -> tuple[list[dict], dict]:
+def _collect_open_work(
+    store: ImproverStore, stale_seconds: int
+) -> tuple[list[dict], dict]:
     open_work: list[dict] = []
     facts = {
         "no_champion": store.get_champion() is None,
@@ -130,26 +139,46 @@ def _collect_open_work(store: ImproverStore) -> tuple[list[dict], dict]:
         })
         facts["admitted"].append(p)
 
+    now = datetime.now(timezone.utc)
     tournaments, _ = store.list_tournaments(status="open", limit=50)
     for t in tournaments:
         results = store.list_tournament_results(t.id)
         parent_n = sum(1 for r in results if r.arm == "parent")
         cand_n = sum(1 for r in results if r.arm == "candidate")
+        # Same last-activity basis as stale_open_tournaments:
+        # max(created_at, last result, last tournament evidence).
+        stamps = [t.created_at]
+        stamps += [r.created_at for r in results]
+        stamps += [
+            e.created_at
+            for e in store.list_evidence_refs("tournament", t.id)
+        ]
+        try:
+            last = max(
+                datetime.fromisoformat(s) for s in stamps if s
+            )
+            idle_s = (now - last).total_seconds()
+        except ValueError:
+            idle_s = 0.0
         open_work.append({
             "kind": "tournament", "id": t.id, "state": "open",
             "parent_results": parent_n,
             "candidate_results": cand_n,
+            "idle_hours": round(idle_s / 3600, 1),
+            "stale": idle_s > stale_seconds,
         })
         if parent_n >= 1 and cand_n >= 1:
             facts["tournaments_ready"].append(t)
         else:
             facts["tournaments_waiting"].append(
-                (t, parent_n, cand_n)
+                (t, parent_n, cand_n, idle_s)
             )
     return open_work, facts
 
 
-def _recommend(facts: dict, blockers: list[dict]) -> list[dict]:
+def _recommend(
+    facts: dict, blockers: list[dict], stale_seconds: int
+) -> list[dict]:
     blocked_tools = {
         t for b in blockers for t in b.get("blocks", [])
     }
@@ -173,7 +202,7 @@ def _recommend(facts: dict, blockers: list[dict]) -> list[dict]:
             "both arms have results — close to compute "
             "recursive_gain",
         )
-    for t, parent_n, cand_n in facts["tournaments_waiting"]:
+    for t, parent_n, cand_n, idle_s in facts["tournaments_waiting"]:
         missing = "parent" if parent_n == 0 else "candidate"
         if parent_n == 0 and cand_n == 0:
             missing = "either arm"
@@ -182,6 +211,14 @@ def _recommend(facts: dict, blockers: list[dict]) -> list[dict]:
             f"tournament is open — no result yet for {missing}; "
             "run the arm's evaluation then record it",
         )
+        if idle_s > stale_seconds:
+            # Dead record — offer the honest exit alongside revival.
+            add(
+                "void_tournament", [t.id],
+                f"tournament idle >{stale_seconds}s with unpaired "
+                "arms — void_tournament if the run is dead "
+                "(rationale required)",
+            )
     for p in facts["conditional"]:
         add(
             "record_meta_decision", [p.id],
@@ -219,12 +256,80 @@ def _workflow_position(recs: list[dict]) -> str:
     return tool or "meta lifecycle"
 
 
-def status_digest(store: ImproverStore, adaptors=None) -> dict:
-    """The Loop-2 status digest — the cross-server contract shape."""
-    open_work, facts = _collect_open_work(store)
-    blockers = _blockers(adaptors)
-    recs = _recommend(facts, blockers)
+def _violation_blockers(store: ImproverStore) -> list[dict]:
+    """Open (unacknowledged) integrity findings — tier-1 blockers
+    that also gate mutating tools when the protocol is enabled."""
+    return [
+        {
+            "kind": "open_violation",
+            "check": v["check"],
+            "object_ref": v["object_ref"],
+            "action": "acknowledge_violation",
+            "tool": "acknowledge_violation",
+            "blocks": ["*"],
+            "detail": v["detail"],
+        }
+        for v in open_violations(store)
+    ]
+
+
+def _decision_debt_blockers(store: ImproverStore) -> list[dict]:
+    """Closed tournaments lacking a meta_decision — blocking debt;
+    the gate exempts the decision tools that resolve it."""
+    return [
+        {
+            "kind": "decision_debt",
+            "tournament_id": tid,
+            "action": "record_meta_decision",
+            "tool": "record_meta_decision",
+            "blocks": ["*"],
+            "detail": (
+                "closed tournament has no meta_decision — adjudicate "
+                "or record a 'hold' with rationale"
+            ),
+        }
+        for tid in undecided_tournaments(store)
+    ]
+
+
+def _improvement_due_rec(store: ImproverStore) -> dict | None:
+    """Advisory recurrence recommendation when the epoch elapses."""
+    if not improvement_due(store):
+        return None
     return {
+        "action": "propose_meta_change",
+        "tool": "propose_meta_change",
+        "entity_refs": [],
+        "reason": (
+            f"improvement epoch elapsed "
+            f"({recurrence.EPOCH_SECONDS:.0f}s with no proposal, "
+            "decision, or "
+            "tournament activity) — propose a meta-change or record "
+            "a decision/hold on pending work"
+        ),
+    }
+
+
+def status_digest(
+    store: ImproverStore, adaptors=None, stale_seconds: int | None = None
+) -> dict:
+    """The Loop-2 status digest — the cross-server contract shape."""
+    if stale_seconds is None:
+        from ..integrity.checks import DEFAULT_STALE_TOURNAMENT_SECONDS
+        stale_seconds = DEFAULT_STALE_TOURNAMENT_SECONDS
+    open_work, facts = _collect_open_work(store, stale_seconds)
+    blockers = (
+        _blockers(adaptors)
+        + _violation_blockers(store)
+        + _decision_debt_blockers(store)
+    )
+    recs = _recommend(facts, blockers, stale_seconds)
+    due_rec = _improvement_due_rec(store)
+    if due_rec is not None:
+        recs.append(due_rec)
+    for i, rec in enumerate(recs):
+        rec["rank"] = i + 1
+    digest = {
         "server": "ml-arete-mcp",
         "role": "loop2",
         "generated_at": _utc_now_iso(),
@@ -235,12 +340,19 @@ def status_digest(store: ImproverStore, adaptors=None) -> dict:
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
     }
+    TRACKER.mark_status_read(digest)
+    return digest
 
 
-def register(mcp, store: ImproverStore, adaptors=None) -> None:
+def register(
+    mcp, store: ImproverStore, adaptors=None,
+    stale_seconds: int | None = None,
+) -> None:
     """Register the status digest resource."""
 
     @mcp.resource("improver://status")
     def get_status() -> str:
         """Compact status digest — open work, blockers, next action."""
-        return json.dumps(status_digest(store, adaptors), indent=2)
+        return json.dumps(
+            status_digest(store, adaptors, stale_seconds), indent=2
+        )

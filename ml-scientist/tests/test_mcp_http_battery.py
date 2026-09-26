@@ -28,7 +28,7 @@ class TestInfrastructure:
             assert resp.status == 200
             body = json.loads(resp.read())
             assert body["status"] in ("ok", "violations")
-            assert len(body["checks"]) == 9
+            assert len(body["checks"]) == 10
             assert "log_file" in body
 
     async def test_server_starts_and_lists_tools(self, server_url):

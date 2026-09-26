@@ -56,6 +56,7 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
     if entity_id.startswith("prog-"):
         base = gui_bases.get("loop0")
         return f"{base}/programme/{entity_id}" if base else None
-    # trial- needs its parent programme_id for /programme/{p}/trial/{t}
-    # and isn't rendered standalone — no honest link without context.
+    if entity_id.startswith("trial-"):
+        base = gui_bases.get("loop0")
+        return f"{base}/trial/{entity_id}" if base else None
     return None

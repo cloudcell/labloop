@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from ..enforcement.recurrence import TRACKER, open_violations
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import MemoryStore
@@ -22,6 +23,23 @@ from ..state.store import MemoryStore
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _violation_blockers(store: MemoryStore) -> list[dict]:
+    """Open (unacknowledged) integrity findings — tier-1 blockers
+    that also gate mutating tools when the protocol is enabled."""
+    return [
+        {
+            "kind": "open_violation",
+            "check": v["check"],
+            "object_ref": v["object_ref"],
+            "action": "acknowledge_violation",
+            "tool": "acknowledge_violation",
+            "blocks": ["*"],
+            "detail": v["detail"],
+        }
+        for v in open_violations(store)
+    ]
 
 
 def _integrity_summary(store: MemoryStore) -> dict:
@@ -47,7 +65,7 @@ def status_digest(store: MemoryStore) -> dict:
     _, total = store.list_claims(limit=1)
     _, superseded = store.list_claims(limit=1, only_superseded=True)
     _, expired = store.list_claims(limit=1, only_expired=True)
-    return {
+    digest = {
         "server": "ml-anamnesis-mcp",
         "role": "claims",
         "generated_at": _utc_now_iso(),
@@ -55,7 +73,7 @@ def status_digest(store: MemoryStore) -> dict:
         # the honest answer, not a fabricated position.
         "workflow_position": None,
         "open_work": [],
-        "blockers": [],
+        "blockers": _violation_blockers(store),
         "recommended_next": [{
             "rank": 1,
             "action": "serve_consumers",
@@ -86,6 +104,8 @@ def status_digest(store: MemoryStore) -> dict:
             "expired": expired,
         },
     }
+    TRACKER.mark_status_read(digest)
+    return digest
 
 
 def register(mcp, store: MemoryStore) -> None:

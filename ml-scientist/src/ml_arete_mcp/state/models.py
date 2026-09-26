@@ -52,6 +52,10 @@ class ProposalStatus(str, Enum):
 class TournamentStatus(str, Enum):
     open = "open"
     closed = "closed"
+    # Terminal dead-record state — opened but never completed. No
+    # recursive_gain, no comparison implied; same family as
+    # programme → abandoned. Set only by void_tournament.
+    voided = "voided"
 
 
 class TournamentArm(str, Enum):
@@ -139,6 +143,9 @@ class Tournament(BaseModel):
     recursive_gain: float | None = None
     created_at: str = Field(default_factory=_utc_now)
     closed_at: str | None = None
+    # The attributed void record {rationale, decided_by, voided_at} —
+    # set when status=voided, NULL otherwise.
+    void: dict[str, Any] | None = None
 
 
 class TournamentResult(BaseModel):

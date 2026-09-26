@@ -78,3 +78,43 @@ def register(mcp, store) -> None:
         """Claims entity graph — claims plus provenance edges as
         nodes + edges. Read-only projection for the agora hub."""
         return json.dumps(build_graph(store), indent=2)
+
+    @mcp.resource("claims://by-relation/{relation}")
+    def get_by_relation(relation: str) -> str:
+        """Claims participating in edges of one relation kind —
+        e.g. claims://by-relation/contradicts lists every claim that
+        contradicts or is contradicted. The contradiction-chain pull
+        without a tool call per claim."""
+        edges = [
+            e for e in store.list_edges(limit=1000)
+            if e.relation.value == relation
+        ]
+        claim_ids = sorted({e.from_claim for e in edges})
+        claims = {}
+        for cid in claim_ids:
+            c = store.get_claim(cid)
+            if c is not None:
+                claims[cid] = {
+                    "id": c.id,
+                    "content": c.content,
+                    "type": c.type.value,
+                    "confidence": c.confidence,
+                    "supersedes_id": c.supersedes_id,
+                    "created_at": c.created_at,
+                }
+        return json.dumps({
+            "server": "ml-anamnesis-mcp",
+            "relation": relation,
+            "generated_at": _now(),
+            "edges": [
+                {
+                    "edge_id": e.id,
+                    "from_claim": e.from_claim,
+                    "to_ref": e.to_ref,
+                    "ref_type": e.ref_type.value,
+                    "weight": e.weight,
+                }
+                for e in edges
+            ],
+            "claims": list(claims.values()),
+        }, indent=2)

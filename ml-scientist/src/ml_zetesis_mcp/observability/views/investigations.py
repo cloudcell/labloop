@@ -8,6 +8,7 @@ from starlette.responses import HTMLResponse
 
 from ...state.models import Investigation
 from ...state.store import SearchStore
+from ..links import link_ids
 from ..templates import (
     escape,
     format_timestamp,
@@ -100,7 +101,8 @@ def render_investigation_list(
 
 
 def render_investigation_detail(
-    store: SearchStore, investigation_id: str
+    store: SearchStore, investigation_id: str,
+    gui_bases: dict | None = None,
 ) -> HTMLResponse:
     """Investigation detail: record + evidence trail + findings."""
     inv = store.get_investigation(investigation_id)
@@ -115,11 +117,12 @@ def render_investigation_detail(
 
     ref_rows = "".join(
         "<tr>"
-        f'<td><span class="mono">{escape(r.id)}</span></td>'
+        f'<td><a class="mono" href="/evidence-ref/{escape(r.id)}">'
+        f"{escape(r.id)}</a></td>"
         f"<td>{escape(r.source.value)}</td>"
         f'<td><span class="mono">{escape(r.tool)}</span></td>'
         f"<td class=\"muted\">{escape(json.dumps(r.args))[:120]}</td>"
-        f'<td class="mono">{escape(", ".join(r.ref_ids) or "—")}</td>'
+        f'<td class="mono">{link_ids(r.ref_ids, gui_bases or {})}</td>'
         f"<td>{format_timestamp(r.created_at)}</td>"
         "</tr>"
         for r in refs
@@ -132,8 +135,9 @@ def render_investigation_detail(
     for f in findings:
         grounding = store.finding_evidence_refs(f.id)
         grounding_html = "".join(
-            f'<span class="badge mono">{escape(r.id)} → {escape(r.source.value)}/'
-            f"{escape(r.tool)}</span>"
+            f'<a class="badge mono" href="/evidence-ref/{escape(r.id)}">'
+            f'{escape(r.id)} → {escape(r.source.value)}/'
+            f"{escape(r.tool)}</a>"
             for r in grounding
         ) or '<span class="muted">no evidence refs — prior-level</span>'
         claim_line = (
@@ -202,3 +206,54 @@ def render_investigation_detail(
     {implications_block}
     """
     return HTMLResponse(render_base(f"Investigation {investigation_id}", body))
+
+
+def render_evidence_ref_detail(
+    store: SearchStore, evidence_ref_id: str,
+    gui_bases: dict | None = None,
+) -> HTMLResponse:
+    """One evidence pull: which upstream read, in which context."""
+    e = store.get_evidence_ref(evidence_ref_id)
+    if e is None:
+        return HTMLResponse(
+            render_error(
+                f"Evidence ref not found: {evidence_ref_id}", 404
+            ),
+            status_code=404,
+        )
+
+    ctx_rows = ""
+    if e.investigation_id:
+        ctx_rows += (
+            f'<tr><th>investigation</th><td><a class="mono" '
+            f'href="/investigation/{escape(e.investigation_id)}">'
+            f"{escape(e.investigation_id)}</a></td></tr>"
+        )
+    if e.campaign_id:
+        ctx_rows += (
+            f'<tr><th>campaign</th><td><a class="mono" '
+            f'href="/campaign/{escape(e.campaign_id)}">'
+            f"{escape(e.campaign_id)}</a></td></tr>"
+        )
+
+    body = f"""
+    <h1><span class="mono">{escape(e.id)}</span>
+        <span class="muted">{escape(e.source.value)}</span></h1>
+    <div class="card">
+        <table>
+            <tr><th>ID</th><td class="mono">{escape(e.id)}</td></tr>
+            {ctx_rows}
+            <tr><th>source</th><td>{escape(e.source.value)}</td></tr>
+            <tr><th>tool</th><td class="mono">{escape(e.tool)}</td></tr>
+            <tr><th>ref_ids</th><td class="mono">{
+                link_ids(e.ref_ids, gui_bases or {})}</td></tr>
+            <tr><th>pulled</th><td>{format_timestamp(e.created_at)}</td>
+            </tr>
+        </table>
+    </div>
+    <h2>Call args</h2>
+    <pre>{escape(json.dumps(e.args, indent=2))}</pre>
+    """
+    return HTMLResponse(
+        render_base(f"Evidence ref {evidence_ref_id}", body)
+    )

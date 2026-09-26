@@ -150,6 +150,12 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                         "decision must cite the comparison it rests "
                         "on."
                     }))
+                if t.status == TournamentStatus.voided:
+                    return fail(json.dumps({
+                        "error": f"Tournament {tournament_id} is "
+                        "voided — decisions rest on comparisons, and "
+                        "a voided record is not a comparison."
+                    }))
 
             decision = MetaDecision(
                 id=f"mdec-{uuid.uuid4().hex[:8]}",

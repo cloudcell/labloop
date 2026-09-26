@@ -86,7 +86,8 @@ def render_tournament_detail(
 
     ref_rows = "".join(
         "<tr>"
-        f'<td class="mono">{escape(e.id)}</td>'
+        f'<td class="mono"><a href="/evidence-ref/{escape(e.id)}">'
+        f"{escape(e.id)}</a></td>"
         f"<td>{escape(e.source.value)}</td>"
         f'<td class="mono">{escape(e.tool)}</td>'
         f'<td class="mono muted">{escape(", ".join(e.ref_ids) or "—")}</td>'
@@ -195,7 +196,8 @@ def render_proposal_detail(
 
     ref_rows = "".join(
         "<tr>"
-        f'<td class="mono">{escape(e.id)}</td>'
+        f'<td class="mono"><a href="/evidence-ref/{escape(e.id)}">'
+        f"{escape(e.id)}</a></td>"
         f"<td>{escape(e.source.value)}</td>"
         f'<td class="mono">{escape(e.tool)}</td>'
         f'<td class="mono muted">{escape(", ".join(e.ref_ids) or "—")}</td>'
@@ -243,6 +245,55 @@ def render_proposal_detail(
     """
     return HTMLResponse(
         render_base(f"Proposal {proposal_id}", body)
+    )
+
+
+def render_evidence_ref_detail(
+    store: ImproverStore, evidence_ref_id: str,
+    gui_bases: dict | None = None,
+) -> HTMLResponse:
+    """One evidence pull: which upstream read, in which context."""
+    e = store.get_evidence_ref(evidence_ref_id)
+    if e is None:
+        return HTMLResponse(
+            render_error(
+                f"Evidence ref not found: {evidence_ref_id}", 404
+            ),
+            status_code=404,
+        )
+    bases = gui_bases or {}
+    ctx_path = {
+        "tournament": "/tournament/",
+        "proposal": "/proposal/",
+    }.get(e.context_type.value)
+    ctx_cell = (
+        f'<a href="{ctx_path}{escape(e.context_id)}" class="mono">'
+        f"{escape(e.context_id)}</a>"
+        if ctx_path
+        else f'<span class="mono">{escape(e.context_id)}</span>'
+    )
+    ref_cells = ", ".join(_link_id(r, bases) for r in e.ref_ids) or "—"
+
+    body = f"""
+    <h1><span class="mono">{escape(e.id)}</span>
+        <span class="muted">{escape(e.source.value)}</span></h1>
+    <div class="card">
+        <table>
+            <tr><th>ID</th><td class="mono">{escape(e.id)}</td></tr>
+            <tr><th>context</th><td>{escape(e.context_type.value)}
+                &nbsp;{ctx_cell}</td></tr>
+            <tr><th>source</th><td>{escape(e.source.value)}</td></tr>
+            <tr><th>tool</th><td class="mono">{escape(e.tool)}</td></tr>
+            <tr><th>ref_ids</th><td class="mono">{ref_cells}</td></tr>
+            <tr><th>pulled</th><td>{format_timestamp(e.created_at)}</td>
+            </tr>
+        </table>
+    </div>
+    <h2>Call args</h2>
+    <pre>{escape(json.dumps(e.args, indent=2))}</pre>
+    """
+    return HTMLResponse(
+        render_base(f"Evidence ref {evidence_ref_id}", body)
     )
 
 

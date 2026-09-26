@@ -25,6 +25,7 @@ def create_server(
     name: str = "ml-zetesis-mcp",
     log_tool_args: bool = False,
     integrity_config: dict | None = None,
+    enforcement_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer with the investigation-loop tools registered.
 
@@ -110,5 +111,18 @@ def create_server(
                 trigger="route",
             )
         )
+
+    # Recurrent self-improvement protocol — consultation-duty gate +
+    # response injection + open-violation gate (plan-20260926-0438Z).
+    # Disabled unless [enforcement] is provided; __main__ always
+    # forwards it, so the shipped server runs enabled by default.
+    enf = enforcement_config or {}
+    if enf and enf.get("recurrent_protocol", True):
+        from .enforcement import recurrence
+
+        recurrence.TRACKER.configure(
+            enf.get("status_freshness_seconds", 600)
+        )
+        recurrence.install(mcp, store, recurrence.TRACKER)
 
     return mcp

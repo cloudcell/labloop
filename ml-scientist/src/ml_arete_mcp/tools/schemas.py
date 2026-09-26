@@ -257,6 +257,13 @@ class CheckInvariantsOut(TypedDict, total=False):
     log_file: str | None
 
 
+class AcknowledgeViolationOut(TypedDict, total=False):
+    ack_id: str | None
+    status: str | None
+    matched_open_violation: bool | None
+    open_violations: int | None
+
+
 class PullEvidenceOut(TypedDict, total=False):
     evidence_ref_id: str | None
     ref_ids: list | None
@@ -265,3 +272,9 @@ class PullEvidenceOut(TypedDict, total=False):
 
 class GetTournamentOut(TypedDict, total=False):
     tournament: dict | None
+
+
+class VoidTournamentOut(TypedDict, total=False):
+    tournament_id: str | None
+    status: str | None
+    voided_at: str | None

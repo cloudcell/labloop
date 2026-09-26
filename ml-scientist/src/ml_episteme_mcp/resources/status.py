@@ -17,6 +17,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..enforcement.recurrence import TRACKER, open_violations
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import StateStore
@@ -91,6 +92,23 @@ def _blockers(adaptor) -> list[dict]:
                 "detail": e.get("last_error") or "channel unreachable",
             })
     return out
+
+
+def _violation_blockers(store: StateStore) -> list[dict]:
+    """Open (unacknowledged) integrity findings — tier-1 blockers
+    that also gate mutating tools when the protocol is enabled."""
+    return [
+        {
+            "kind": "open_violation",
+            "check": v["check"],
+            "object_ref": v["object_ref"],
+            "action": "acknowledge_violation",
+            "tool": "acknowledge_violation",
+            "blocks": ["*"],
+            "detail": v["detail"],
+        }
+        for v in open_violations(store)
+    ]
 
 
 def _integrity_summary(store: StateStore) -> dict:
@@ -335,16 +353,58 @@ def _workflow_position(recs: list[dict]) -> str:
     return tool
 
 
+def _unsealed_archives(
+    store: StateStore, warn_hours: float
+) -> list[dict]:
+    """Archive-registry rows that were created but never sealed past
+    the staleness window — an advisory, never a blocker: an unsealed
+    archive is provenance debt, not a fault (field report F10)."""
+    try:
+        rows = store.conn.execute(
+            "SELECT archive_id, created_at FROM archive_registry "
+            "WHERE sealed = 0"
+        ).fetchall()
+    except Exception:
+        return []
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in rows:
+        try:
+            created = datetime.fromisoformat(
+                r["created_at"].replace("Z", "+00:00")
+            )
+        except (ValueError, TypeError):
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_h = (now - created).total_seconds() / 3600
+        if age_h >= warn_hours:
+            out.append({"archive_id": r["archive_id"], "age_hours": age_h})
+    return out
+
+
 def status_digest(
-    store: StateStore, adaptor=None, stale_programme_hours: float = 24.0
+    store: StateStore, adaptor=None, stale_programme_hours: float = 24.0,
+    archive_seal_warn_hours: float = 72.0,
 ) -> dict:
     """The Loop-0 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(
         store, stale_programme_hours
     )
-    blockers = _blockers(adaptor)
+    blockers = _blockers(adaptor) + _violation_blockers(store)
     recs = _recommend(facts, blockers)
-    return {
+    for a in _unsealed_archives(store, archive_seal_warn_hours):
+        recs.append({
+            "action": "seal_archive",
+            "tool": None,
+            "entity_refs": [a["archive_id"]],
+            "reason": (
+                f"archive {a['archive_id']} has been unsealed for "
+                f"{a['age_hours']:.0f}h — a sealed archive is the "
+                "provenance terminus; verify and seal it"
+            ),
+        })
+    digest = {
         "server": "ml-episteme-mcp",
         "role": "loop0",
         "generated_at": _utc_now_iso(),
@@ -355,11 +415,16 @@ def status_digest(
         "upstream_summary": _upstream_summary(adaptor),
         "integrity_summary": _integrity_summary(store),
     }
+    # Consultation-duty watermark — every digest consumer (status
+    # resource, session resource, status_report prompt) stamps it.
+    TRACKER.mark_status_read(digest)
+    return digest
 
 
 def register(
     mcp, store: StateStore, adaptor=None,
     stale_programme_hours: float = 24.0,
+    archive_seal_warn_hours: float = 72.0,
 ) -> None:
     """Register the status digest resource."""
 
@@ -367,6 +432,9 @@ def register(
     def get_status() -> str:
         """Compact status digest — open work, blockers, next action."""
         return json.dumps(
-            status_digest(store, adaptor, stale_programme_hours),
+            status_digest(
+                store, adaptor, stale_programme_hours,
+                archive_seal_warn_hours,
+            ),
             indent=2,
         )

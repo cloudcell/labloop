@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from pydantic import Field
+
 import json
 
 from ..integrity.checks import run_and_log
-from .schemas import ok, CheckInvariantsOut
+from ..enforcement.recurrence import violation_ack
+from .schemas import ok, AcknowledgeViolationOut, CheckInvariantsOut
 from mcp.types import CallToolResult
 
 
@@ -35,3 +38,19 @@ def register(mcp, store, integrity_config: dict | None = None) -> None:
         [integrity] log_max_files).
         """
         return ok(run_and_log(store, config=integrity_config, trigger="tool"))
+
+    @mcp.tool()
+    def acknowledge_violation(
+        check_name: Annotated[str, Field(description="Name of the integrity check that flagged the violation (as shown in check_invariants or the status digest blockers).")],
+        object_ref: Annotated[str, Field(description="The flagged record's reference, exactly as reported by the check.")],
+        disposition: Annotated[str, Field(description="What was done about it — 'remediated via …' or 'accepted: <reason>'.")],
+        decided_by: Annotated[str, Field(description="Who acknowledges — 'agent:<name>' or 'human:<name>'. Attribution is required.")],
+    ) -> Annotated[CallToolResult, AcknowledgeViolationOut]:
+        """Acknowledge an open integrity violation — insert-only.
+
+        Records the disposition against (check_name, object_ref) so
+        the finding stops gating writes and leaves the digest's
+        blockers; the underlying record is never touched."""
+        return ok(violation_ack(
+            store, check_name, object_ref, disposition, decided_by,
+        ))

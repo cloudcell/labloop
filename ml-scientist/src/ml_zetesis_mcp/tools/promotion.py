@@ -6,6 +6,13 @@ verdict writes back upstream through the promotion adaptor — the only
 write channel in the ecosystem, whitelisted to the three insert-only
 lineage surfaces. Decisions are records; rollback is a new verdict,
 never a deletion.
+
+Campaigns are an *optional* path — multi-programme orchestration for
+tournaments that need a governed spawn/verdict loop. Direct
+record_tournament_result on arete is equally first-class: field
+evidence (plan-20260926-0438Z, review R6) shows agents drive the
+direct path by default; these tools orchestrate when campaigns are
+actually wanted, not because tournaments require them.
 """
 
 from __future__ import annotations

@@ -85,7 +85,7 @@ def _check(payload, name):
 def test_clean_store_is_ok(store):
     payload = run_checks(store)
     assert payload["status"] == "ok"
-    assert len(payload["checks"]) == 9
+    assert len(payload["checks"]) == 10
     assert all(c["ok"] for c in payload["checks"])
 
 
@@ -159,21 +159,32 @@ def test_unsealed_execution(store):
 
 def test_strace_divergence(store, tmp_path):
     _seed(store)
-    art = tmp_path / "artifacts" / "trial-t1"
-    art.mkdir(parents=True)
-    store.update_trial_artifact_path("trial-t1", str(art))
     store.create_bundle(Bundle(
         id="bundle-t1", trial_id="trial-t1",
         code_ref="git:x", env_ref="e", seeds_json="[1]",
         splits_json="{}", baseline_ref="b",
         code_hash="sha256:sealed",
     ))
-    (art / "executed_code.json").write_text(json.dumps({
+    # The check reads the manifest from the blob store — the staging
+    # artifact dir is deleted at finalize and is not consulted.
+    import hashlib
+    content = json.dumps({
         "files": [
             {"original_path": "a.py", "code_hash": "sha256:sealed"},
             {"original_path": "b.py", "code_hash": "sha256:escaped"},
         ]
-    }))
+    }).encode()
+    digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    store.create_artifact_file(
+        content_hash=digest, filename="executed_code.json",
+        content=content, content_type="application/json",
+        captured_at="2026-01-01T00:00:00Z", original_path="/x",
+    )
+    store.create_trial_artifact(
+        ta_id="ta-1", trial_id="trial-t1", content_hash=digest,
+        filename="executed_code.json", artifact_type="other",
+        created_at="2026-01-01T00:00:00Z",
+    )
     c = _check(run_checks(store), "strace_divergence")
     assert not c["ok"]
     assert c["violations"][0]["trial_id"] == "trial-t1"
@@ -398,7 +409,7 @@ async def test_health_deep_route(store):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert len(body["checks"]) == 9
+        assert len(body["checks"]) == 10
 
 
 def test_integrity_gui(store):

@@ -413,10 +413,15 @@ def check_tournament_open(store: ImproverStore, tournament_id: str):
     if tournament is None:
         return f"Tournament not found: {tournament_id}.", None
     if tournament.status != TournamentStatus.open:
+        state = tournament.status.value
+        why = (
+            "a dead record with an audit trail"
+            if tournament.status == TournamentStatus.voided
+            else "results are sealed"
+        )
         return (
-            f"Tournament {tournament_id} is closed — results are "
-            "sealed. Open a new tournament under a fresh contract "
-            "instead.",
+            f"Tournament {tournament_id} is {state} — {why}. Open a "
+            "new tournament under a fresh contract instead.",
             tournament,
         )
     return None, tournament
@@ -629,3 +634,60 @@ def check_promote_allowed(
                 None,
             )
     return None, decision
+
+
+def check_metric_name_drift(
+    store: ImproverStore, metrics: dict
+) -> list[str]:
+    """Contract-metric lint (plan A2) — advisory, never a refusal.
+
+    Warns when a newly declared metric name has never appeared on a
+    prior meta_contract but is a near-spelling of one that did — the
+    drift pattern from the field report (same measurement, two names
+    → recursive_gain series that silently compare different things).
+    A declared 'metric_alias' mapping in metrics_json resolves the
+    warning.
+    """
+    import difflib
+
+    # Metric names are the *values* under metric-role keys
+    # ({"primary_metric": "hits", "direction": "max", ...}) — keys are
+    # schema fields, values are the names that drift.
+    _SCHEMA_KEYS = {"direction", "metric_alias"}
+
+    def _names(m: dict) -> set[str]:
+        out = set()
+        for k, v in m.items():
+            if k in _SCHEMA_KEYS:
+                continue
+            if isinstance(v, str):
+                out.add(v)
+            elif isinstance(v, list):
+                out.update(x for x in v if isinstance(x, str))
+        return out
+
+    declared = _names(metrics)
+    if not declared:
+        return []
+    aliases = metrics.get("metric_alias") or {}
+
+    prior: set[str] = set()
+    for c in store.list_meta_contracts():
+        prior.update(_names(c.metrics))
+        for new, _old in (c.metrics.get("metric_alias") or {}).items():
+            prior.add(new)
+
+    warnings = []
+    for name in sorted(declared):
+        if name in prior or name in aliases:
+            continue
+        close = difflib.get_close_matches(name, prior, n=2, cutoff=0.55)
+        for cand in close:
+            warnings.append(
+                f"metric '{name}' is new but near-spells prior "
+                f"contract metric '{cand}' — if this is a rename, "
+                "declare it via 'metric_alias' in metrics_json so "
+                "cross-contract gain series stay comparable; if it "
+                "is genuinely new, ignore this lint."
+            )
+    return warnings

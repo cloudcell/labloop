@@ -22,7 +22,7 @@ from ..enforcement.checks import (
 )
 from ..state.models import Claim, ClaimEdge, ClaimType, RefType, Relation
 from ..state.store import MemoryStore, content_hash
-from .schemas import coerce_json, fail, ok, AssertClaimOut, GetClaimOut, ListClaimsOut, RelateOut
+from .schemas import coerce_json, fail, ok, AssertClaimOut, GetClaimOut, GetClaimsOut, ListClaimsOut, RelateOut
 from typing import Annotated, Literal
 from pydantic import Field
 from mcp.types import CallToolResult
@@ -252,6 +252,62 @@ def register(
                 "outgoing_edges": out,
                 "incoming_edges": inc,
             })
+        except Exception as e:
+            return fail(json.dumps({"error": str(e)}))
+
+    @mcp.tool()
+    def get_claims(
+        claim_ids: Annotated[list[str] | str, Field(description='Claim IDs to fetch in one call — list or JSON-encoded list. Caps the get_claim amplification loop (one call per claim → one call per subgraph).')],
+    ) -> Annotated[CallToolResult, GetClaimsOut]:
+        """Batch-read claims — one call, many claims.
+
+        Same provenance bundle as get_claim (claim + outgoing +
+        incoming edges) for every requested ID. Missing IDs are
+        reported under 'missing' rather than failing the batch —
+        a stale subgraph reference should not strand the whole pull.
+        """
+        try:
+            claim_ids = coerce_json(claim_ids, list, "claim_ids")
+            claims_out, missing = [], []
+            for cid in claim_ids:
+                claim = store.get_claim(cid)
+                if claim is None:
+                    missing.append(cid)
+                    continue
+                claims_out.append({
+                    "claim": {
+                        "id": claim.id,
+                        "content": claim.content,
+                        "type": claim.type.value,
+                        "confidence": claim.confidence,
+                        "importance": claim.importance,
+                        "valid_from": claim.valid_from,
+                        "valid_until": claim.valid_until,
+                        "supersedes_id": claim.supersedes_id,
+                        "source_id": claim.source_id,
+                        "created_at": claim.created_at,
+                    },
+                    "outgoing_edges": [
+                        {
+                            "edge_id": e.id,
+                            "to_ref": e.to_ref,
+                            "ref_type": e.ref_type.value,
+                            "relation": e.relation.value,
+                            "weight": e.weight,
+                        }
+                        for e in store.edges_from(cid)
+                    ],
+                    "incoming_edges": [
+                        {
+                            "edge_id": e.id,
+                            "from_claim": e.from_claim,
+                            "relation": e.relation.value,
+                            "weight": e.weight,
+                        }
+                        for e in store.edges_to(cid)
+                    ],
+                })
+            return ok({"claims": claims_out, "missing": missing})
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
 

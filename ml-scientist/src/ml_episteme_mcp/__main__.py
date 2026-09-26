@@ -281,6 +281,7 @@ Examples:
         executor_config=config.get("executor", {}),
         claims_config=config.get("claims", {}),
         session_config=config.get("session", {}),
+        enforcement_config=config.get("enforcement", {}),
     )
 
     async def _run_server(coro):
@@ -411,10 +412,16 @@ Examples:
         import uvicorn
         from .observability.server import create_observability_app
 
+        # The agora GUI base is deployment knowledge, not a code
+        # constant: TOML [observability] agora_gui_url wins, else the
+        # launcher-exported ML_AGORA_GUI_URL (ports.env-derived).
+        obs_config = dict(config.get("observability", {}))
+        if env_url := os.environ.get("ML_AGORA_GUI_URL"):
+            obs_config.setdefault("agora_gui_url", env_url)
         obs_app = create_observability_app(
             store, obs_refresh, archiver=archiver,
             mcp_health_url=f"http://{host or '127.0.0.1'}:{port}/health",
-            observability_config=config.get("observability", {}),
+            observability_config=obs_config,
         )
         aux_servers.append(
             uvicorn.Server(

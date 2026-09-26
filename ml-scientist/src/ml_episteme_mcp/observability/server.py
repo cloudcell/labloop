@@ -57,6 +57,7 @@ def create_observability_app(
     _templates.configure_polling(
         health_poll_seconds=_obs_cfg.get("health_poll_seconds"),
         integrity_poll_seconds=_obs_cfg.get("integrity_poll_seconds"),
+        agora_url=_obs_cfg.get("agora_gui_url"),
     )
 
     static_dir = Path(__file__).parent / "static"

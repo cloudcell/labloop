@@ -41,6 +41,7 @@ def create_observability_app(
     _templates.configure_polling(
         health_poll_seconds=_obs_cfg.get("health_poll_seconds"),
         integrity_poll_seconds=_obs_cfg.get("integrity_poll_seconds"),
+        agora_url=_obs_cfg.get("agora_gui_url"),
     )
 
     def index(request: Request) -> HTMLResponse:
@@ -66,6 +67,12 @@ def create_observability_app(
     def campaign_link_detail(request: Request) -> HTMLResponse:
         return tourn_views.render_campaign_link_detail(
             store, request.path_params["link_id"],
+            gui_bases=upstream_gui_bases or {},
+        )
+
+    def evidence_ref_detail(request: Request) -> HTMLResponse:
+        return tourn_views.render_evidence_ref_detail(
+            store, request.path_params["evidence_ref_id"],
             gui_bases=upstream_gui_bases or {},
         )
 
@@ -164,6 +171,7 @@ def create_observability_app(
         Route("/tournament/{tournament_id}", tournament_detail),
         Route("/proposal/{proposal_id}", proposal_detail),
         Route("/campaign-link/{link_id}", campaign_link_detail),
+        Route("/evidence-ref/{evidence_ref_id}", evidence_ref_detail),
         Route("/contract/{contract_id}", contract_detail),
         Route("/integrity", integrity),
         Route("/integrity/help", integrity_help),

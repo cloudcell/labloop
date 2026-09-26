@@ -13,6 +13,7 @@ recorded act (the reap_orphaned_trials precedent).
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,24 +135,56 @@ def _check_unsealed_execution(store) -> dict:
     )
 
 
+def _executed_code_manifest(store, trial_id: str) -> dict | None:
+    """Read a trial's executed_code.json from the blob store.
+
+    The staging artifact_dir is deleted after capture
+    (capture_artifacts_from_dir cleanup), so the manifest must come
+    from artifact_files via trial_artifacts — never from
+    trial.artifact_path.
+    """
+    import gzip as _gzip
+
+    row = store._fetchone(
+        """SELECT af.content FROM trial_artifacts ta
+           JOIN artifact_files af ON af.content_hash = ta.content_hash
+           WHERE ta.trial_id = ? AND ta.filename = 'executed_code.json'""",
+        (trial_id,),
+    )
+    if row is None:
+        return None
+    try:
+        return json.loads(_gzip.decompress(row["content"]))
+    except (OSError, ValueError):
+        return None
+
+
+# Interpreter/environment code — sitecustomize, stdlib, spawn
+# machinery. env_ref covers the platform; these can never be bundle
+# members, so comparing them against the sealed set is a guaranteed
+# false positive. Same classification capture_executed_code applies.
+_ENV_CODE_RE = re.compile(r"/(?:etc|lib|lib64)/python\d+\.\d+/")
+
+
 def _check_strace_divergence(store) -> dict:
     """Executed .py files absent from the sealed bundle — code that ran
-    outside what capture_bundle sealed."""
+    outside what capture_bundle sealed. Interpreter/environment files
+    (sitecustomize, stdlib) are excluded: they are env, not experiment
+    code, and can never be sealed into a bundle."""
     rows = store._fetchall(
-        """SELECT t.id, t.artifact_path,
-                  b.code_hash, b.code_hash_extra_json
+        """SELECT t.id, b.code_hash, b.code_hash_extra_json
            FROM trials t
            LEFT JOIN bundles b ON b.trial_id = t.id
-           WHERE t.artifact_path IS NOT NULL"""
+           WHERE EXISTS (
+               SELECT 1 FROM trial_artifacts ta
+               WHERE ta.trial_id = t.id
+                 AND ta.filename = 'executed_code.json'
+           )"""
     )
     violations = []
     for r in rows:
-        manifest_path = Path(r["artifact_path"]) / "executed_code.json"
-        if not manifest_path.is_file():
-            continue
-        try:
-            manifest = json.loads(manifest_path.read_text())
-        except (ValueError, OSError):
+        manifest = _executed_code_manifest(store, r["id"])
+        if manifest is None:
             continue
         bundle_set = {r["code_hash"]} if r["code_hash"] else set()
         try:
@@ -159,9 +192,12 @@ def _check_strace_divergence(store) -> dict:
         except ValueError:
             pass
         escaped = [
-            f["original_path"]
+            f.get("original_path") or f.get("path")
             for f in manifest.get("files", [])
             if f.get("code_hash") and f["code_hash"] not in bundle_set
+            and not _ENV_CODE_RE.search(
+                f.get("original_path") or f.get("path") or ""
+            )
         ]
         if escaped:
             violations.append({"trial_id": r["id"], "paths": escaped})
@@ -170,6 +206,51 @@ def _check_strace_divergence(store) -> dict:
         f"{len(violations)} trial(s) executed code outside the sealed "
         "bundle",
     )
+
+
+def _check_input_data_undigested(store) -> dict:
+    """Completed trials whose executed_code.json records an
+    input_data file with no digest — the bundle cannot say what data
+    it ran on. A recorded policy exclusion (role='sealed') is
+    compliant; a null sha256 on input_data is not — the digest was
+    required and is missing. schema_version<2 manifests predate the
+    input-digest projection: they are 'unrecorded' provenance gaps
+    (reported in detail, never flagged — a digest not taken cannot
+    be reconstructed)."""
+    rows = store._fetchall(
+        """SELECT DISTINCT t.id FROM trials t
+           JOIN trial_artifacts ta ON ta.trial_id = t.id
+           WHERE t.status = 'completed'
+             AND ta.filename = 'executed_code.json'"""
+    )
+    violations = []
+    unrecorded = 0
+    for r in rows:
+        manifest = _executed_code_manifest(store, r["id"])
+        if manifest is None:
+            continue
+        if manifest.get("schema_version", 1) < 2:
+            unrecorded += 1
+            continue
+        undigested = [
+            f.get("path")
+            for f in manifest.get("files", [])
+            if f.get("role") == "input_data" and not f.get("sha256")
+        ]
+        if undigested:
+            violations.append(
+                {"trial_id": r["id"], "paths": undigested}
+            )
+    detail = (
+        f"{len(violations)} completed trial(s) have input_data files "
+        "with no recorded digest"
+    )
+    if unrecorded:
+        detail += (
+            f"; {unrecorded} trial(s) carry pre-v2 manifests "
+            "(unrecorded — digests never taken, not reconstructable)"
+        )
+    return _res("input_data_undigested", violations, detail)
 
 
 def _check_budget_exceeded(store) -> dict:
@@ -405,6 +486,7 @@ def run_checks(
         ),
         _check_unsealed_execution(store),
         _check_strace_divergence(store),
+        _check_input_data_undigested(store),
         _check_budget_exceeded(store),
         _check_stuck_hypotheses(store),
         _check_mislabeled_outcome(store),

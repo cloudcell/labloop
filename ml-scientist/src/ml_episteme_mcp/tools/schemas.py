@@ -431,12 +431,32 @@ class CheckInvariantsOut(TypedDict, total=False):
     log_file: str | None
 
 
+class AcknowledgeViolationOut(TypedDict, total=False):
+    ack_id: str | None
+    status: str | None
+    matched_open_violation: bool | None
+    open_violations: int | None
+
+
 class DescribeBlobOut(TypedDict, total=False):
     exists: bool | None
     resolved_in: list[str] | None
     size_bytes: int | None
     content_type: str | None
     captured_at: str | None
+
+
+class GetBlobOut(TypedDict, total=False):
+    digest: str | None
+    size_bytes: int | None
+    content_type: str | None
+    captured_at: str | None
+    resolved_in: list[str] | None
+    served_from: str | None
+    content_b64: str | None
+    error: str | None
+    computed_digest: str | None
+    detail: str | None
 
 
 class PrepareDataOut(TypedDict, total=False):

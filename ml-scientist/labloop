@@ -23,6 +23,12 @@
 # A server started outside labloop (e.g. run-ml-*.sh in a terminal)
 # shows as `unmanaged` in status; `stop` will still terminate it by
 # resolving the port listener.
+#
+# `export <slug>` packages a diagnostic run for retrieval off the VM:
+# stages per-server /health + /health/deep snapshots, integrity check
+# logs, server-log tails and the agent-produced payload under
+# diagnostics/out/<slug>/, then tars everything to
+# sxport/<UTC-timestamp>-<slug>.tar.gz and prints its path + sha256.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -183,6 +189,71 @@ resolve() {
     esac
 }
 
+export_one() {
+    # Package a diagnostic run: agent payload + auto-collected server
+    # state → sxport/<UTC>-<slug>.tar.gz. The slug names the diagnostic
+    # and is also the payload dir the agent fills at
+    # diagnostics/out/<slug>/.
+    local slug=$1 stamp stage out
+    if [ -z "$slug" ]; then
+        echo "labloop export: missing slug — expected 'labloop export <slug>'" >&2
+        return 2
+    fi
+    case "$slug" in
+        all|*/*|*..*)
+            echo "labloop export: bad slug '$slug' — use a simple name (e.g. the diagnostics filename without .md)" >&2
+            return 2 ;;
+    esac
+    stamp=$(date -u +%Y%m%d-%H%MZ)
+    mkdir -p sxport
+    stage="sxport/${stamp}-${slug}"
+    out="${stage}.tar.gz"
+    rm -rf "$stage"
+    mkdir -p "$stage"
+
+    # Agent payload — required; a diagnostic that produced nothing
+    # exports nothing.
+    if [ -d "diagnostics/out/$slug" ]; then
+        cp -r "diagnostics/out/$slug" "$stage/payload"
+    else
+        echo "labloop export: warning — diagnostics/out/$slug/ not found; exporting server state only" >&2
+        mkdir -p "$stage/payload"
+    fi
+
+    # Per-server health snapshots + log tails + integrity check logs.
+    mkdir -p "$stage/health" "$stage/logs" "$stage/integrity"
+    local name gp lp
+    for name in "${components[@]}"; do
+        gp=$(gui_port "$name")
+        lp=$(mcp_port "$name")
+        curl -fsS -m 3 "http://127.0.0.1:${lp}/health" \
+            >"$stage/health/${name}-mcp-health.json" 2>/dev/null \
+            || echo '{"error":"unreachable"}' >"$stage/health/${name}-mcp-health.json"
+        curl -fsS -m 3 "http://127.0.0.1:${gp}/health/deep" \
+            >"$stage/health/${name}-gui-deep.json" 2>/dev/null \
+            || echo '{"error":"unreachable"}' >"$stage/health/${name}-gui-deep.json"
+        tail -n 1000 "$(home_dir "$name")/logs/server.log" \
+            >"$stage/logs/${name}.log" 2>/dev/null || true
+        for f in "$(home_dir "$name")"/logs/check-*.jsonl; do
+            [ -f "$f" ] && cp "$f" "$stage/integrity/${name}-$(basename "$f")"
+        done
+    done
+
+    {
+        echo "slug: $slug"
+        echo "exported_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "host: $(hostname -f 2>/dev/null || hostname)"
+        echo "labloop_status:"
+        for name in "${components[@]}"; do status_one "$name"; done
+    } >"$stage/MANIFEST.txt"
+
+    tar -czf "$out" -C sxport "$(basename "$stage")"
+    rm -rf "$stage"
+    sha256sum "$out"
+    wc -c <"$out" | xargs echo "bytes:"
+    echo "export: $out"
+}
+
 usage() {
     cat <<'EOF'
 labloop — lifecycle for the ml-* loop stack.
@@ -192,6 +263,10 @@ labloop — lifecycle for the ml-* loop stack.
   labloop restart [name|all]
   labloop status  [name|all]   pid/ports/health per server (default: all)
   labloop logs    <name>       tail -f ~/.ml-<name>/logs/server.log
+  labloop export  <slug>       package diagnostics/out/<slug>/ + server
+                               health/logs/integrity trail into
+                               sxport/<UTC>-<slug>.tar.gz (prints path
+                               + sha256 — report these in the run log)
 
 names: anamnesis  episteme  zetesis  arete  agora
 
@@ -227,6 +302,9 @@ case "$cmd" in
         [ "$target" = "all" ] && { usage >&2; exit 2; }
         resolve "$target" >/dev/null
         exec tail -f "$(home_dir "$target")/logs/server.log"
+        ;;
+    export)
+        export_one "$target"
         ;;
     *)
         usage

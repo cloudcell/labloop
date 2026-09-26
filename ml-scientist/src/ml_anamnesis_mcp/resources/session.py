@@ -21,10 +21,14 @@ TOOL_CATALOG = [
      "description": "Assert a typed edge between claims (derived_from, supports, contradicts, supersedes)"},
     {"name": "get_claim", "category": "claims",
      "description": "Read one claim by id"},
+    {"name": "get_claims", "category": "claims",
+     "description": "Batch-read claims — one call, many claims"},
     {"name": "list_claims", "category": "claims",
      "description": "Query claims by type/superseded/expired filters"},
     {"name": "check_invariants", "category": "integrity",
      "description": "Audit the claim store against its invariants"},
+    {"name": "acknowledge_violation", "category": "integrity",
+     "description": "Acknowledge an open violation — clears the write gate"},
 ]
 
 BOUNDARY_NOTE = (

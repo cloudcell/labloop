@@ -23,6 +23,7 @@ def create_server(
     name: str = "ml-anamnesis-mcp",
     log_tool_args: bool = False,
     integrity_config: dict | None = None,
+    enforcement_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer with the claim-graph tools registered.
 
@@ -78,5 +79,18 @@ def create_server(
         from .integrity.checks import run_and_log
 
         return JSONResponse(run_and_log(store, config=integrity_config, trigger="route"))
+
+    # Recurrent self-improvement protocol — consultation-duty gate +
+    # response injection + open-violation gate (plan-20260926-0438Z).
+    # Disabled unless [enforcement] is provided; __main__ always
+    # forwards it, so the shipped server runs enabled by default.
+    enf = enforcement_config or {}
+    if enf and enf.get("recurrent_protocol", True):
+        from .enforcement import recurrence
+
+        recurrence.TRACKER.configure(
+            enf.get("status_freshness_seconds", 600)
+        )
+        recurrence.install(mcp, store, recurrence.TRACKER)
 
     return mcp

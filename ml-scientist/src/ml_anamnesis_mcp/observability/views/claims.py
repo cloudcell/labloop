@@ -6,7 +6,13 @@ from starlette.responses import HTMLResponse
 
 from ...state.models import EVIDENCE_RELATIONS, Claim
 from ...state.store import MemoryStore
-from ..templates import escape, format_timestamp, render_base, render_error
+from ..templates import (
+    PEER_GUI_URLS,
+    escape,
+    format_timestamp,
+    render_base,
+    render_error,
+)
 
 _REL_EVIDENCE = EVIDENCE_RELATIONS
 
@@ -32,11 +38,99 @@ def _rel_badge(relation: str) -> str:
     return f'<span class="{cls}">{escape(relation)}</span>'
 
 
+# ID prefix → (owning server, GUI detail path). Only prefixes with a
+# real detail page on a single unambiguous owner are mapped — mdec-*,
+# pol-*, hyp-*, obs-*, conc-* and friends have no page to link to and
+# stay opaque.
+_PEER_REF_ROUTES = (
+    ("mcontract-", "arete", "/contract/"),
+    ("tourn-", "arete", "/tournament/"),
+    ("imp-", "arete", "/improver/"),
+    ("mcp-", "arete", "/proposal/"),
+    ("cand-", "zetesis", "/candidate/"),
+    ("camp-", "zetesis", "/campaign/"),
+    ("inv-", "zetesis", "/investigation/"),
+    ("trial-", "episteme", "/trial/"),
+    ("prog-", "episteme", "/programme/"),
+    ("contract-", "episteme", "/contract/"),
+    ("archive-", "episteme", "/archive/"),
+)
+
+# eref-* is minted by BOTH arete and zetesis — the id alone can't name
+# the owner, and the citing edge's source_id is no oracle either (a
+# decision on arete can cite an eref that surfaced inside a zetesis
+# pull's ref_ids). So eref refs route through the local /ref/ resolver,
+# which probes each candidate owner's /evidence-ref/ page at click
+# time and redirects to whichever actually has the record.
+_EREF_OWNER_CANDIDATES = ("arete", "zetesis")
+
+
 def _ref_link(to_ref: str, ref_type: str) -> str:
-    """claim-typed refs link to their detail page; others stay opaque."""
+    """claim refs link locally; known peer prefixes link cross-GUI."""
     if ref_type == "claim":
         return f'<a class="mono" href="/claim/{escape(to_ref)}">{escape(to_ref)}</a>'
+    if to_ref.startswith("eref-"):
+        return (
+            f'<a class="mono" href="/ref/{escape(to_ref)}" '
+            f'title="resolves to the owning GUI">'
+            f"{escape(to_ref)}</a>"
+        )
+    for prefix, server, path in _PEER_REF_ROUTES:
+        if to_ref.startswith(prefix):
+            if base := PEER_GUI_URLS.get(server):
+                href = f"{escape(base)}{path}{escape(to_ref)}"
+                return (
+                    f'<a class="mono" href="{href}" '
+                    f'title="{escape(server)} GUI">{escape(to_ref)}</a>'
+                )
+            break
     return f'<span class="mono">{escape(to_ref)}</span>'
+
+
+def resolve_ref_redirect(ref_id: str) -> HTMLResponse:
+    """Click-time owner resolution for ambiguous refs (eref-*).
+
+    Probes each candidate peer GUI's /evidence-ref/ page; redirects to
+    the first that actually serves the record. If none do — the record
+    is gone or every candidate is down — render an honest miss page
+    naming what was tried. Never guess.
+    """
+    from urllib.parse import quote
+
+    import httpx
+    from starlette.responses import RedirectResponse
+
+    tried: list[tuple[str, str | None]] = []
+    if ref_id.startswith("eref-"):
+        for server in _EREF_OWNER_CANDIDATES:
+            base = PEER_GUI_URLS.get(server)
+            if not base:
+                tried.append((server, None))
+                continue
+            url = f"{base}/evidence-ref/{quote(ref_id)}"
+            try:
+                if httpx.get(url, timeout=2.0).status_code == 200:
+                    return RedirectResponse(url)
+                tried.append((server, url))
+            except Exception:
+                tried.append((server, url))
+    tried_rows = "".join(
+        f"<tr><td>{escape(s)}</td>"
+        f'<td class="mono muted">{escape(u or "no GUI URL configured")}</td></tr>'
+        for s, u in tried
+    ) or '<tr><td colspan="2" class="muted">no candidates</td></tr>'
+    body = f"""
+    <h1><span class="mono">{escape(ref_id)}</span>
+        <span class="status status-failed">unresolved</span></h1>
+    <div class="card">
+        <p>This reference could not be resolved to a live detail page
+        on any candidate server — the record may be gone, or every
+        owning GUI may be down or unconfigured.</p>
+        <table><thead><tr><th>Candidate</th><th>Tried</th></tr></thead>
+        <tbody>{tried_rows}</tbody></table>
+    </div>
+    """
+    return HTMLResponse(render_base(f"Ref {ref_id}", body), status_code=404)
 
 
 def _confidence(conf: float) -> str:

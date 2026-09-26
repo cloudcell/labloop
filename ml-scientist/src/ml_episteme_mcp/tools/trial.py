@@ -329,7 +329,12 @@ def _last_json_line(text: str) -> dict | None:
     return None
 
 
-def _finalize_trial(store: StateStore, trial_id: str, output: str) -> CallToolResult:
+def _finalize_trial(
+    store: StateStore,
+    trial_id: str,
+    output: str,
+    sealed_patterns: list[str] | None = None,
+) -> CallToolResult:
     """Parse executor output, update trial status, and return the result.
 
     If the executor reports failure (status != completed, nonzero exit),
@@ -391,7 +396,10 @@ def _finalize_trial(store: StateStore, trial_id: str, output: str) -> CallToolRe
         artifact_result = None
         if trial is not None and trial.artifact_path:
             try:
-                store.capture_executed_code(trial_id, trial.artifact_path)
+                store.capture_executed_code(
+                    trial_id, trial.artifact_path,
+                    sealed_patterns=sealed_patterns,
+                )
             except Exception:
                 pass  # evidence capture must never mask finalization
             try:
@@ -441,7 +449,10 @@ def _finalize_trial(store: StateStore, trial_id: str, output: str) -> CallToolRe
     artifact_result = None
     if trial is not None and trial.artifact_path:
         try:
-            store.capture_executed_code(trial_id, trial.artifact_path)
+            store.capture_executed_code(
+                trial_id, trial.artifact_path,
+                sealed_patterns=sealed_patterns,
+            )
         except Exception:
             pass
         try:
@@ -464,6 +475,7 @@ def _finalize_trial(store: StateStore, trial_id: str, output: str) -> CallToolRe
 async def _auto_finalize(
     trial_id: str, store: StateStore, adaptor: MCPAdaptor,
     poll_seconds: float = 5.0,
+    sealed_patterns: list[str] | None = None,
 ) -> None:
     """Background task: poll the executor and finalize the trial when it
     completes.
@@ -487,7 +499,10 @@ async def _auto_finalize(
             async_output = adaptor.executor.get_async_status(trial_id)
             async_data = _parse_executor_output(async_output)
             if async_data.get("status") in ("completed", "failed", "timeout"):
-                _finalize_trial(store, trial_id, async_output)
+                _finalize_trial(
+                    store, trial_id, async_output,
+                    sealed_patterns=sealed_patterns,
+                )
                 return
     except Exception:
         # If the poller itself fails (infrastructure issue — executor
@@ -1077,7 +1092,10 @@ def register(
                     timeout=_submit_wait,
                 )
                 # Synchronous path — job finished within the wait window
-                return _finalize_trial(store, trial_id, output)
+                return _finalize_trial(
+                    store, trial_id, output,
+                    sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
+                )
             except asyncio.TimeoutError:
                 # The job didn't finish in the wait window — dispatch async
                 output = await adaptor.executor.execute_code_async(
@@ -1099,6 +1117,9 @@ def register(
                         _auto_finalize(
                             trial_id, store, adaptor,
                             poll_seconds=_finalize_poll,
+                            sealed_patterns=_exec_cfg.get(
+                                "sealed_path_patterns"
+                            ),
                         )
                     )
                     return ok({
@@ -1111,7 +1132,10 @@ def register(
                         "reaches 'completed'.",
                     })
                 # If async dispatch returned a result immediately, finalize
-                return _finalize_trial(store, trial_id, output)
+                return _finalize_trial(
+                    store, trial_id, output,
+                    sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
+                )
         except Exception as e:
             # Only mark failed if the trial is not already terminal
             # (completed/failed/retryable are terminal — can't transition out)
@@ -1148,7 +1172,10 @@ def register(
 
             if async_data.get("status") in ("completed", "failed", "timeout"):
                 # Trial finished in background — finalize it
-                return _finalize_trial(store, trial_id, async_output)
+                return _finalize_trial(
+                    store, trial_id, async_output,
+                    sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
+                )
 
             if async_data.get("status") == "running":
                 # Live telemetry: elapsed + last progress.json the
@@ -1178,6 +1205,40 @@ def register(
                 "artifact_path": trial.artifact_path,
                 "executor_output": trial.executor_output_json,
             })
+        except Exception as e:
+            return fail(json.dumps({"error": str(e)}))
+
+    @mcp.tool()
+    async def wait_trial(programme_id: Annotated[str, Field(description='ID of the target research programme.')], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float, Field(description='Max seconds to wait server-side (capped at 60 — long trials still need client polling, just far less of it).')] = 60.0, poll_seconds: Annotated[float, Field(description='Interval between server-side status checks.')] = 2.0) -> Annotated[CallToolResult, TrialStatusOut]:
+        """Wait for a trial to reach a terminal state — one call instead
+        of a polling loop.
+
+        Polls get_trial_status internally every poll_seconds until the
+        trial is completed/failed/retryable/abandoned or timeout_seconds
+        elapses (server-side cap: 60s). Returns the final status payload
+        plus 'waited_seconds' and 'timed_out'. Caps the get_trial_status
+        amplification loop: a 60s wait replaces ~30 round-trips.
+        """
+        try:
+            timeout_seconds = min(float(timeout_seconds), 60.0)
+            poll_seconds = max(0.5, float(poll_seconds))
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                res = await get_trial_status(programme_id, trial_id)
+                payload = json.loads(res.content[0].text) if res.content else {}
+                if "error" in payload:
+                    return res
+                if payload.get("status") in (
+                    "completed", "failed", "retryable", "abandoned",
+                ) or time.monotonic() >= deadline:
+                    payload["waited_seconds"] = round(
+                        timeout_seconds - max(0.0, deadline - time.monotonic()), 1
+                    )
+                    payload["timed_out"] = payload.get("status") not in (
+                        "completed", "failed", "retryable", "abandoned",
+                    )
+                    return ok(payload)
+                await asyncio.sleep(poll_seconds)
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
 

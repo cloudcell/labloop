@@ -26,6 +26,7 @@ def create_server(
     name: str = "ml-arete-mcp",
     log_tool_args: bool = False,
     integrity_config: dict | None = None,
+    enforcement_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer with the meta-change lifecycle tools.
 
@@ -75,7 +76,12 @@ def create_server(
         mcp, store, adaptors, integrity_config=integrity_config
     )
     session_resource.register(mcp, store, adaptors)
-    status_resource.register(mcp, store, adaptors)
+    status_resource.register(
+        mcp, store, adaptors,
+        stale_seconds=(integrity_config or {}).get(
+            "stale_tournament_seconds"
+        ),
+    )
     graph_resource.register(mcp, store)
     workflows.register(mcp)
     status_prompts.register(mcp, store, adaptors)
@@ -110,5 +116,22 @@ def create_server(
                 trigger="route",
             )
         )
+
+    # Recurrent self-improvement protocol — consultation-duty gate +
+    # response injection + open-violation + decision-debt gates
+    # (plan-20260926-0438Z). Disabled unless [enforcement] is
+    # provided; __main__ always forwards it, so the shipped server
+    # runs enabled by default.
+    enf = enforcement_config or {}
+    if enf and enf.get("recurrent_protocol", True):
+        from .enforcement import recurrence
+
+        recurrence.TRACKER.configure(
+            enf.get("status_freshness_seconds", 600)
+        )
+        recurrence.configure_epoch(
+            enf.get("improvement_epoch_seconds", 86400)
+        )
+        recurrence.install(mcp, store, recurrence.TRACKER)
 
     return mcp

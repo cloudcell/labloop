@@ -32,6 +32,15 @@ DEFAULTS: dict[str, Any] = {
     "transport": "stdio",
     "port": 38080,
     "host": "0.0.0.0",
+    # Recurrent protocol ships enabled (plan-20260926-0438Z):
+    # mutating tools require a status digest read within the TTL;
+    # violations gate writes until acknowledged. Set
+    # recurrent_protocol=false or status_freshness_seconds=0 to
+    # disable for debugging.
+    "enforcement": {
+        "recurrent_protocol": True,
+        "status_freshness_seconds": 600,
+    },
 }
 
 
@@ -100,6 +109,15 @@ def load_config(config_path: str | None = None) -> dict[str, Any]:
         config.setdefault("executor", {})["timeout_seconds"] = int(env_timeout)
     if env_python := os.environ.get("ML_EPISTEME_EXECUTOR_PYTHON"):
         config.setdefault("executor", {})["python_exe"] = env_python
+    # Lab-wide protocol overrides (shared env names across all
+    # servers so a single variable flips the whole stack).
+    enf = config.setdefault("enforcement", {})
+    if env_rp := os.environ.get("ML_RECURRENT_PROTOCOL"):
+        enf["recurrent_protocol"] = env_rp.strip().lower() not in (
+            "0", "false", "off", "no",
+        )
+    if env_fs := os.environ.get("ML_STATUS_FRESHNESS_SECONDS"):
+        enf["status_freshness_seconds"] = float(env_fs)
 
     return config
 

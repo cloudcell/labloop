@@ -2,7 +2,12 @@
 # 90-extract-lab-data.sh — pull a labloop-export artifact out of a VM.
 # Host half of docs/se-plans/plan-20260923-2038Z--secure-data-extraction.md.
 #
-#   ./90-extract-lab-data.sh <vm> [dest-dir]     (dest defaults ./extracted)
+#   ./90-extract-lab-data.sh [--all] <vm> [dest-dir]   (dest defaults ./extracted)
+#   --all  run `labloop-export --all` in the guest first — the full
+#          trusted+hostile pull (quiesces lab services, in-guest
+#          rate limit: once per 300s). Without --all, only the
+#          path-scoped /var/lib/labloop-export/user tree is pulled —
+#          the artifacts an agent staged with `labloop-export <paths>`.
 #
 # Pull-only over the existing qemu-guest-agent channel — no SSH, no
 # virtiofs, no guest->host sockets. Reads exactly two fixed paths under
@@ -35,8 +40,20 @@ trap 'rm -rf "$WORK"; restore_vm' EXIT
 die() { echo "90-extract: $*" >&2; exit 1; }
 note() { echo; echo "==> $*"; }
 
-VM=${1:?"usage: ./90-extract-lab-data.sh <vm> [dest-dir]"}
-DEST=${2:-./extracted}
+# NOTE: no shift — $* must keep --all for the sg-libvirt re-exec below
+ALL=0 VM="" DEST=""
+for a in "$@"; do
+    case "$a" in
+        --all)      ALL=1 ;;
+        -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
+        -*)         die "unknown flag: $a" ;;
+        *)          if [ -z "$VM" ]; then VM="$a";
+                    elif [ -z "$DEST" ]; then DEST="$a";
+                    else die "extra argument: $a"; fi ;;
+    esac
+done
+[ -n "$VM" ] || die "usage: ./90-extract-lab-data.sh [--all] <vm> [dest-dir]"
+DEST=${DEST:-./extracted}
 case "$VM" in *[!a-zA-Z0-9._-]*) die "bad vm name '$VM'";; esac
 
 id -nG | grep -qw libvirt || exec sg libvirt -c "$0 $*"
@@ -152,26 +169,32 @@ if ! qga "test -x /usr/local/sbin/labloop-export" 2>/dev/null; then
 fi
 
 # ------------------------------------------------------------------
-# pick the newest complete staging tree — lexical gate: only these
-# two dirs are EVER acceptable answers from the guest
+# mode selection — --all forces a fresh FULL export (trusted+hostile)
+# in the guest: quiesces the lab services, rate-limited in-guest to
+# once per 300s. Without it, ONLY the path-scoped user tree is pulled
+# — the artifacts an agent staged via `labloop-export <paths>`.
+# Both dirs are fixed constants — nothing guest-suggested is trusted.
 # ------------------------------------------------------------------
-mode_dir=$(qga "ls -td /var/lib/labloop-export/*/manifest.json 2>/dev/null | head -1" \
-           | tr -d '[:space:]')
-mode_dir=${mode_dir%/manifest.json}
-case "$mode_dir" in
-    /var/lib/labloop-export/root | /var/lib/labloop-export/user) ;;
-    "") if [ -n "$RESTORE" ]; then
-            # we woke this VM ourselves — nothing was mid-flight, so
-            # staging a full export can't interrupt live work
-            note "no export staged — running labloop-export --all in guest"
-            qga "/usr/local/sbin/labloop-export --all" \
-                || die "guest-side export failed (see output above)"
-            mode_dir=/var/lib/labloop-export/root
-        else
-            die "no export staged in $VM — run labloop-export in the guest first"
-        fi ;;
-    *)  die "guest returned unexpected staging path '$mode_dir' — refusing" ;;
-esac
+if [ "$ALL" -eq 1 ]; then
+    note "--all: running labloop-export --all in guest (quiesces the lab)"
+    qga "/usr/local/sbin/labloop-export --all" \
+        || die "guest-side export failed (see output above)"
+    mode_dir=/var/lib/labloop-export/root
+elif qga "test -f /var/lib/labloop-export/user/manifest.json" 2>/dev/null; then
+    mode_dir=/var/lib/labloop-export/user
+elif qga "test -f /var/lib/labloop-export/root/manifest.json" 2>/dev/null; then
+    # operator staged a full export in-guest — its product is pullable
+    mode_dir=/var/lib/labloop-export/root
+elif [ -n "$RESTORE" ]; then
+    # we woke this VM ourselves — nothing was mid-flight, so staging
+    # a full export can't interrupt live work
+    note "no export staged — running labloop-export --all in guest"
+    qga "/usr/local/sbin/labloop-export --all" \
+        || die "guest-side export failed (see output above)"
+    mode_dir=/var/lib/labloop-export/root
+else
+    die "no export staged in $VM — run labloop-export <paths> in the guest, or use --all"
+fi
 
 note "pulling manifest from $mode_dir"
 qga_pull "$mode_dir/manifest.json" "$WORK/manifest.json" \

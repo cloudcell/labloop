@@ -588,6 +588,18 @@ CREATE TABLE IF NOT EXISTS promotion_decisions (
     FOREIGN KEY (candidate_id) REFERENCES candidate_versions(id),
     FOREIGN KEY (contract_id) REFERENCES evaluation_contracts(id)
 );
+
+-- Insert-only acknowledgment ledger for integrity-check findings
+-- (recurrent protocol, plan-20260926-0438Z). The check log stays
+-- append-only; an ack records disposition, never erases a finding.
+CREATE TABLE IF NOT EXISTS violation_acks (
+    id TEXT PRIMARY KEY,
+    check_name TEXT NOT NULL,
+    object_ref TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -836,6 +848,29 @@ class StateStore:
         """
         with self._lock:
             return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    # --- Violation acknowledgments (insert-only, recurrent protocol) ---
+
+    def record_violation_ack(
+        self, *, ack_id: str, check_name: str, object_ref: str,
+        disposition: str, decided_by: str, created_at: str,
+    ) -> None:
+        self._write(
+            "INSERT INTO violation_acks "
+            "(id, check_name, object_ref, disposition, decided_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ack_id, check_name, object_ref, disposition, decided_by,
+             created_at),
+        )
+
+    def violation_ack_keys(self) -> set[tuple[str, str]]:
+        """(check_name, object_ref) pairs already acknowledged."""
+        return {
+            (r["check_name"], r["object_ref"])
+            for r in self._fetchall(
+                "SELECT check_name, object_ref FROM violation_acks"
+            )
+        }
 
     def _write(self, sql: str, params: tuple = ()) -> None:
         """Execute a write statement and commit, under the write lock.
@@ -2162,6 +2197,79 @@ class StateStore:
         out["exists"] = bool(resolved_in)
         return out
 
+    def read_blob(self, content_hash: str) -> dict:
+        """Read a content-addressed blob's bytes by digest — verified.
+
+        The read half of describe_blob: resolves the digest across
+        artifact_files (gzip-decompressed BLOBs) and code_snippets
+        (text as UTF-8 bytes), recomputes the digest over the bytes,
+        and refuses to return content that fails verification — a
+        stored row that doesn't match its key is reported, never
+        served. bundles.code_hash is a reference, not a byte store;
+        its digests resolve through code_snippets under the same key.
+
+        Returns {"ok": True, bytes, meta} or {"ok": False, error, ...}
+        — never raises for the error cases the caller must report.
+        """
+        import hashlib as _hashlib
+        import re as _re
+
+        if not _re.fullmatch(r"sha256:[0-9a-f]{64}", content_hash or ""):
+            return {
+                "ok": False,
+                "error": "malformed_digest",
+                "detail": "expected sha256:<64 lowercase hex>",
+            }
+
+        meta = self.describe_blob(content_hash)
+        if not meta["exists"]:
+            return {"ok": False, "error": "not_found",
+                    "resolved_in": []}
+
+        data: bytes | None = None
+        served_from: str | None = None
+        af = self.get_artifact_file(content_hash)
+        if af is not None:
+            data = af["content"]
+            served_from = "artifact_files"
+        else:
+            cs = self.get_code_snippet(content_hash)
+            if cs is not None:
+                data = cs.code_text.encode("utf-8")
+                served_from = "code_snippets"
+
+        if data is None:
+            # Resolved in a metadata-only store (bundles.code_hash)
+            # with no byte-bearing row — the hash is a reference to
+            # bytes no store holds.
+            return {
+                "ok": False,
+                "error": "no_bytes",
+                "resolved_in": meta["resolved_in"],
+                "detail": "digest resolves but no store holds bytes",
+            }
+
+        computed = "sha256:" + _hashlib.sha256(data).hexdigest()
+        if computed != content_hash:
+            return {
+                "ok": False,
+                "error": "digest_mismatch",
+                "computed_digest": computed,
+                "served_from": served_from,
+                "detail": "stored bytes do not match their key — "
+                          "bytes withheld",
+            }
+
+        return {
+            "ok": True,
+            "content": data,
+            "served_from": served_from,
+            "resolved_in": meta["resolved_in"],
+            "size_bytes": meta.get("size_bytes", len(data)),
+            "content_type": meta.get("content_type"),
+            "captured_at": meta.get("captured_at"),
+        }
+
     def has_blob(self, content_hash: str) -> bool:
         """True when the digest resolves to held bytes in any store."""
         return self.describe_blob(content_hash)["exists"]
@@ -2350,25 +2458,48 @@ class StateStore:
         self,
         trial_id: str,
         artifact_dir: str | Path,
+        sealed_patterns: list[str] | None = None,
     ) -> dict:
-        """Capture the code files a trial ACTUALLY read, from the strace
-        read-trace the executor left in the artifact dir.
+        """Record every file a trial's process tree opened, from the
+        strace read-trace the executor left in the artifact dir.
 
         This is execution-time evidence — the authoritative record of
-        what ran — distinct from the sealed bundle's static closure
-        (capture_code_with_imports), which is a pre-run prediction.
-        Both are kept: the bundle says what was intended to be enough;
-        this manifest says what was actually enough.
+        what ran and what it ran on — distinct from the sealed bundle's
+        static closure (capture_code_with_imports), a pre-run
+        prediction. Schema v2 records every opened path, not only
+        .py files, classified by role:
 
-        Every observed .py file outside interpreter internals
-        (stdlib, site-packages) and outside the artifact dir itself is
-        content-addressed into code_snippets. An executed_code.json
-        manifest is written into the artifact dir so the subsequent
-        artifact capture stores it as trial evidence.
+          code       — .py/.pyc-derived; content-addressed into
+                       code_snippets as before (code_hash).
+          input_data — non-code file opened read-only outside
+                       interpreter internals and the artifact dir.
+                       Digested AT FINALIZE — the only honest moment;
+                       a file rewritten or removed mid-run records
+                       sha256: null + reason (and trips the
+                       input_data_undigested invariant).
+          sealed     — path matched a sealed_path_patterns deny rule.
+                       NEVER opened for hashing, never enumerated —
+                       the refusal itself is recorded as
+                       sha256: null + reason so the exclusion is
+                       auditable rather than invisible.
+          other      — write-opened outputs and other observed files
+                       outside the artifact dir; digested when they
+                       exist at finalize.
+
+        An executed_code.json manifest is written into the artifact
+        dir so the subsequent artifact capture stores it as trial
+        evidence, and the trial manifest is amended to pin it.
+
+        sealed_patterns: fnmatch globs matched against each path's
+        RESOLVED absolute form (strace paths can be relative to the
+        trial's cwd) — [executor] sealed_path_patterns.
         """
+        import fnmatch
+        import hashlib
         import json as _json
         import re
         import sysconfig
+        import uuid
         from .models import _utc_now
 
         path = Path(artifact_dir)
@@ -2377,19 +2508,22 @@ class StateStore:
         logs = sorted(path.glob("*_readtrace.strace"))
         if not logs:
             return {"traced": False, "captured": []}
+        patterns = list(sealed_patterns or [])
 
         stdlib = Path(sysconfig.get_path("stdlib")).resolve()
         artifact_resolved = path.resolve()
-        # Any interpreter's internals — stdlib + site-packages — share
-        # the /lib/pythonX.Y/ layout (uv-managed, system, venv alike).
-        # The trial may run a different interpreter than the server, so
-        # a prefix check against OUR stdlib is insufficient.
-        interp_re = re.compile(r"/lib/python\d+\.\d+/")
+        # Any interpreter's internals — stdlib, site-packages, init
+        # files (Debian keeps sitecustomize.py under /etc/pythonX.Y/) —
+        # share the */pythonX.Y/ layout (uv-managed, system, venv
+        # alike). The trial may run a different interpreter than the
+        # server, so a prefix check against OUR stdlib is insufficient.
+        interp_re = re.compile(r"/(?:etc|lib|lib64)/python\d+\.\d+/")
 
-        # openat(AT_FDCWD, "/x.py", O_RDONLY|O_CLOEXEC) = 3
-        # also matches `<... openat resumed> ... = 3` continuations.
+        # openat(AT_FDCWD, "/x", O_RDONLY|O_CLOEXEC) = 3 — every opened
+        # path, not only .py; flags decide role. Also matches
+        # `<... openat resumed> ... = 3` continuations.
         call_re = re.compile(
-            r'(?:openat2?|open)\([^)]*"([^"]+\.pyc?)"[^)]*\)\s*=\s*(\d+)'
+            r'(?:openat2?|open)\([^)]*"([^"]+)"[^)]*\)\s*=\s*(-?\d+)'
         )
         exec_re = re.compile(r'execve\([^=]*=\s*\d+')
         str_re = re.compile(r'"([^"]+\.py)"')
@@ -2398,7 +2532,8 @@ class StateStore:
         # execute without ever opening its own .py. Derive it.
         pyc_re = re.compile(r"^(.*)/__pycache__/([^/]+)\.cpython-\d+\.pyc$")
 
-        observed: set[Path] = set()
+        # path → open-flags seen (any write flag demotes to "other")
+        observed: dict[str, dict] = {}
         for log in logs:
             try:
                 text = log.read_text(encoding="utf-8", errors="replace")
@@ -2408,61 +2543,139 @@ class StateStore:
                 for m in call_re.finditer(line):
                     if int(m.group(2)) < 0:
                         continue  # failed open — nothing was read
-                    p = Path(m.group(1))
-                    pm = pyc_re.match(str(p))
-                    if pm:
-                        observed.add(Path(pm.group(1)) / (pm.group(2) + ".py"))
-                    elif p.suffix == ".py":
-                        observed.add(p)
+                    raw = m.group(1)
+                    pm = pyc_re.match(raw)
+                    p = Path(pm.group(1)) / (pm.group(2) + ".py") if pm else Path(raw)
+                    key = str(p)
+                    entry = observed.setdefault(key, {"write": False})
+                    if "O_WRONLY" in line or "O_RDWR" in line:
+                        entry["write"] = True
                 if "execve(" in line and exec_re.search(line):
                     for s in str_re.findall(line):
                         if s.endswith(".py"):
-                            observed.add(Path(s))
+                            observed.setdefault(s, {"write": False})
+
+        def _digest_file(rp: Path) -> str:
+            h = hashlib.sha256()
+            with open(rp, "rb") as fh:
+                for chunk in iter(lambda: fh.read(65536), b""):
+                    h.update(chunk)
+            return "sha256:" + h.hexdigest()
 
         captured = []
-        for p in sorted(observed):
+        for raw_path, flags in sorted(observed.items()):
+            p = Path(raw_path)
             if not p.is_absolute():
                 p = artifact_resolved / p
             try:
                 rp = p.resolve()
             except OSError:
                 continue
-            if not rp.is_file():
-                continue
-            if rp.suffix != ".py":
-                continue
             if interp_re.search(str(rp)):
                 continue  # interpreter internals — env, not experiment
             try:
                 if rp.is_relative_to(artifact_resolved):
-                    continue  # wrapper script — captured as an artifact
+                    continue  # workspace files — captured as artifacts
             except ValueError:
                 pass
-            try:
-                code_hash = self.capture_code_from_path(str(rp))
-            except (FileNotFoundError, OSError, UnicodeDecodeError):
+
+            # The deny rule fires on the resolved path BEFORE any file
+            # access — a sealed dataset is never opened for hashing.
+            if patterns and any(
+                fnmatch.fnmatch(str(rp), pat) for pat in patterns
+            ):
+                captured.append({
+                    "path": str(rp),
+                    "role": "sealed",
+                    "sha256": None,
+                    "size_bytes": None,
+                    "reason": "excluded by policy",
+                })
                 continue
-            captured.append({
-                "original_path": str(rp),
-                "code_hash": code_hash,
-                "size_bytes": rp.stat().st_size,
-            })
+
+            if rp.suffix == ".py":
+                if not rp.is_file():
+                    continue
+                try:
+                    code_hash = self.capture_code_from_path(str(rp))
+                except (FileNotFoundError, OSError, UnicodeDecodeError):
+                    continue
+                captured.append({
+                    "path": str(rp),
+                    "original_path": str(rp),
+                    "code_hash": code_hash,
+                    "role": "code",
+                    "sha256": code_hash,
+                    "size_bytes": rp.stat().st_size,
+                })
+                continue
+
+            # Non-code file — an input or an output. Digest it only if
+            # it still exists at finalize; a vanished file is recorded
+            # honestly, not reconstructed.
+            role = "other" if flags["write"] else "input_data"
+            entry = {"path": str(rp), "role": role}
+            try:
+                entry["sha256"] = _digest_file(rp)
+                entry["size_bytes"] = rp.stat().st_size
+            except OSError as e:
+                entry["sha256"] = None
+                entry["size_bytes"] = None
+                entry["reason"] = (
+                    f"not readable at finalize: {e.__class__.__name__}"
+                )
+            captured.append(entry)
 
         manifest = {
+            "schema_version": 2,
             "trial_id": trial_id,
             "traced": True,
             "created_at": _utc_now(),
             "note": (
-                "Code files actually opened by the trial's process tree "
-                "(strace). Evidence of what ran; the sealed bundle's "
-                "static closure is the pre-run prediction of the same."
+                "Files the trial's process tree actually opened "
+                "(strace): code executed and data consumed. "
+                "role=sealed entries were never hashed — the exclusion "
+                "is recorded, not invisible."
             ),
             "files": captured,
         }
+        manifest_path = path / "executed_code.json"
         try:
-            (path / "executed_code.json").write_text(
-                _json.dumps(manifest, indent=2)
-            )
+            manifest_path.write_text(_json.dumps(manifest, indent=2))
         except OSError:
             pass
+
+        # Pin the new evidence into the trial manifest: the read-trace
+        # and executed_code.json itself, plus the input-file digest
+        # table — everything produced must be digest-pinned or
+        # explicitly absent with a reason.
+        for mf in sorted(path.glob("*_manifest.json")):
+            try:
+                mdata = _json.loads(mf.read_text())
+            except (OSError, ValueError):
+                continue
+            arts = mdata.setdefault("artifacts", [])
+            listed = {a.get("filename") for a in arts}
+            for fp in [*logs, manifest_path]:
+                if fp.name in listed or not fp.is_file():
+                    continue
+                arts.append({
+                    "id": f"art-{uuid.uuid4().hex[:8]}",
+                    "type": (
+                        "read_trace" if fp.name.endswith(".strace")
+                        else "executed_code"
+                    ),
+                    "filename": fp.name,
+                    "sha256": _digest_file(fp),
+                    "size_bytes": fp.stat().st_size,
+                })
+            mdata["input_files"] = [
+                f for f in captured
+                if f["role"] in ("input_data", "sealed")
+            ]
+            try:
+                mf.write_text(_json.dumps(mdata, indent=2))
+            except OSError:
+                pass
+
         return {"traced": True, "captured": captured}

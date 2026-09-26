@@ -119,19 +119,46 @@ def _lab_next_actions(servers: dict[str, dict]) -> list[dict]:
             continue
         digest = srv["digest"]
         for b in digest.get("blockers", []):
-            entries.append((
-                1, _LOOP_ORDER[name],
-                {
-                    "server": digest.get("server", name),
-                    "action": "restore_channel",
-                    "tool": None,
-                    "reason": (
-                        f"{b.get('channel')} channel down on "
-                        f"{digest.get('server', name)} — blocks "
-                        f"{', '.join(b.get('blocks') or ['?'])}"
-                    ),
-                },
-            ))
+            if b.get("kind") == "upstream_down" or b.get("channel"):
+                entries.append((
+                    1, _LOOP_ORDER[name],
+                    {
+                        "server": digest.get("server", name),
+                        "action": "restore_channel",
+                        "tool": None,
+                        "reason": (
+                            f"{b.get('channel')} channel down on "
+                            f"{digest.get('server', name)} — blocks "
+                            f"{', '.join(b.get('blocks') or ['?'])}"
+                        ),
+                    },
+                ))
+            else:
+                # Governance-debt blocker kinds (decision_debt,
+                # open_violation, …) carry their own action/tool —
+                # pass them through; never re-label as a channel
+                # failure.
+                refs = [
+                    r for r in (
+                        b.get("tournament_id"), b.get("object_ref"),
+                        b.get("programme_id"), b.get("investigation_id"),
+                    ) if r
+                ]
+                entries.append((
+                    1, _LOOP_ORDER[name],
+                    {
+                        "server": digest.get("server", name),
+                        "action": b.get("action") or "review_blocker",
+                        "tool": b.get("tool"),
+                        "kind": b.get("kind"),
+                        "entity_refs": refs,
+                        "reason": (
+                            b.get("detail")
+                            or f"{b.get('kind')} blocker on "
+                            f"{digest.get('server', name)}"
+                        ),
+                    },
+                ))
         for rec in digest.get("recommended_next", []):
             if rec.get("action") in _NON_ACTIONS:
                 continue

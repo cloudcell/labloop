@@ -38,6 +38,11 @@ def create_observability_app(
     _templates.configure_polling(
         health_poll_seconds=_obs_cfg.get("health_poll_seconds"),
         integrity_poll_seconds=_obs_cfg.get("integrity_poll_seconds"),
+        agora_url=_obs_cfg.get("agora_gui_url"),
+        peer_gui_urls={
+            peer: _obs_cfg.get(f"{peer}_gui_url")
+            for peer in ("episteme", "zetesis", "arete")
+        },
     )
 
     def index(request: Request) -> HTMLResponse:
@@ -52,6 +57,11 @@ def create_observability_app(
     def claim_detail(request: Request) -> HTMLResponse:
         return claim_views.render_claim_detail(
             store, request.path_params["claim_id"]
+        )
+
+    def ref_redirect(request: Request) -> HTMLResponse:
+        return claim_views.resolve_ref_redirect(
+            request.path_params["ref_id"]
         )
 
     def health(request: Request) -> Response:
@@ -142,6 +152,7 @@ def create_observability_app(
         Route("/health", health),
         Route("/favicon.ico", favicon),
         Route("/claim/{claim_id}", claim_detail),
+        Route("/ref/{ref_id}", ref_redirect),
         Route("/integrity", integrity),
         Route("/integrity/help", integrity_help),
         Route("/integrity/status", integrity_status),

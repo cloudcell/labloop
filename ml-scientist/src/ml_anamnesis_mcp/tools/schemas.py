@@ -103,6 +103,12 @@ class ListClaimsOut(TypedDict, total=False):
     claims: list[dict] | None
     total: int | None
 
+
+class GetClaimsOut(TypedDict, total=False):
+    claims: list[dict] | None
+    missing: list[str] | None
+
+
 class CheckInvariantsOut(TypedDict, total=False):
     server: str | None
     status: str | None
@@ -111,3 +117,10 @@ class CheckInvariantsOut(TypedDict, total=False):
     checks: list[dict] | None
     trigger: str | None
     log_file: str | None
+
+
+class AcknowledgeViolationOut(TypedDict, total=False):
+    ack_id: str | None
+    status: str | None
+    matched_open_violation: bool | None
+    open_violations: int | None

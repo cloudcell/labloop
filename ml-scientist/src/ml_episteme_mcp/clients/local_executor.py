@@ -535,6 +535,18 @@ class LocalExecutor(ExecutorRole):
                 "size_bytes": stderr_path.stat().st_size,
             },
         ]
+        # The strace read-trace is produced evidence — pin it too.
+        # (executed_code.json is written later at finalize; the
+        # manifest amendment in capture_executed_code pins it and any
+        # trace files missed here.)
+        for trace_path in sorted(artifact_dir.glob("*_readtrace.strace")):
+            artifacts.append({
+                "id": f"art-{uuid.uuid4().hex[:8]}",
+                "type": "read_trace",
+                "filename": trace_path.name,
+                "sha256": _sha256_file(trace_path),
+                "size_bytes": trace_path.stat().st_size,
+            })
 
         manifest = {
             "trial_id": tid,

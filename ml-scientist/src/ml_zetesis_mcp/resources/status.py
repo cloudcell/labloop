@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from ..enforcement.recurrence import TRACKER, open_violations
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import SearchStore
@@ -79,6 +80,23 @@ def _blockers(adaptors) -> list[dict]:
                 "detail": e.get("last_error") or "channel unreachable",
             })
     return out
+
+
+def _violation_blockers(store: SearchStore) -> list[dict]:
+    """Open (unacknowledged) integrity findings — tier-1 blockers
+    that also gate mutating tools when the protocol is enabled."""
+    return [
+        {
+            "kind": "open_violation",
+            "check": v["check"],
+            "object_ref": v["object_ref"],
+            "action": "acknowledge_violation",
+            "tool": "acknowledge_violation",
+            "blocks": ["*"],
+            "detail": v["detail"],
+        }
+        for v in open_violations(store)
+    ]
 
 
 def _integrity_summary(store: SearchStore) -> dict:
@@ -204,9 +222,9 @@ def _workflow_position(recs: list[dict]) -> str:
 def status_digest(store: SearchStore, adaptors=None) -> dict:
     """The Loop-1 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(store)
-    blockers = _blockers(adaptors)
+    blockers = _blockers(adaptors) + _violation_blockers(store)
     recs = _recommend(facts, blockers)
-    return {
+    digest = {
         "server": "ml-zetesis-mcp",
         "role": "loop1",
         "generated_at": _utc_now_iso(),
@@ -217,6 +235,8 @@ def status_digest(store: SearchStore, adaptors=None) -> dict:
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
     }
+    TRACKER.mark_status_read(digest)
+    return digest
 
 
 def register(mcp, store: SearchStore, adaptors=None) -> None:

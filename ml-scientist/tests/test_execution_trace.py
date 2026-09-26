@@ -71,17 +71,19 @@ async def test_traced_run_captures_spawned_py(store, artifact_dir, tmp_path):
 
     result = store.capture_executed_code("trial-t3", artifact_dir)
     assert result["traced"] is True
-    paths = [c["original_path"] for c in result["captured"]]
+    code_entries = [c for c in result["captured"] if c["role"] == "code"]
+    paths = [c["original_path"] for c in code_entries]
     assert str(helper.resolve()) in paths
     # snippet is content-addressed and retrievable
-    entry = next(c for c in result["captured"] if "spawned_helper" in c["original_path"])
+    entry = next(c for c in code_entries if "spawned_helper" in c["original_path"])
     snip = store.get_code_snippet(entry["code_hash"])
     assert snip is not None
     assert "from helper" in snip.code_text
     # manifest written into the artifact dir → captured as artifact
     manifest = json.loads((artifact_dir / "executed_code.json").read_text())
     assert manifest["traced"] is True
-    assert any("spawned_helper" in f["original_path"] for f in manifest["files"])
+    code_files = [f for f in manifest["files"] if f["role"] == "code"]
+    assert any("spawned_helper" in f["original_path"] for f in code_files)
 
 
 def test_capture_executed_code_filters(store, tmp_path):

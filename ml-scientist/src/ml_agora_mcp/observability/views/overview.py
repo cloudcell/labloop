@@ -59,6 +59,31 @@ def _linkify(text: str, gui_bases: dict,
     )
 
 
+def _blocker_label(b: dict) -> str:
+    """Short pill label for a digest blocker — kind-aware.
+
+    Connectivity blockers carry {channel}; governance blockers
+    (recurrent protocol) carry {kind, check, object_ref} or
+    {kind, tournament_id}. Never the bare '?' of a shape mismatch.
+    """
+    if b.get("channel"):
+        return f"channel {b['channel']}"
+    if b.get("check"):
+        ref = b.get("object_ref") or ""
+        return f"{b['check']} {ref}".strip()
+    if b.get("tournament_id"):
+        return f"{b.get('kind', 'debt')} {b['tournament_id']}"
+    return b.get("kind", "unknown")
+
+
+def _blocker_title(b: dict) -> str:
+    """Hover text: what to do about it (the blocker's own remedy)."""
+    parts = [b.get("detail", "")]
+    if b.get("tool"):
+        parts.append(f"→ {b['tool']}")
+    return " — ".join(p for p in parts if p)
+
+
 def _integrity_pill(digest: dict) -> str:
     integ = digest.get("integrity") or {}
     verdict = integ.get("verdict")
@@ -92,8 +117,9 @@ def _server_card(name: str, srv: dict, target: str | None,
     if blockers:
         rows.append(
             "<p>" + " ".join(
-                f'<span class="status status-expired">blocked: '
-                f'{escape(b.get("channel", "?"))}</span>'
+                f'<span class="status status-expired" '
+                f'title="{escape(_blocker_title(b))}">blocked: '
+                f'{escape(_blocker_label(b))}</span>'
                 for b in blockers
             ) + "</p>"
         )

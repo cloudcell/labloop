@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS tournaments (
     status TEXT NOT NULL DEFAULT 'open',
     recursive_gain REAL,
     created_at TEXT NOT NULL,
-    closed_at TEXT
+    closed_at TEXT,
+    void_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tourn_status ON tournaments(status);
 
@@ -176,6 +177,18 @@ CREATE TABLE IF NOT EXISTS evidence_refs (
 );
 CREATE INDEX IF NOT EXISTS idx_eref_context
     ON evidence_refs(context_type, context_id);
+
+-- Insert-only acknowledgment ledger for integrity-check findings
+-- (recurrent protocol, plan-20260926-0438Z). The check log stays
+-- append-only; an ack records disposition, never erases a finding.
+CREATE TABLE IF NOT EXISTS violation_acks (
+    id TEXT PRIMARY KEY,
+    check_name TEXT NOT NULL,
+    object_ref TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -213,6 +226,16 @@ class ImproverStore:
                 "ADD COLUMN corrections_json TEXT NOT NULL DEFAULT '[]'"
             )
             self.conn.commit()
+        tcols = {
+            r[1] for r in self.conn.execute(
+                "PRAGMA table_info(tournaments)"
+            )
+        }
+        if "void_json" not in tcols:
+            self.conn.execute(
+                "ALTER TABLE tournaments ADD COLUMN void_json TEXT"
+            )
+            self.conn.commit()
 
     def close(self) -> None:
         if self.conn:
@@ -229,6 +252,30 @@ class ImproverStore:
 
     def _fetchall(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         return self.conn.execute(sql, params).fetchall()
+
+    # --- Violation acknowledgments (insert-only, recurrent protocol) ---
+
+    def record_violation_ack(
+        self, *, ack_id: str, check_name: str, object_ref: str,
+        disposition: str, decided_by: str, created_at: str,
+    ) -> None:
+        self._execute(
+            "INSERT INTO violation_acks "
+            "(id, check_name, object_ref, disposition, decided_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ack_id, check_name, object_ref, disposition, decided_by,
+             created_at),
+        )
+        self.conn.commit()
+
+    def violation_ack_keys(self) -> set[tuple[str, str]]:
+        """(check_name, object_ref) pairs already acknowledged."""
+        return {
+            (r["check_name"], r["object_ref"])
+            for r in self._fetchall(
+                "SELECT check_name, object_ref FROM violation_acks"
+            )
+        }
 
     # --- Improver versions ---
 
@@ -538,6 +585,29 @@ class ImproverStore:
         )
         self.conn.commit()
 
+    def void_tournament(
+        self, tournament_id: str, rationale: str, decided_by: str
+    ) -> str:
+        """open → voided — the dead-record exit. No recursive_gain is
+        computed; the attributed rationale lives in void_json so the
+        record carries why it was abandoned. Returns voided_at."""
+        now = _now_iso()
+        self._execute(
+            "UPDATE tournaments SET status = ?, closed_at = ?, "
+            "void_json = ? WHERE id = ?",
+            (
+                TournamentStatus.voided.value, now,
+                json.dumps({
+                    "rationale": rationale,
+                    "decided_by": decided_by,
+                    "voided_at": now,
+                }),
+                tournament_id,
+            ),
+        )
+        self.conn.commit()
+        return now
+
     def list_tournaments_for_improver(
         self, improver_id: str
     ) -> list[Tournament]:
@@ -561,6 +631,11 @@ class ImproverStore:
             recursive_gain=row["recursive_gain"],
             created_at=row["created_at"],
             closed_at=row["closed_at"],
+            void=(
+                json.loads(row["void_json"])
+                if "void_json" in row.keys() and row["void_json"]
+                else None
+            ),
         )
 
     # --- Tournament results (insert-only) ---
@@ -623,8 +698,9 @@ class ImproverStore:
                 f"Tournament not found: {row['tournament_id']}"
             )
         if tournament.status != TournamentStatus.open:
+            state = tournament.status.value
             raise ValueError(
-                f"Tournament {tournament.id} is closed — its results "
+                f"Tournament {tournament.id} is {state} — its results "
                 "are sealed and cannot be corrected."
             )
         corrections = json.loads(row["corrections_json"] or "[]")

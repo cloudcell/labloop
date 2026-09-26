@@ -18,18 +18,39 @@ def escape(text: Any) -> str:
 # the server's toml; process-wide, applied at app construction.
 HEALTH_POLL_SECONDS = 10
 INTEGRITY_POLL_SECONDS = 30
+# Lab-home link — resolved at app construction, never guessed: the
+# [observability] agora_gui_url TOML key wins, else the launcher-
+# exported ML_AGORA_GUI_URL (derived from ports.env), else hidden.
+AGORA_GUI_URL: str | None = None
 
 
 def configure_polling(
     health_poll_seconds: int | None = None,
     integrity_poll_seconds: int | None = None,
+    agora_url: str | None = None,
 ) -> None:
-    """Apply configured nav-poll intervals ([observability] table)."""
-    global HEALTH_POLL_SECONDS, INTEGRITY_POLL_SECONDS
+    """Apply configured nav settings ([observability] table)."""
+    global HEALTH_POLL_SECONDS, INTEGRITY_POLL_SECONDS, AGORA_GUI_URL
     if health_poll_seconds is not None:
         HEALTH_POLL_SECONDS = int(health_poll_seconds)
     if integrity_poll_seconds is not None:
         INTEGRITY_POLL_SECONDS = int(integrity_poll_seconds)
+    if agora_url is not None:
+        AGORA_GUI_URL = agora_url
+
+
+def _home_link() -> str:
+    """Nav home icon → the agora GUI (the lab's read-only hub)."""
+    if not AGORA_GUI_URL:
+        return ""
+    url = escape(AGORA_GUI_URL)
+    return (
+        f'<a class="home-link" href="{url}" title="Agora — lab home">'
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+        'stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/>'
+        '<path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></a>'
+    )
 
 
 
@@ -72,6 +93,13 @@ def render_base(title: str, body: str) -> str:
         a:hover {{ text-decoration: underline; }}
         .nav {{ margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }}
         .nav .spacer {{ flex: 1; }}
+        .home-link {{
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 1.75rem; height: 1.75rem; border-radius: 0.25rem;
+            border: 1px solid var(--border); background: var(--bg-card);
+            color: var(--fg-muted);
+        }}
+        .home-link:hover {{ color: var(--accent); border-color: var(--accent); text-decoration: none; }}
         .card {{
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -172,6 +200,7 @@ def render_base(title: str, body: str) -> str:
 </head>
 <body>
     <div class="nav">
+        {_home_link()}
         <a href="/">← Investigations</a>
         <a href="/promotion">Promotion</a>
         <span class="spacer"></span>

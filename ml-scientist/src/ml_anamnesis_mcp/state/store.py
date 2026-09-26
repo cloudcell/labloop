@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS claim_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_edges_from ON claim_edges(from_claim);
 CREATE INDEX IF NOT EXISTS idx_edges_to   ON claim_edges(to_ref);
+
+-- Insert-only acknowledgment ledger for integrity-check findings
+-- (recurrent protocol, plan-20260926-0438Z). The check log stays
+-- append-only; an ack records disposition, never erases a finding.
+CREATE TABLE IF NOT EXISTS violation_acks (
+    id TEXT PRIMARY KEY,
+    check_name TEXT NOT NULL,
+    object_ref TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -81,6 +93,30 @@ class MemoryStore:
 
     def _fetchall(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         return self.conn.execute(sql, params).fetchall()
+
+    # --- Violation acknowledgments (insert-only, recurrent protocol) ---
+
+    def record_violation_ack(
+        self, *, ack_id: str, check_name: str, object_ref: str,
+        disposition: str, decided_by: str, created_at: str,
+    ) -> None:
+        self._execute(
+            "INSERT INTO violation_acks "
+            "(id, check_name, object_ref, disposition, decided_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ack_id, check_name, object_ref, disposition, decided_by,
+             created_at),
+        )
+        self.conn.commit()
+
+    def violation_ack_keys(self) -> set[tuple[str, str]]:
+        """(check_name, object_ref) pairs already acknowledged."""
+        return {
+            (r["check_name"], r["object_ref"])
+            for r in self._fetchall(
+                "SELECT check_name, object_ref FROM violation_acks"
+            )
+        }
 
     # --- Claims ---
 

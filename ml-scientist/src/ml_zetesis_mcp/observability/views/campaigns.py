@@ -9,6 +9,7 @@ from starlette.responses import HTMLResponse
 
 from ...state.models import PromotionCampaign, RosterEntry
 from ...state.store import SearchStore
+from ..links import link_id, link_ids
 from ..templates import (
     escape,
     format_timestamp,
@@ -99,7 +100,8 @@ def render_promotion_page(store: SearchStore) -> HTMLResponse:
 
 
 def render_campaign_detail(
-    store: SearchStore, campaign_id: str
+    store: SearchStore, campaign_id: str,
+    gui_bases: dict | None = None,
 ) -> HTMLResponse:
     """Campaign detail: record + per-arm results + evidence trail."""
     c = store.get_campaign(campaign_id)
@@ -112,13 +114,14 @@ def render_campaign_detail(
     results = store.list_campaign_results(campaign_id)
     refs = store.list_evidence_refs(campaign_id=campaign_id)
     spawns = store.list_campaign_spawns(campaign_id)
+    bases = gui_bases or {}
 
     result_rows = "".join(
         "<tr>"
         f'<td><span class="mono">{escape(r.id)}</span></td>'
         f'<td><span class="status status-{escape(r.arm.value)}">'
         f"{escape(r.arm.value)}</span></td>"
-        f'<td><span class="mono">{escape(r.programme_id)}</span></td>'
+        f"<td>{link_id(r.programme_id, bases)}</td>"
         f'<td class="muted">{escape(json.dumps(r.metrics))[:140]}</td>'
         f"<td>{format_timestamp(r.created_at)}</td>"
         "</tr>"
@@ -133,7 +136,7 @@ def render_campaign_detail(
         f'<td><span class="mono">{escape(s.id)}</span></td>'
         f'<td><span class="status status-{escape(s.arm.value)}">'
         f"{escape(s.arm.value)}</span></td>"
-        f'<td><span class="mono">{escape(s.programme_id)}</span></td>'
+        f"<td>{link_id(s.programme_id, bases)}</td>"
         f'<td class="muted">{escape(json.dumps(s.budget))[:100]}</td>'
         f'<td><span class="status status-{escape(s.status.value)}">'
         f"{escape(s.status.value)}</span></td>"
@@ -147,10 +150,11 @@ def render_campaign_detail(
 
     ref_rows = "".join(
         "<tr>"
-        f'<td><span class="mono">{escape(r.id)}</span></td>'
+        f'<td><a class="mono" href="/evidence-ref/{escape(r.id)}">'
+        f"{escape(r.id)}</a></td>"
         f"<td>{escape(r.source.value)}</td>"
         f'<td><span class="mono">{escape(r.tool)}</span></td>'
-        f'<td class="mono">{escape(", ".join(r.ref_ids) or "—")}</td>'
+        f'<td class="mono">{link_ids(r.ref_ids, bases)}</td>'
         f"<td>{format_timestamp(r.created_at)}</td>"
         "</tr>"
         for r in refs

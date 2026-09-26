@@ -15,6 +15,7 @@ import uuid
 from ..enforcement.checks import (
     admission_verdict,
     check_contract_valid,
+    check_metric_name_drift,
     check_proposal_fields,
     classify_class_map,
 )
@@ -99,11 +100,15 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 holdouts=holdouts,
                 budget=budget,
             )
+            lint = check_metric_name_drift(store, metrics)
             store.create_meta_contract(contract)
-            return ok({
+            payload = {
                 "contract_id": contract.id,
                 "version": contract.version,
-            })
+            }
+            if lint:
+                payload["lint"] = lint
+            return ok(payload)
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
 

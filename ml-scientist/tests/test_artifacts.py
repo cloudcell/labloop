@@ -76,7 +76,10 @@ class TestArtifactWorkspaces:
             assert manifest["programme_id"] == "prog-1"
             assert manifest["bundle_id"] == "bundle-1"
             assert "created_at" in manifest
-            assert len(manifest["artifacts"]) == 3  # wrapper, stdout, stderr
+            # wrapper, stdout, stderr — plus the read-trace when
+            # strace tracing is active on this host (auto-detected).
+            expected = 3 + len(list(artifact_dir.glob("*_readtrace.strace")))
+            assert len(manifest["artifacts"]) == expected
 
             # Each artifact has id, type, filename, sha256, size_bytes
             for art in manifest["artifacts"]:
