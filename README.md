@@ -51,6 +51,16 @@ after first login.
 automatically (override with `ML_SCIENTIST=`). See `ml-labloop/README.md`
 for the full workflow including publishing VM images.
 
+**VM sizing** lives in `ml-labloop/labloop.conf`: `LABLOOP_VCPUS`
+(default `16`) and `LABLOOP_MEMORY_MIB` (default `16384`). Edit the
+file or export the same variables before building. The vCPU count is
+clamped at build time to 75% of the host's CPU cores —
+`min(LABLOOP_VCPUS, host_cores*3/4)` — so a lab can never be sized to
+starve the host it runs on. Inside the guest, the hostile-zone
+container is capped at ~5/8 of the guest's vCPUs and ~3/4 of its RAM,
+so the desktop and MCP services keep headroom even under a hostile
+CPU/memory storm.
+
 ## Download a prebuilt image
 
 Released VM images live in the public Hugging Face bucket:

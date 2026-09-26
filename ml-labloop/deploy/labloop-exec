@@ -21,5 +21,17 @@ logger -t labloop-exec -- "$*"
 # processes would get HOME=/ — on the read-only rootfs that breaks
 # pip/caches/tools (observed: pip failing on '/.local'). The quadlet
 # mounts a tmpfs at /home/exp so this HOME is writable scratch.
+# -e *_NUM_THREADS=1: BLAS/OpenMP runtime caps. Experiment code that
+# forgets to pin threading (or pins it *after* `import numpy`, which
+# is a no-op — the runtime reads the env at library init) otherwise
+# spawns ncpu threads per worker; a handful of multiprocessing workers
+# then produce a runnable-thread storm that starves the VM's own
+# desktop/display path (observed: 86 threads on 8 vCPUs, load 58,
+# hard wedge). One thread per worker is the documented convention —
+# parallelise across workers, not inside BLAS. Code that needs more
+# can still raise it inside its own process.
 exec /usr/bin/podman exec --user "$(id -u)" -e HOME=/home/exp \
+    -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 -e MKL_NUM_THREADS=1 \
+    -e NUMEXPR_NUM_THREADS=1 -e VECLIB_MAXIMUM_THREADS=1 \
+    -e BLIS_NUM_THREADS=1 \
     lab-cnt-exp "$@"

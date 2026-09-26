@@ -39,6 +39,25 @@ trap 'rm -rf "$WORK"' EXIT
 die()  { echo "create-lab-template: $*" >&2; exit 1; }
 note() { echo; echo "==> $*"; }
 
+# VM sizing — labloop.conf (repo root); same-named env vars win.
+# vcpus are clamped to 75% of host cores: a lab VM must never be
+# sized to starve the host it runs on.
+if [ -f "$REPO/labloop.conf" ]; then . "$REPO/labloop.conf"; fi
+VCPUS="${LABLOOP_VCPUS:-16}"
+MEM_MIB="${LABLOOP_MEMORY_MIB:-16384}"
+host_cores="$(nproc)"
+vcpu_cap=$(( host_cores * 3 / 4 )); [ "$vcpu_cap" -lt 1 ] && vcpu_cap=1
+if [ "$VCPUS" -gt "$vcpu_cap" ]; then
+    note "vcpus clamped: $VCPUS -> $vcpu_cap (75% of $host_cores host cores)"
+    VCPUS=$vcpu_cap
+fi
+# hostile-zone ceiling — derived: ~5/8 of guest vcpus, ~3/4 of guest
+# RAM. The driver zone + desktop always keep headroom under a
+# hostile-zone CPU/memory storm (observed: 8vcpu VM, exp at --cpus 6
+# + --memory 16g, thread storm froze the whole guest).
+EXP_CPUS=$(( VCPUS * 5 / 8 )); [ "$EXP_CPUS" -lt 1 ] && EXP_CPUS=1
+EXP_MEM_MIB=$(( MEM_MIB * 3 / 4 ))
+
 # ------------------------------------------------------------------
 # Phase 0 — preflight
 # ------------------------------------------------------------------
@@ -139,9 +158,9 @@ if $VIRSH dominfo "$VM" >/dev/null 2>&1; then
     note "domain $VM exists — skipping virt-install"
 else
     [ -n "$ISO" ] || die "LABLOOP_ISO=<mint.iso> required to create $VM"
-    note "virt-install: $VM (16G / 8vcpu / 80G qcow2 / UEFI / SPICE)"
+    note "virt-install: $VM (${MEM_MIB}MiB / ${VCPUS}vcpu / 80G qcow2 / UEFI / SPICE)"
     virt-install --connect qemu:///system --name "$VM" \
-        --memory 16384 --vcpus 8 \
+        --memory "$MEM_MIB" --vcpus "$VCPUS" \
         --disk size=80,format=qcow2,bus=virtio \
         --cdrom "$ISO" \
         --os-variant generic \
@@ -341,10 +360,16 @@ qga "install -d -m 0755 -o mcp -g mcp /home/mcp/.config/containers/systemd && \
          /home/mcp/.config/containers/systemd/"
 qga "su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
      systemctl --user daemon-reload && systemctl --user start lab-cnt-mcp'"
+# render the hostile-zone ceiling (@EXP_CPUS@/@EXP_MEM_MIB@) for this
+# guest's size — the payload copy keeps the placeholders
+sed -e "s/@EXP_CPUS@/$EXP_CPUS/g" -e "s/@EXP_MEM_MIB@/$EXP_MEM_MIB/g" \
+    "$REPO/deploy/quadlets/lab-cnt-exp.container" \
+    > "$WORK/lab-cnt-exp.container"
+qga_push "$WORK/lab-cnt-exp.container" /tmp/lab-cnt-exp.container
 qga "install -d -m 0755 -o exp -g exp /home/exp/.config/containers/systemd && \
-     install -m 0644 -o exp -g exp \
-         /srv/lab/workspace/ml-labloop/deploy/quadlets/lab-cnt-exp.container \
-         /home/exp/.config/containers/systemd/"
+     install -m 0644 -o exp -g exp /tmp/lab-cnt-exp.container \
+         /home/exp/.config/containers/systemd/ && \
+     rm -f /tmp/lab-cnt-exp.container"
 qga "su - exp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
      systemctl --user daemon-reload && systemctl --user start lab-cnt-exp'"
 

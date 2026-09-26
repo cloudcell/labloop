@@ -136,7 +136,12 @@ def _server_card(name: str, srv: dict, target: str | None,
             f" <span class='muted'>{escape(w.get('kind', ''))}</span></li>"
             for w in open_work[:5]
         )
-        rows.append(f"<ul>{items}</ul>")
+        more = len(open_work) - 5
+        tail = (
+            f"<li class='muted'>+{more} more open item(s)</li>"
+            if more > 0 else ""
+        )
+        rows.append(f"<ul>{items}{tail}</ul>")
     if recs:
         top = recs[0]
         rows.append(

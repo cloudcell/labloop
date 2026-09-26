@@ -53,6 +53,18 @@ Entry timestamps are the commit time in **UTC**.
 
 ### Fixed
 
+- **Hostile-zone resource storm wedges the VM** — `lab-cnt-exp`
+  was allowed `--cpus 6 --memory 16g` on an 8 vCPU / 16 GiB VM
+  (no headroom for the desktop), and `labloop-exec` did not pin
+  BLAS/OpenMP threading, so a single `import numpy` before
+  `os.environ.setdefault("OMP_NUM_THREADS","1")` spawned 8 threads
+  per worker — 86 runnable threads, load 58, display starved, hard
+  freeze. Caps are now `--cpus 5 --cpu-shares 512 --memory 12g`
+  (host tasks win under contention) and `labloop-exec` exports
+  `OMP/OPENBLAS/MKL/NUMEXPR/VECLIB/BLIS_NUM_THREADS=1` into every
+  exec. `30-ensure-lab-tools.sh` also now pushes `labloop-exec` +
+  `labloop-build`, which it had silently never updated.
+  *(2026-09-26 18:06Z)*
 - **Display freezes** — QXL `vgamem` raised 32 → 128 MiB; at
   2560×1440 the starved framebuffer caused TTM thrashing until the
   DRM path wedged. *(2026-09-25 22:57Z)*

@@ -181,6 +181,7 @@ def _collect_open_work(
             "id": prog_id,
             "state": "active",
             "goal": row["goal"],
+            "created_at": row["created_at"],
         }
         if not row["candidate_version_id"]:
             prog_item["unattributed"] = True
@@ -225,6 +226,7 @@ def _collect_open_work(
             open_work.append({
                 "kind": "hypothesis", "id": h.id,
                 "state": "under_test", "programme_id": prog_id,
+                "created_at": h.created_at,
             })
         for t in running + designed:
             open_work.append({
@@ -232,6 +234,7 @@ def _collect_open_work(
                 "state": t.status.value,
                 "programme_id": prog_id,
                 "hypothesis_id": t.hypothesis_id,
+                "created_at": t.started_at or t.created_at,
             })
         for t in needs_obs:
             open_work.append({
@@ -240,6 +243,7 @@ def _collect_open_work(
                 "flag": "missing_observation",
                 "programme_id": prog_id,
                 "hypothesis_id": t.hypothesis_id,
+                "created_at": t.finished_at or t.created_at,
             })
 
         facts["running"].extend(running)
@@ -253,6 +257,13 @@ def _collect_open_work(
         )
         if not hypotheses:
             facts["empty_programmes"].append(prog_id)
+    # Most recent first — consumers render the head of this list
+    # (agora's overview shows the first 5), so recency must lead.
+    open_work.sort(
+        key=lambda w: w.get("last_activity_at")
+        or w.get("created_at") or "",
+        reverse=True,
+    )
     return open_work, facts
 
 

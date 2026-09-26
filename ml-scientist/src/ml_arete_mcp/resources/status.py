@@ -130,12 +130,14 @@ def _collect_open_work(
         open_work.append({
             "kind": "proposal", "id": p.id, "state": "conditional",
             "proposer": p.proposer_improver_id,
+            "created_at": p.created_at,
         })
         facts["conditional"].append(p)
     for p in admitted:
         open_work.append({
             "kind": "proposal", "id": p.id, "state": "admitted",
             "proposer": p.proposer_improver_id,
+            "created_at": p.created_at,
         })
         facts["admitted"].append(p)
 
@@ -153,11 +155,13 @@ def _collect_open_work(
             e.created_at
             for e in store.list_evidence_refs("tournament", t.id)
         ]
+        last_ts = t.created_at
         try:
             last = max(
                 datetime.fromisoformat(s) for s in stamps if s
             )
             idle_s = (now - last).total_seconds()
+            last_ts = last.isoformat()
         except ValueError:
             idle_s = 0.0
         open_work.append({
@@ -166,6 +170,7 @@ def _collect_open_work(
             "candidate_results": cand_n,
             "idle_hours": round(idle_s / 3600, 1),
             "stale": idle_s > stale_seconds,
+            "last_activity_at": last_ts,
         })
         if parent_n >= 1 and cand_n >= 1:
             facts["tournaments_ready"].append(t)
@@ -173,6 +178,13 @@ def _collect_open_work(
             facts["tournaments_waiting"].append(
                 (t, parent_n, cand_n, idle_s)
             )
+    # Most recent first — consumers render the head of this list
+    # (agora's overview shows the first 5), so recency must lead.
+    open_work.sort(
+        key=lambda w: w.get("last_activity_at")
+        or w.get("created_at") or "",
+        reverse=True,
+    )
     return open_work, facts
 
 

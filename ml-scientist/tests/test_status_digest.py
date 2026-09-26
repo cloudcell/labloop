@@ -132,6 +132,22 @@ class TestRecommendations:
         tools = [r["tool"] for r in d["recommended_next"]]
         assert "design_experiment" in tools
 
+    def test_open_work_sorted_newest_first(self, store):
+        """Consumers render the head of open_work (agora shows the
+        first 5) — recency must lead. An older programme with no
+        recent activity must not displace a newer one; child items
+        sort by their own stamps."""
+        store.create_programme(
+            _programme("prog-old").model_copy(
+                update={"created_at": "2026-01-01T00:00:00+00:00"}))
+        store.create_programme(
+            _programme("prog-new"))
+        d = status_digest(store)
+        progs = [
+            w["id"] for w in d["open_work"] if w["kind"] == "programme"
+        ]
+        assert progs[0] == "prog-new"
+
     def test_unattributed_programme_flagged_as_debt(self, store):
         """Layer C: an active programme without candidate_version_id
         shows as attribution debt — flagged in open_work and surfaced

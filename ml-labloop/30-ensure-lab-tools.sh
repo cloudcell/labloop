@@ -94,7 +94,8 @@ ensure_vm() {
         || { echo "  skip: guest-agent not answering"; return 0; }
 
     note "pushing deploy files"
-    for f in labloop-export labloop-update-opencode \
+    for f in labloop-export labloop-exec labloop-build \
+             labloop-update-opencode \
              labloop.sudoers labloop-tmpfiles.conf \
              security-battery.sh functional-battery.sh \
              GENESIS-RESEARCH-PROMPT.md DATA-MOVEMENT-MANUAL.md \
@@ -103,8 +104,20 @@ ensure_vm() {
              opencode.json opencode.jsonc; do
         qga_push "$vm" "$REPO/deploy/$f" "/tmp/ensure-$f"
     done
-    qga_push "$vm" \
-        "$REPO/deploy/quadlets/lab-cnt-exp.container" /tmp/ensure-lab-cnt-exp.container
+    # render the hostile-zone ceiling against the guest's ACTUAL size
+    # (~5/8 of its vcpus, ~3/4 of its RAM) — the quadlet carries
+    # @EXP_CPUS@/@EXP_MEM_MIB@ placeholders
+    local g_cpus g_mib exp_cpus exp_mib
+    g_cpus=$(qga_exec "$vm" "nproc" | tail -1); g_cpus=${g_cpus:-0}
+    g_mib=$(qga_exec "$vm" \
+        "awk '/MemTotal/{print int(\$2/1024)}' /proc/meminfo" | tail -1)
+    g_mib=${g_mib:-0}
+    exp_cpus=$(( g_cpus * 5 / 8 )); [ "$exp_cpus" -lt 1 ] && exp_cpus=1
+    exp_mib=$(( g_mib * 3 / 4 ));  [ "$exp_mib" -lt 256 ] && exp_mib=256
+    sed -e "s/@EXP_CPUS@/$exp_cpus/g" -e "s/@EXP_MEM_MIB@/$exp_mib/g" \
+        "$REPO/deploy/quadlets/lab-cnt-exp.container" \
+        > "$WORK/lab-cnt-exp.container"
+    qga_push "$vm" "$WORK/lab-cnt-exp.container" /tmp/ensure-lab-cnt-exp.container
     qga_push "$vm" \
         "$REPO/deploy/quadlets/lab-cnt-mcp.container" /tmp/ensure-lab-cnt-mcp.container
     qga_push "$vm" \
@@ -137,6 +150,8 @@ ensure_vm() {
     local need=0
     qga_exec "$vm" "
         cmp -s /tmp/ensure-labloop-export /usr/local/sbin/labloop-export &&
+        cmp -s /tmp/ensure-labloop-exec /usr/local/sbin/labloop-exec &&
+        cmp -s /tmp/ensure-labloop-build /usr/local/sbin/labloop-build &&
         cmp -s /tmp/ensure-labloop-update-opencode \
                /usr/local/sbin/labloop-update-opencode &&
         cmp -s /tmp/ensure-labloop.sudoers /etc/sudoers.d/labloop &&
@@ -176,6 +191,8 @@ ensure_vm() {
     note "installing (root side)"
     qga_exec "$vm" "
         install -m 0755 -o root -g root /tmp/ensure-labloop-export /usr/local/sbin/labloop-export &&
+        install -m 0755 -o root -g root /tmp/ensure-labloop-exec /usr/local/sbin/labloop-exec &&
+        install -m 0755 -o root -g root /tmp/ensure-labloop-build /usr/local/sbin/labloop-build &&
         install -m 0755 -o root -g root /tmp/ensure-labloop-update-opencode \
             /usr/local/sbin/labloop-update-opencode &&
         install -m 0440 -o root -g root /tmp/ensure-labloop.sudoers /etc/sudoers.d/labloop &&
@@ -191,6 +208,10 @@ ensure_vm() {
         install -d -o lab -g lab /srv/lab/workspace/ml-labloop/deploy &&
         install -m 0755 -o lab -g lab /tmp/ensure-labloop-export \
             /srv/lab/workspace/ml-labloop/deploy/labloop-export &&
+        install -m 0755 -o lab -g lab /tmp/ensure-labloop-exec \
+            /srv/lab/workspace/ml-labloop/deploy/labloop-exec &&
+        install -m 0755 -o lab -g lab /tmp/ensure-labloop-build \
+            /srv/lab/workspace/ml-labloop/deploy/labloop-build &&
         install -m 0755 -o lab -g lab /tmp/ensure-labloop-update-opencode \
             /srv/lab/workspace/ml-labloop/deploy/labloop-update-opencode &&
         install -m 0644 -o lab -g lab /tmp/ensure-security-battery.sh \

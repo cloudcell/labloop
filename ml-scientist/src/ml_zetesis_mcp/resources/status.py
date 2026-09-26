@@ -129,6 +129,7 @@ def _collect_open_work(store: SearchStore) -> tuple[list[dict], dict]:
         open_work.append({
             "kind": "campaign", "id": c.id, "state": "open",
             "results": len(results),
+            "created_at": c.created_at,
         })
         facts["campaigns"].append((c, results))
 
@@ -141,6 +142,7 @@ def _collect_open_work(store: SearchStore) -> tuple[list[dict], dict]:
             "question": inv.question,
             "evidence_refs": len(refs),
             "findings": len(findings),
+            "created_at": inv.created_at,
         })
         if findings:
             facts["concludable_invs"].append((inv, refs, findings))
@@ -148,6 +150,10 @@ def _collect_open_work(store: SearchStore) -> tuple[list[dict], dict]:
             facts["working_invs"].append((inv, refs))
         else:
             facts["fresh_invs"].append(inv)
+    # Most recent first — consumers render the head of this list
+    # (agora's overview shows the first 5), so recency must lead.
+    open_work.sort(key=lambda w: w.get("created_at") or "",
+                   reverse=True)
     return open_work, facts
 
 

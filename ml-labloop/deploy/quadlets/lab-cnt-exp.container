@@ -39,7 +39,17 @@ Volume=/srv/lab/experiments:/experiments:rw
 # static binaries, tarballs): a named volume so it survives image
 # rebuilds and stays out of the read-only rootfs
 Volume=labloop-opt:/opt/local
-PodmanArgs=--cpus 6 --pids-limit 512 --memory 16g
+# Resource ceiling — sized to leave the DRIVER/TRUSTED zones alive
+# under a hostile-zone CPU storm, not to throttle normal work.
+# @EXP_CPUS@ / @EXP_MEM_MIB@ are rendered at install time (create-
+# lab-template and 30-ensure-lab-tools.sh) to ~5/8 of the guest's
+# vcpus and ~3/4 of its RAM — the desktop keeps headroom even when
+# the hostile zone saturates (observed: load 58 + TTM buffer-
+# eviction failures + hard freeze on an uncapped storm).
+#   --cpu-shares 512: under contention exp yields to default-weight
+#     host tasks (1024); gets full quota when the box is idle
+#   --pids-limit 512: bounds fork/thread-bomb blast radius
+PodmanArgs=--cpus @EXP_CPUS@ --cpu-shares 512 --pids-limit 512 --memory @EXP_MEM_MIB@m
 
 [Service]
 Restart=always
