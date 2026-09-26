@@ -8,7 +8,7 @@ across any empirical domain.
 
 ![LabLoop UI](ml-labloop/docs-pub/assets/Screenshot_2026-09-27_05-25-41.png)
 
-![LabLoop UI](ml-labloop/docs-pub/assets/Screenshot_2026-09-27_05-25-41.png)
+![LabLoop UI](ml-labloop/docs-pub/assets/Screenshot_2026-09-27_05-37-28.png)
 
 
 Two projects, side by side. Each folder is self-contained and usable
