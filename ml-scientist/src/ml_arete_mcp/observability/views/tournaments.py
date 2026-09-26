@@ -26,7 +26,7 @@ def _link_id(entity_id: str, gui_bases: dict) -> str:
 
 def _result_rows(results) -> str:
     return "".join(
-        "<tr>"
+        f'<tr id="tres-{escape(r.id)}">'
         f'<td class="mono">{escape(r.id)}'
         + (f' <span class="muted" title="'
            f'{escape(json.dumps(r.corrections))}">✎{len(r.corrections)}'

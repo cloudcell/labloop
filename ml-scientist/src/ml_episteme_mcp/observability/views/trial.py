@@ -153,7 +153,7 @@ def render_trial_detail(
         variance_str = ", ".join(f"{k}={v:.4f}" for k, v in variance.items())
 
         obs_rows.append(f"""
-        <tr>
+        <tr id="obs-{escape(obs.id)}">
             <td>{escape(obs.id)}</td>
             <td>{escape(metrics_str)}</td>
             <td>{escape(variance_str)}</td>

@@ -110,8 +110,30 @@ ensure_vm() {
     qga_push "$vm" \
         "$REPO/containers/mcp/entrypoint.sh" /tmp/ensure-entrypoint.sh
 
+    # diagnostics reports from the sibling ml-scientist checkout ->
+    # ~/Desktop/diagnostics (they are *.md — the workspace payload's
+    # md-strip would remove them, so they ship via QGA directly)
+    local diag_names=() b
+    local diag_src="$REPO/../ml-scientist/diagnostics"
+    if [ -d "$diag_src" ]; then
+        for f in "$diag_src"/*; do
+            [ -f "$f" ] || continue
+            b="$(basename "$f")"
+            qga_push "$vm" "$f" "/tmp/ensure-diag-$b"
+            diag_names+=("$b")
+        done
+    fi
+
     # content check, not existence — an older installed revision must
     # count as "needs update", or updated scripts would never roll out
+    local diag_cmp=""
+    if ((${#diag_names[@]})); then
+        diag_cmp=" && test -d /home/lab/Desktop/diagnostics"
+        for b in "${diag_names[@]}"; do
+            diag_cmp="$diag_cmp && cmp -s '/tmp/ensure-diag-$b' \
+                '/home/lab/Desktop/diagnostics/$b'"
+        done
+    fi
     local need=0
     qga_exec "$vm" "
         cmp -s /tmp/ensure-labloop-export /usr/local/sbin/labloop-export &&
@@ -148,7 +170,7 @@ ensure_vm() {
                /srv/lab/workspace/ml-labloop/containers/mcp/entrypoint.sh &&
         test -d /var/lib/labloop-export/user &&
         test -d /var/lib/labloop-export/root &&
-        test -d /srv/lab/incoming" >/dev/null 2>&1 || need=1
+        test -d /srv/lab/incoming$diag_cmp" >/dev/null 2>&1 || need=1
     [ "$need" = 0 ] && { echo "  already current"; return 0; }
 
     note "installing (root side)"
@@ -212,6 +234,18 @@ ensure_vm() {
         install -m 0755 -o lab -g lab /tmp/ensure-entrypoint.sh \
             /srv/lab/workspace/ml-labloop/containers/mcp/entrypoint.sh" \
         || echo "  warn: workspace refresh failed (workspace absent?)"
+
+    if ((${#diag_names[@]})); then
+        note "installing diagnostics -> ~/Desktop/diagnostics"
+        qga_exec "$vm" \
+            "install -d -m 0755 -o lab -g lab /home/lab/Desktop/diagnostics" \
+            || echo "  warn: diagnostics dir failed"
+        for b in "${diag_names[@]}"; do
+            qga_exec "$vm" "install -m 0644 -o lab -g lab '/tmp/ensure-diag-$b' \
+                '/home/lab/Desktop/diagnostics/$b' && rm -f '/tmp/ensure-diag-$b'" \
+                || echo "  warn: diagnostics file $b failed"
+        done
+    fi
 
     # quadlet: update definition; restart lab-cnt-exp only if it changed
     local changed

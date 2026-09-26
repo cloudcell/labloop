@@ -533,6 +533,23 @@ else
     echo "    (no patches dir — set LABLOOP_PATCHES_DIR or skipping)"
 fi
 
+# diagnostics reports -> ~/Desktop/diagnostics. They are *.md — the
+# ml-scientist sanitize pass strips every *.md from the workspace
+# payload, so they must be pushed directly, not via the staged tree.
+# Whitelisted for the public export, so builds from the staged copy
+# find them in the sibling ml-scientist as usual.
+DIAG_DIR="$ML_SCIENTIST/diagnostics"
+if [ -d "$DIAG_DIR" ] && [ -n "$(ls -A "$DIAG_DIR" 2>/dev/null)" ]; then
+    note "diagnostics -> ~/Desktop/diagnostics"
+    qga "install -d -m 0755 -o lab -g lab /home/lab/Desktop/diagnostics"
+    for f in "$DIAG_DIR"/*; do
+        b="$(basename "$f")"
+        qga_push "$f" "/tmp/diag-$b"
+        qga "install -m 0644 -o lab -g lab '/tmp/diag-$b' \
+             '/home/lab/Desktop/diagnostics/$b' && rm -f '/tmp/diag-$b'"
+    done
+fi
+
 note "panel clock: %H:%M %Z + UTC (first-login autostart fixer)"
 # the perchannel XML does not exist until lab's first graphical login,
 # so the durable fix is an autostart hook that sets it via xfconf-query.

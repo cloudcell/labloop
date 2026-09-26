@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Route
 
 from ..state.store import ImproverStore
@@ -74,6 +79,46 @@ def create_observability_app(
         return tourn_views.render_evidence_ref_detail(
             store, request.path_params["evidence_ref_id"],
             gui_bases=upstream_gui_bases or {},
+        )
+
+    def decision_detail(request: Request) -> HTMLResponse:
+        return imp_views.render_decision_detail(
+            store, request.path_params["decision_id"],
+            gui_bases=upstream_gui_bases or {},
+        )
+
+    def canary_detail(request: Request) -> HTMLResponse:
+        return imp_views.render_canary_detail(
+            store, request.path_params["canary_id"],
+            gui_bases=upstream_gui_bases or {},
+        )
+
+    def policy_shortcut(request: Request) -> Response:
+        """Redirect /policy/{id} → its improver's pol- anchor."""
+        pid = request.path_params["policy_id"]
+        p = store.get_policy_version(pid)
+        if p is not None:
+            imp = store.get_improver(p.improver_version_id)
+            if imp is not None:
+                return RedirectResponse(
+                    f"/improver/{imp.id}#pol-{pid}"
+                )
+        return HTMLResponse(
+            render_error(f"Policy version not found: {pid}", 404),
+            status_code=404,
+        )
+
+    def result_shortcut(request: Request) -> Response:
+        """Redirect /result/{id} → its tournament's tres- anchor."""
+        rid = request.path_params["result_id"]
+        r = store.get_tournament_result(rid)
+        if r is not None:
+            return RedirectResponse(
+                f"/tournament/{r.tournament_id}#tres-{rid}"
+            )
+        return HTMLResponse(
+            render_error(f"Result not found: {rid}", 404),
+            status_code=404,
         )
 
     def contract_detail(request: Request) -> HTMLResponse:
@@ -172,6 +217,10 @@ def create_observability_app(
         Route("/proposal/{proposal_id}", proposal_detail),
         Route("/campaign-link/{link_id}", campaign_link_detail),
         Route("/evidence-ref/{evidence_ref_id}", evidence_ref_detail),
+        Route("/decision/{decision_id}", decision_detail),
+        Route("/canary/{canary_id}", canary_detail),
+        Route("/policy/{policy_id}", policy_shortcut),
+        Route("/result/{result_id}", result_shortcut),
         Route("/contract/{contract_id}", contract_detail),
         Route("/integrity", integrity),
         Route("/integrity/help", integrity_help),

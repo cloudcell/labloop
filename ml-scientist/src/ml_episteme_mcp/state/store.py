@@ -1525,6 +1525,19 @@ class StateStore:
             updated_at=row["updated_at"],
         )
 
+    def get_belief_by_id(self, belief_id: str) -> Belief | None:
+        row = self._fetchone(
+            "SELECT * FROM beliefs WHERE id = ?", (belief_id,)
+        )
+        if row is None:
+            return None
+        return Belief(
+            id=row["id"],
+            programme_id=row["programme_id"],
+            state_json=row["state_json"],
+            updated_at=row["updated_at"],
+        )
+
     def list_beliefs(self, programme_id: str) -> list[Belief]:
         """Return all beliefs for a programme, ordered by update time."""
         rows = self._fetchall(

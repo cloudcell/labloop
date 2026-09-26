@@ -24,12 +24,19 @@ INTEGRITY_POLL_SECONDS = 30
 # [observability] agora_gui_url TOML key wins, else the launcher-
 # exported ML_AGORA_GUI_URL (derived from ports.env), else hidden.
 AGORA_GUI_URL: str | None = None
+# Downstream peer GUIs for cross-GUI reference links (candidate →
+# zetesis, claim → anamnesis). Same provenance as AGORA_GUI_URL:
+# [observability] <peer>_gui_url wins, else the launcher-exported
+# ML_<PEER>_GUI_URL. Missing entries mean "render the id, don't
+# guess an address."
+PEER_GUI_URLS: dict[str, str] = {}
 
 
 def configure_polling(
     health_poll_seconds: int | None = None,
     integrity_poll_seconds: int | None = None,
     agora_url: str | None = None,
+    peer_gui_urls: dict[str, str] | None = None,
 ) -> None:
     """Apply configured nav settings ([observability] table)."""
     global HEALTH_POLL_SECONDS, INTEGRITY_POLL_SECONDS, AGORA_GUI_URL
@@ -39,6 +46,8 @@ def configure_polling(
         INTEGRITY_POLL_SECONDS = int(integrity_poll_seconds)
     if agora_url is not None:
         AGORA_GUI_URL = agora_url
+    if peer_gui_urls:
+        PEER_GUI_URLS.update(peer_gui_urls)
 
 
 def _home_link() -> str:

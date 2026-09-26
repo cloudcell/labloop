@@ -672,6 +672,14 @@ class ImproverStore:
             )
         return [self._row_to_tournament_result(r) for r in rows]
 
+    def get_tournament_result(
+        self, result_id: str
+    ) -> TournamentResult | None:
+        row = self._fetchone(
+            "SELECT * FROM tournament_results WHERE id = ?", (result_id,)
+        )
+        return self._row_to_tournament_result(row) if row else None
+
     def correct_tournament_result(
         self,
         result_id: str,

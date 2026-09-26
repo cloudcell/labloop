@@ -373,7 +373,7 @@ def render_programme_detail(
     hyp_rows = []
     for h in hypotheses:
         hyp_rows.append(f"""
-        <tr>
+        <tr id="hyp-{escape(h.id)}">
             <td><a href="/programme/{escape(programme_id)}#hyp-{escape(h.id)}">{escape(h.id)}</a></td>
             <td>{escape(h.statement[:200])}{'...' if len(h.statement) > 200 else ''}</td>
             <td>{render_status_badge(h.status.value)}</td>

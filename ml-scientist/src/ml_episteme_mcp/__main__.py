@@ -418,6 +418,12 @@ Examples:
         obs_config = dict(config.get("observability", {}))
         if env_url := os.environ.get("ML_AGORA_GUI_URL"):
             obs_config.setdefault("agora_gui_url", env_url)
+        # Same for downstream peers episteme pages may link to
+        # (candidate records on zetesis, claims on anamnesis).
+        for peer in ("zetesis", "anamnesis"):
+            env_key = f"ML_{peer.upper()}_GUI_URL"
+            if env_url := os.environ.get(env_key):
+                obs_config.setdefault(f"{peer}_gui_url", env_url)
         obs_app = create_observability_app(
             store, obs_refresh, archiver=archiver,
             mcp_health_url=f"http://{host or '127.0.0.1'}:{port}/health",

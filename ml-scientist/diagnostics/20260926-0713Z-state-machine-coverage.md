@@ -5,8 +5,10 @@ on what it tells you. The freshness gate will interrupt you — re-read
 the status resource when it tells you to, and carry on.
 
 This session exercises EVERY state machine in the ecosystem against one
-synthetic workload. The reference is docs/c-handbook/c-09-state-machines.md
-— §6's transition table is your coverage matrix. Every row must be
+synthetic workload. The rubric is the SELF-CONTAINED coverage matrix at
+the end of this prompt (it mirrors the repo doc
+docs/c-handbook/c-09-state-machines.md §6 — if that file exists in this
+checkout, reconcile against it; it takes precedence). Every row must be
 exercised or explicitly dispositioned. Coverage, not throughput, is the
 goal — and every refusal is a result, not an obstacle.
 
@@ -148,10 +150,10 @@ PART F — cross-cutting
     should be clean. If your synthetic run legitimately created a
     violation (e.g. an ack you chose not to remediate), acknowledge it
     with an honest disposition and report it — do not leave silent debt.
-30. COVERAGE MATRIX: for every row of c-09 §6's transition table, mark
-    PASS / FAIL / SKIP with the tool call or evidence id that proves it.
-    A transition you could not exercise must be SKIP with a reason —
-    never silently absent.
+30. COVERAGE MATRIX: for every row of the transition matrix at the
+    end of this prompt, mark PASS / FAIL / SKIP with the tool call or
+    evidence id that proves it. A transition you could not exercise
+    must be SKIP with a reason — never silently absent.
 
 While you work:
 - When a tool call refuses, read the error and do exactly what it says.
@@ -164,14 +166,83 @@ While you work:
   for campaign arms where the tools permit), but every NEGATIVE must
   actually be attempted — a refusal you didn't trigger is an unrun test.
 
-DELIVERABLE — produce an exportable artifact. From the repo root:
-1. Write your findings into diagnostics/out/state-machine-coverage/ —
+DELIVERABLE — produce an exportable artifact.
+1. Write your findings into
+   /home/lab/workspace/diagnostics-out/state-machine-coverage/ —
    report.md (narrative per part, every refusal verbatim) and
-   matrix.md (the §6 coverage matrix — transition, state seen,
+   matrix.md (the coverage matrix below — transition, state seen,
    evidence id, PASS/FAIL/SKIP+reason) plus evidence files (JSON
    snapshots of terminal records: the completed programme, the closed
    + voided tournaments, the policy row, the canary, the claims).
-2. Run: ./labloop export state-machine-coverage
-3. Report the printed tarball path, byte count and sha256 verbatim.
-   The tarball is retrieved off the VM by a script — the run is not
+2. Stage it for host retrieval:
+      labloop-export /home/lab/workspace/diagnostics-out/state-machine-coverage
+   There is no ./labloop in the VM — that is the host-side repo
+   launcher; use labloop-export instead. Only if labloop-export is
+   missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,
+   and label the result a substitute.
+3. Report the staged export path, byte count and sha256 verbatim.
+   The export is pulled off the VM by a host script — the run is not
    complete until the export succeeds.
+
+COVERAGE MATRIX — the rubric (mirrors c-09 §6; embedded so this prompt
+is self-contained when the handbook isn't in the checkout). Mark each
+row PASS/FAIL/SKIP + evidence:
+
+Loop 0 — episteme (store-enforced FSM):
+| # | entity | transition | tool / actor |
+| 1 | programme | → active | create_programme |
+| 2 | programme | active → completed | close_programme (gates: no under_test hypothesis, ≥1 trial, no running trial) |
+| 3 | programme | active → abandoned | close_programme |
+| 4 | programme | completed/abandoned → archived | archiver / archive_pending_programmes |
+| 5 | hypothesis | → proposed | formulate_hypothesis (NEG: no failure_criterion → refused) |
+| 6 | hypothesis | proposed → under_test | design_experiment (atomic) |
+| 7 | hypothesis | under_test → accepted | conclude_hypothesis (evidence; mints claim) |
+| 8 | hypothesis | under_test → rejected | conclude_hypothesis (mints falsification) |
+| 9 | hypothesis | under_test → inconclusive | conclude_hypothesis (mints NOTHING) |
+| 10 | hypothesis | * → abandoned | close_programme sweep |
+| 11 | trial | → designed | design_experiment |
+| 12 | trial | designed → running | run_trial (NEG: without sealed bundle → refused) |
+| 13 | trial | running → completed | executor finalize (executor record required) |
+| 14 | trial | running → failed | executor finalize / cancel_trial |
+| 15 | trial | running → retryable | mark_retryable / infra finalize |
+| 16 | trial | designed → abandoned | close_programme sweep |
+| 17 | trial | completed/failed → completed/failed/retryable | correct_trial_status (recorded repair, off-FSM) |
+
+Loop 1 — zetesis (guarded writes):
+| 18 | investigation | → open | open_investigation |
+| 19 | investigation | open → concluded | conclude_investigation |
+| 20 | investigation | open → abandoned | abandon_investigation |
+| 21 | finding | → provisional | record_finding |
+| 22 | finding | provisional → asserted | conclude_investigation (mints claim) |
+| 23 | finding | provisional → dropped | drop_finding |
+| 24 | campaign | → open | open_campaign (needs contract + incumbent) |
+| 25 | campaign | open → closed | close_campaign (NEG: <1 result per arm → refused; freezes promotion_score) |
+| 26 | spawn | spawned → completed | record_campaign_result (attribution verified upstream; NEG: wrong candidate → refused) |
+| 27 | spawn | → failed | ENUM-DEFINED, no tool writes it — expect SKIP |
+| 28 | roster entry | candidate → challenger | register_challenger |
+| 29 | roster entry | → champion | upstream promote verdict + refresh_roster |
+| 30 | roster entry | → rolled_back | upstream rollback verdict + refresh_roster |
+
+Loop 2 — arete (guarded writes):
+| 31 | proposal | → admitted | propose_meta_change (class-2) |
+| 32 | proposal | → conditional | propose_meta_change (class-3/unknown; human gate downstream) |
+| 33 | proposal | → rejected | propose_meta_change (class-1 — refused at the gate) |
+| 34 | tournament | → open | open_tournament |
+| 35 | tournament | open → closed | close_tournament (computes recursive_gain; NEG: unpaired → refused) |
+| 36 | tournament | open → voided | void_tournament (NEG: paired → refused; NEG: already closed → refused) |
+| 37 | meta_decision | insert-only event | record_meta_decision (verdict promote/reject/hold/rollback; NEG: cites voided tournament → refused; NEG: conditional proposal without decided_by=human:<name> → refused) |
+| 38 | policy_version | minted → active | promote_policy (latest decision must be promote; conditional needs human:) |
+| 39 | policy_version | active → rolled_back | rollback (restores displaced champion) |
+| 40 | canary | open → passed | record_canary + close_canary |
+| 41 | canary | open → regressed | close_canary (motivates rollback) |
+
+Anamnesis — bi-temporal claims (no FSM):
+| 42 | claim | → live | assert_claim |
+| 43 | claim | live → superseded | assert_claim with supersedes_id (auto supersedes edge) |
+| 44 | claim | live → expired | valid_until elapsed (hidden by default) |
+| 45 | claim | unevidenced cap | NEG: confidence >0.3 with no evidence edges → capped/refused |
+| 46 | claim edge | claim-ref verified | NEG: relate to a nonexistent claim id → refused |
+
+Cross-cutting:
+| 47 | agora | read-only by construction | NEG: tool list exposes no mutating tools |
+| 48 | lab | integrity | check_invariants clean on all four state-owning servers |

@@ -117,7 +117,7 @@ def render_campaign_detail(
     bases = gui_bases or {}
 
     result_rows = "".join(
-        "<tr>"
+        f'<tr id="cres-{escape(r.id)}">'
         f'<td><span class="mono">{escape(r.id)}</span></td>'
         f'<td><span class="status status-{escape(r.arm.value)}">'
         f"{escape(r.arm.value)}</span></td>"
@@ -132,7 +132,7 @@ def render_campaign_detail(
     )
 
     spawn_rows = "".join(
-        "<tr>"
+        f'<tr id="spawn-{escape(s.id)}">'
         f'<td><span class="mono">{escape(s.id)}</span></td>'
         f'<td><span class="status status-{escape(s.arm.value)}">'
         f"{escape(s.arm.value)}</span></td>"
@@ -318,4 +318,41 @@ def render_candidate_detail(
     """
     return HTMLResponse(
         render_base(f"Candidate {candidate_id}", body)
+    )
+
+
+def render_search_policy_detail(
+    store: SearchStore, policy_id: str
+) -> HTMLResponse:
+    """Search-policy detail — named search-behaviour version record.
+
+    Policies are not embedded in any other page, so this is a
+    standalone view rather than a redirect.
+    """
+    p = store.get_search_policy(policy_id)
+    if p is None:
+        return HTMLResponse(
+            render_error(f"Search policy not found: {policy_id}", 404),
+            status_code=404,
+        )
+    body = f"""
+    <h1><span class="mono">{escape(p.id)}</span>
+        <span class="status status-{escape(p.status.value)}">
+        {escape(p.status.value)}</span></h1>
+    <div class="card">
+        <table>
+            <tr><th>name</th><td>{escape(p.name)}</td></tr>
+            <tr><th>version</th><td>{p.version}</td></tr>
+            <tr><th>status</th>
+                <td><span class="status status-{escape(p.status.value)}">
+                {escape(p.status.value)}</span></td></tr>
+            <tr><th>created</th>
+                <td>{format_timestamp(p.created_at)}</td></tr>
+        </table>
+        <p class="muted">policy:</p>
+        <pre>{escape(json.dumps(p.policy, indent=2))}</pre>
+    </div>
+    """
+    return HTMLResponse(
+        render_base(f"Search policy {policy_id}", body)
     )

@@ -51,7 +51,10 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
         ("cand-", "/candidate/"),
         ("camp-", "/campaign/"),
         ("inv-", "/investigation/"),
-        ("eref-", "/evidence-ref/"),
+        ("find-", "/finding/"),
+        ("spawn-", "/spawn/"),
+        ("cres-", "/campaign-result/"),
+        ("spol-", "/search-policy/"),
     ):
         if entity_id.startswith(prefix):
             return f"{path}{entity_id}"
@@ -61,6 +64,11 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
         ("prog-", "/programme/"),
         ("contract-", "/contract/"),
         ("archive-", "/archive/"),
+        ("hyp-", "/hypothesis/"),
+        ("obs-", "/observation/"),
+        ("conc-", "/conclusion/"),
+        ("decision-", "/decision/"),
+        ("belief-", "/belief/"),
     ):
         if entity_id.startswith(prefix):
             base = _loop0_base(gui_bases)
@@ -69,6 +77,14 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
     if entity_id.startswith("claim-"):
         base = gui_bases.get("claims")
         return f"{base}/claim/{entity_id}" if base else None
+    # eref- is minted by BOTH servers — for ids of unknown provenance,
+    # the anamnesis /ref/ resolver probes both owners' /evidence-ref/
+    # pages and redirects to the real one. (Refs read back from this
+    # server's own evidence-refs table are linked directly by the
+    # views, not via entity_url.)
+    if entity_id.startswith("eref-"):
+        base = gui_bases.get("claims")
+        return f"{base}/ref/{entity_id}" if base else None
     return None
 
 

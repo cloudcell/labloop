@@ -15,11 +15,17 @@ While you work:
 - When a tool call refuses, read the error and do exactly what it says.
 - Report every refusal you hit verbatim, and what resolved it.
 
-DELIVERABLE — produce an exportable artifact. From the repo root:
-1. Write your findings into diagnostics/out/recurrent-protocol-smoke/ —
+DELIVERABLE — produce an exportable artifact.
+1. Write your findings into
+   /home/lab/workspace/diagnostics-out/recurrent-protocol-smoke/ —
    report.md (narrative: what you did, every refusal verbatim, what
    resolved it) plus any evidence files (JSON snapshots, counts).
-2. Run: ./labloop export recurrent-protocol-smoke
-3. Report the printed tarball path, byte count and sha256 verbatim.
-   The tarball is retrieved off the VM by a script — the run is not
+2. Stage it for host retrieval:
+      labloop-export /home/lab/workspace/diagnostics-out/recurrent-protocol-smoke
+   There is no ./labloop in the VM — that is the host-side repo
+   launcher; use labloop-export instead. Only if labloop-export is
+   missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,
+   and label the result a substitute.
+3. Report the staged export path, byte count and sha256 verbatim.
+   The export is pulled off the VM by a host script — the run is not
    complete until the export succeeds.

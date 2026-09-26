@@ -220,7 +220,7 @@ def render_improver_detail(
 
     decisions = store.list_meta_decisions(improver_id)
     decision_rows = "".join(
-        "<tr>"
+        f'<tr id="mdec-{escape(d.id)}">'
         f'<td><span class="status status-{_status_class(d.verdict.value)}">'
         f"{escape(d.verdict.value)}</span></td>"
         f'<td class="mono muted">{escape(d.id)}</td>'
@@ -237,7 +237,7 @@ def render_improver_detail(
 
     policies = store.list_policy_versions(improver_id)
     policy_rows = "".join(
-        "<tr>"
+        f'<tr id="pol-{escape(p.id)}">'
         f'<td class="mono">{escape(p.id)}</td>'
         f'<td><span class="status status-{_status_class(p.status.value)}">'
         f"{escape(p.status.value)}</span></td>"
@@ -304,3 +304,95 @@ def render_improver_detail(
         <tbody>{policy_rows}</tbody></table>
     """
     return HTMLResponse(render_base(f"Improver {improver_id}", body))
+
+
+def render_decision_detail(
+    store: ImproverStore,
+    decision_id: str,
+    gui_bases: dict | None = None,
+) -> HTMLResponse:
+    """Meta-decision detail: verdict, attribution, context, evidence."""
+    from ..links import link_id, link_ids
+
+    d = store.get_meta_decision(decision_id)
+    if d is None:
+        return HTMLResponse(
+            render_error(f"Decision not found: {decision_id}", 404),
+            status_code=404,
+        )
+    bases = gui_bases or {}
+    evidence_rows = "".join(
+        f'<tr><td>{link_id(ref, bases)}</td></tr>'
+        for ref in d.evidence_refs
+    ) or '<tr><td class="muted">No evidence refs recorded.</td></tr>'
+    body = f"""
+    <h1><span class="mono">{escape(d.id)}</span>
+        <span class="status status-{_status_class(d.verdict.value)}">
+        {escape(d.verdict.value)}</span></h1>
+    <div class="card">
+        <table>
+            <tr><th>improver</th>
+                <td>{link_id(d.candidate_improver_id, bases)}</td></tr>
+            <tr><th>contract</th>
+                <td>{link_id(d.contract_id, bases)}</td></tr>
+            <tr><th>tournament</th>
+                <td>{link_id(d.tournament_id, bases)}</td></tr>
+            <tr><th>claim</th>
+                <td>{link_id(d.claim_id, bases)}</td></tr>
+            <tr><th>verdict</th>
+                <td><span class="status status-{_status_class(d.verdict.value)}">
+                {escape(d.verdict.value)}</span></td></tr>
+            <tr><th>decided by</th><td>{escape(d.decided_by)}</td></tr>
+            <tr><th>decided at</th>
+                <td>{format_timestamp(d.created_at)}</td></tr>
+        </table>
+        <p><strong>rationale:</strong> {escape(d.rationale)}</p>
+    </div>
+    <div class="card">
+        <h2>Evidence refs ({len(d.evidence_refs)})</h2>
+        <table><tbody>{evidence_rows}</tbody></table>
+    </div>
+    """
+    return HTMLResponse(render_base(f"Decision {decision_id}", body))
+
+
+def render_canary_detail(
+    store: ImproverStore,
+    canary_id: str,
+    gui_bases: dict | None = None,
+) -> HTMLResponse:
+    """Canary deployment detail — gate record for a policy version."""
+    from ..links import link_id
+
+    c = store.get_canary(canary_id)
+    if c is None:
+        return HTMLResponse(
+            render_error(f"Canary not found: {canary_id}", 404),
+            status_code=404,
+        )
+    bases = gui_bases or {}
+    closed = (
+        format_timestamp(c.closed_at)
+        if c.closed_at
+        else '<span class="muted">open</span>'
+    )
+    body = f"""
+    <h1><span class="mono">{escape(c.id)}</span>
+        <span class="status status-{_status_class(c.status.value)}">
+        {escape(c.status.value)}</span></h1>
+    <div class="card">
+        <table>
+            <tr><th>policy version</th>
+                <td>{link_id(c.policy_version_id, bases)}</td></tr>
+            <tr><th>status</th>
+                <td><span class="status status-{_status_class(c.status.value)}">
+                {escape(c.status.value)}</span></td></tr>
+            <tr><th>opened</th>
+                <td>{format_timestamp(c.created_at)}</td></tr>
+            <tr><th>closed</th><td>{closed}</td></tr>
+        </table>
+        <p class="muted">scope:</p>
+        <pre>{escape(json.dumps(c.scope, indent=2))}</pre>
+    </div>
+    """
+    return HTMLResponse(render_base(f"Canary {canary_id}", body))

@@ -39,7 +39,7 @@ def render_conclusion_view(store: StateStore, programme_id: str) -> HTMLResponse
         hyp_statement = hyp.statement if hyp else "(hypothesis not found)"
 
         cards.append(f"""
-        <div class="card" style="margin-bottom: 1rem">
+        <div class="card" id="conc-{escape(c.id)}" style="margin-bottom: 1rem">
             <h3>{render_status_badge(c.verdict.value)}</h3>
             <div class="muted" style="margin-bottom: 0.5rem">{escape(c.id)}</div>
             <p style="margin-bottom: 0.5rem"><strong>Hypothesis:</strong> {escape(hyp_statement)}</p>

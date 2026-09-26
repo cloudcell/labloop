@@ -9,26 +9,44 @@ lab. Filenames: `<UTC-timestamp>-<slug>.md` (same convention as docs/).
 Every diagnostic prompt ends with a DELIVERABLE section requiring the
 agent to:
 
-1. Write its findings into `diagnostics/out/<slug>/` — `report.md`
-   plus evidence files (verbatim tool results, JSON snapshots,
-   computed counts). The slug is the filename minus timestamp and
-   `.md`.
-2. Run `./labloop export <slug>` from the repo root.
-3. Report the printed tarball path, byte count and sha256 verbatim.
+1. Write its findings into `/home/lab/workspace/diagnostics-out/<slug>/`
+   — `report.md` plus evidence files (verbatim tool results, JSON
+   snapshots, computed counts). The slug is the filename minus
+   timestamp and `.md`.
+2. Stage the deliverable for host retrieval:
 
-`labloop export` packages `diagnostics/out/<slug>/` (the payload) plus
-auto-collected server state — per-server `/health` + `/health/deep`
-snapshots, integrity `check-*.jsonl` trails, server-log tails, a
-MANIFEST — into `sxport/<UTC>-<slug>.tar.gz`. A run is not complete
-until the export succeeds.
+   ```bash
+   labloop-export /home/lab/workspace/diagnostics-out/<slug>
+   ```
+
+3. Report the staged export path, byte count and sha256 verbatim.
+
+`labloop-export` (installed at `/usr/local/sbin/labloop-export`,
+nopasswd-free for `lab`) freezes the staged set into a manifest +
+`export.tar.gz` under `/var/lib/labloop-export/user/`. A run is not
+complete until the export succeeds.
+
+**There is no `./labloop` in the VM.** `labloop` is the host-side repo
+launcher (manages `~/.ml-*` server processes on the operator's
+machine; its `export` subcommand packages host-side `diagnostics/out/`
++ server state into `sxport/`). In the guest the servers live in the
+`lab-cnt-mcp` container and the only sanctioned egress is
+`labloop-export` — do not look for `./labloop`, and do not treat its
+absence as a blocker worth escalating.
+
+**Fallback**: only if `labloop-export` itself is missing (VM predates
+it) does the agent emulate it rather than stalling — tar.gz the out
+dir into `/srv/lab/exchange/`, `sha256sum` it, and report path +
+bytes + digest labelled *substitute for `labloop-export`*.
 
 ## Retrieval
 
 From the host:
 
 ```bash
-scp vm:ml-scientist/sxport/<UTC>-<slug>.tar.gz .
-tar -tzf ...   # payload/ is the agent's report; the rest is server state
+./90-extract-lab-data.sh <vm> <dest-dir>
+# lands <dest>/<vm>-extraction-<UTC>.tar.gz — sha256-verified.
+# Unpack deliberately: the payload is agent-produced, treat as untrusted.
 ```
 
-`diagnostics/out/` and `sxport/` are run artifacts — gitignored.
+`diagnostics-out/` is a run artifact — gitignored.

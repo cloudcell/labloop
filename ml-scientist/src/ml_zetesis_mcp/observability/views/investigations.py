@@ -146,7 +146,7 @@ def render_investigation_detail(
             if f.claim_id else ""
         )
         finding_cards += f"""
-        <div class="card">
+        <div class="card" id="find-{escape(f.id)}">
             <p style="font-size: 1.0rem; margin-bottom: 0.5rem">{escape(f.content)}</p>
             <p>
                 <span class="status status-{escape(f.status.value)}">{escape(f.status.value)}</span>

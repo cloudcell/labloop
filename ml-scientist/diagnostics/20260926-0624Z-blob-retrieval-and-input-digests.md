@@ -52,13 +52,19 @@ While you work:
   directly — everything goes through MCP tools.
 - Report every refusal you hit verbatim, and what resolved it.
 
-DELIVERABLE — produce an exportable artifact. From the repo root:
-1. Write your findings into diagnostics/out/blob-retrieval-and-input-digests/
+DELIVERABLE — produce an exportable artifact.
+1. Write your findings into
+   /home/lab/workspace/diagnostics-out/blob-retrieval-and-input-digests/
    — report.md (every get_blob result verbatim: digest, size_bytes,
    served_from, your independently recomputed digest; the manifest
    entries verbatim; the check_invariants result) plus evidence files
    (the decoded blob bytes, the manifest JSON).
-2. Run: ./labloop export blob-retrieval-and-input-digests
-3. Report the printed tarball path, byte count and sha256 verbatim.
-   The tarball is retrieved off the VM by a script — the run is not
+2. Stage it for host retrieval:
+      labloop-export /home/lab/workspace/diagnostics-out/blob-retrieval-and-input-digests
+   There is no ./labloop in the VM — that is the host-side repo
+   launcher; use labloop-export instead. Only if labloop-export is
+   missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,
+   and label the result a substitute.
+3. Report the staged export path, byte count and sha256 verbatim.
+   The export is pulled off the VM by a host script — the run is not
    complete until the export succeeds.

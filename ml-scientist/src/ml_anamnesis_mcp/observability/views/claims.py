@@ -38,22 +38,39 @@ def _rel_badge(relation: str) -> str:
     return f'<span class="{cls}">{escape(relation)}</span>'
 
 
-# ID prefix → (owning server, GUI detail path). Only prefixes with a
-# real detail page on a single unambiguous owner are mapped — mdec-*,
-# pol-*, hyp-*, obs-*, conc-* and friends have no page to link to and
-# stay opaque.
+# ID prefix → (owning server, GUI detail path). Every entity family
+# with a real detail surface maps here — context-bound records
+# (hypotheses, observations, conclusions, findings, spawns, results,
+# policies) resolve through redirect routes on the owning GUI that
+# land on the parent page's anchor. Anything unmapped stays opaque
+# rather than guessing an address.
 _PEER_REF_ROUTES = (
     ("mcontract-", "arete", "/contract/"),
     ("tourn-", "arete", "/tournament/"),
     ("imp-", "arete", "/improver/"),
     ("mcp-", "arete", "/proposal/"),
+    ("mdec-", "arete", "/decision/"),
+    ("pol-", "arete", "/policy/"),
+    ("canary-", "arete", "/canary/"),
+    ("tcamp-", "arete", "/campaign-link/"),
+    ("tres-", "arete", "/result/"),
     ("cand-", "zetesis", "/candidate/"),
     ("camp-", "zetesis", "/campaign/"),
     ("inv-", "zetesis", "/investigation/"),
+    ("find-", "zetesis", "/finding/"),
+    ("spawn-", "zetesis", "/spawn/"),
+    ("cres-", "zetesis", "/campaign-result/"),
+    ("spol-", "zetesis", "/search-policy/"),
     ("trial-", "episteme", "/trial/"),
     ("prog-", "episteme", "/programme/"),
     ("contract-", "episteme", "/contract/"),
     ("archive-", "episteme", "/archive/"),
+    ("hyp-", "episteme", "/hypothesis/"),
+    ("obs-", "episteme", "/observation/"),
+    ("conc-", "episteme", "/conclusion/"),
+    ("decision-", "episteme", "/decision/"),
+    ("belief-", "episteme", "/belief/"),
+    ("data-ref-", "episteme", "/dataref/"),
 )
 
 # eref-* is minted by BOTH arete and zetesis — the id alone can't name
@@ -302,7 +319,7 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
             valid from {format_timestamp(claim.valid_from)}
             {('until ' + format_timestamp(claim.valid_until)) if claim.valid_until else '(live)'}
             &nbsp;·&nbsp; asserted {format_timestamp(claim.created_at)}
-            {('&nbsp;·&nbsp; source ' + escape(claim.source_id)) if claim.source_id else ''}
+            {('&nbsp;·&nbsp; source ' + _ref_link(claim.source_id, 'entity')) if claim.source_id else ''}
         </p>
         {superseded_line}
     </div>

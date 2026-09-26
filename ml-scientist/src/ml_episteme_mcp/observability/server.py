@@ -58,6 +58,11 @@ def create_observability_app(
         health_poll_seconds=_obs_cfg.get("health_poll_seconds"),
         integrity_poll_seconds=_obs_cfg.get("integrity_poll_seconds"),
         agora_url=_obs_cfg.get("agora_gui_url"),
+        peer_gui_urls={
+            peer: _obs_cfg[f"{peer}_gui_url"]
+            for peer in ("zetesis", "anamnesis")
+            if _obs_cfg.get(f"{peer}_gui_url")
+        },
     )
 
     static_dir = Path(__file__).parent / "static"
@@ -151,6 +156,93 @@ def create_observability_app(
 
         return HTMLResponse(
             render_error(f"Trial not found: {tid}", 404), status_code=404
+        )
+
+    def _archived_programme_url(programme_id: str) -> str | None:
+        """Archive URL for a programme, if it was archived."""
+        prog = store.get_programme(programme_id)
+        if (
+            prog is not None
+            and prog.status.value == "archived"
+            and archiver is not None
+        ):
+            entry = store._fetchone(
+                "SELECT archive_id FROM archive_entries "
+                "WHERE programme_id = ?",
+                (programme_id,),
+            )
+            if entry is not None:
+                return f"/archive/{entry['archive_id']}/programme/{programme_id}"
+        return None
+
+    def hypothesis_shortcut(request: Request) -> Response:
+        """Redirect /hypothesis/{id} → the programme page's hyp- anchor."""
+        hid = request.path_params["hypothesis_id"]
+        hyp = store.get_hypothesis(hid)
+        if hyp is not None:
+            if url := _archived_programme_url(hyp.programme_id):
+                return RedirectResponse(f"{url}#hyp-{hid}")
+            return RedirectResponse(
+                f"/programme/{hyp.programme_id}#hyp-{hid}"
+            )
+        return HTMLResponse(
+            render_error(f"Hypothesis not found: {hid}", 404),
+            status_code=404,
+        )
+
+    def conclusion_shortcut(request: Request) -> Response:
+        """Redirect /conclusion/{id} → the conclusions page anchor."""
+        cid = request.path_params["conclusion_id"]
+        conc = store.get_conclusion(cid)
+        if conc is not None:
+            if url := _archived_programme_url(conc.programme_id):
+                return RedirectResponse(f"{url}#conc-{cid}")
+            return RedirectResponse(
+                f"/programme/{conc.programme_id}/conclusions#conc-{cid}"
+            )
+        return HTMLResponse(
+            render_error(f"Conclusion not found: {cid}", 404),
+            status_code=404,
+        )
+
+    def observation_shortcut(request: Request) -> Response:
+        """Redirect /observation/{id} → its trial page's obs- anchor."""
+        oid = request.path_params["observation_id"]
+        obs = store.get_observation(oid)
+        if obs is not None:
+            trial = store.get_trial(obs.trial_id)
+            if trial is not None:
+                if url := _archived_programme_url(trial.programme_id):
+                    return RedirectResponse(
+                        f"{url}/trial/{obs.trial_id}#obs-{oid}"
+                    )
+                return RedirectResponse(
+                    f"/programme/{trial.programme_id}/trial/"
+                    f"{obs.trial_id}#obs-{oid}"
+                )
+        return HTMLResponse(
+            render_error(f"Observation not found: {oid}", 404),
+            status_code=404,
+        )
+
+    def belief_shortcut(request: Request) -> Response:
+        """Redirect /belief/{id} → its programme's belief page."""
+        bid = request.path_params["belief_id"]
+        belief = store.get_belief_by_id(bid)
+        if belief is not None:
+            return RedirectResponse(
+                f"/programme/{belief.programme_id}/belief"
+            )
+        return HTMLResponse(
+            render_error(f"Belief not found: {bid}", 404), status_code=404
+        )
+
+    def decision_detail(request: Request) -> HTMLResponse:
+        """Promotion decision detail — verdict, evidence, attribution."""
+        from .views import decision as decision_views
+
+        return decision_views.render_decision_detail(
+            store, request.path_params["decision_id"]
         )
 
     def health(request: Request) -> Response:
@@ -437,6 +529,11 @@ def create_observability_app(
         Route("/programme/{programme_id}/budget", programme_budget_partial),
         Route("/programme/{programme_id}/trial/{trial_id}", trial_detail),
         Route("/trial/{trial_id}", trial_shortcut),
+        Route("/hypothesis/{hypothesis_id}", hypothesis_shortcut),
+        Route("/conclusion/{conclusion_id}", conclusion_shortcut),
+        Route("/observation/{observation_id}", observation_shortcut),
+        Route("/belief/{belief_id}", belief_shortcut),
+        Route("/decision/{decision_id}", decision_detail),
         Route("/programme/{programme_id}/trial/{trial_id}/artifact/{filename:path}", trial_artifact_file),
         Route("/programme/{programme_id}/belief", belief_detail),
         Route("/programme/{programme_id}/belief/summary", programme_belief_partial),

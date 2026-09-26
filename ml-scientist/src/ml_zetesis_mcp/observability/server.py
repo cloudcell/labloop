@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Route
 
 from ..state.store import SearchStore
@@ -71,6 +76,52 @@ def create_observability_app(
         return inv_views.render_evidence_ref_detail(
             store, request.path_params["evidence_ref_id"],
             gui_bases=upstream_gui_bases or {},
+        )
+
+    def finding_shortcut(request: Request) -> Response:
+        """Redirect /finding/{id} → its investigation's find- anchor."""
+        fid = request.path_params["finding_id"]
+        f = store.get_finding(fid)
+        if f is not None:
+            return RedirectResponse(
+                f"/investigation/{f.investigation_id}#find-{fid}"
+            )
+        return HTMLResponse(
+            render_error(f"Finding not found: {fid}", 404),
+            status_code=404,
+        )
+
+    def spawn_shortcut(request: Request) -> Response:
+        """Redirect /spawn/{id} → its campaign's spawn- anchor."""
+        sid = request.path_params["spawn_id"]
+        s = store.get_spawn(sid)
+        if s is not None:
+            return RedirectResponse(
+                f"/campaign/{s.campaign_id}#spawn-{sid}"
+            )
+        return HTMLResponse(
+            render_error(f"Spawn not found: {sid}", 404), status_code=404
+        )
+
+    def campaign_result_shortcut(request: Request) -> Response:
+        """Redirect /campaign-result/{id} → campaign's cres- anchor."""
+        rid = request.path_params["result_id"]
+        r = store.get_campaign_result(rid)
+        if r is not None:
+            return RedirectResponse(
+                f"/campaign/{r.campaign_id}#cres-{rid}"
+            )
+        return HTMLResponse(
+            render_error(
+                f"Campaign result not found: {rid}", 404
+            ),
+            status_code=404,
+        )
+
+    def search_policy_detail(request: Request) -> HTMLResponse:
+        """Search-policy detail — standalone page (no parent page)."""
+        return campaign_views.render_search_policy_detail(
+            store, request.path_params["policy_id"]
         )
 
     def health(request: Request) -> Response:
@@ -164,6 +215,10 @@ def create_observability_app(
         Route("/campaign/{campaign_id}", campaign_detail),
         Route("/candidate/{candidate_id}", candidate_detail),
         Route("/evidence-ref/{evidence_ref_id}", evidence_ref_detail),
+        Route("/finding/{finding_id}", finding_shortcut),
+        Route("/spawn/{spawn_id}", spawn_shortcut),
+        Route("/campaign-result/{result_id}", campaign_result_shortcut),
+        Route("/search-policy/{policy_id}", search_policy_detail),
         Route("/integrity", integrity),
         Route("/integrity/help", integrity_help),
         Route("/integrity/status", integrity_status),

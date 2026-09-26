@@ -317,7 +317,7 @@ def render_archived_programme_detail(
         hyp_id = c.get("hypothesis_id", "")
         hyp_link = f'<a href="{base_url}#hyp-{escape(hyp_id)}">{escape(hyp_id)}</a>' if hyp_id else "—"
         conc_rows.append(f"""
-        <tr>
+        <tr id="conc-{escape(c['id'])}">
             <td>{escape(c['id'])}</td>
             <td>{render_status_badge(c['verdict'])}</td>
             <td>{hyp_link}</td>
@@ -505,7 +505,7 @@ def render_archived_trial_detail(
         except Exception:
             variance = {}
         obs_rows.append(f"""
-        <tr>
+        <tr id="obs-{escape(o['id'])}">
             <td>{escape(o['id'])}</td>
             <td>{render_json_pretty(metrics)}</td>
             <td>{render_json_pretty(variance)}</td>

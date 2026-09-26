@@ -801,6 +801,39 @@ class SearchStore:
             for r in rows
         ]
 
+    def get_spawn(self, spawn_id: str) -> CampaignSpawn | None:
+        row = self._fetchone(
+            "SELECT * FROM campaign_spawns WHERE id = ?", (spawn_id,)
+        )
+        if row is None:
+            return None
+        return CampaignSpawn(
+            id=row["id"],
+            campaign_id=row["campaign_id"],
+            arm=CampaignArm(row["arm"]),
+            programme_id=row["programme_id"],
+            budget=json.loads(row["budget_json"]),
+            status=row["status"],
+            created_at=row["created_at"],
+        )
+
+    def get_campaign_result(
+        self, result_id: str
+    ) -> CampaignResult | None:
+        row = self._fetchone(
+            "SELECT * FROM campaign_results WHERE id = ?", (result_id,)
+        )
+        if row is None:
+            return None
+        return CampaignResult(
+            id=row["id"],
+            campaign_id=row["campaign_id"],
+            arm=CampaignArm(row["arm"]),
+            programme_id=row["programme_id"],
+            metrics=json.loads(row["metrics_json"]),
+            created_at=row["created_at"],
+        )
+
     def get_spawn_for_programme(
         self, programme_id: str
     ) -> CampaignSpawn | None:

@@ -6,6 +6,11 @@ Hypotheses, designed experiments, evidence and conclusions as
 durable state — built for researchers, applications and AI agents
 across any empirical domain.
 
+![LabLoop UI](ml-labloop/docs-pub/assets/Screenshot_2026-09-27_05-25-41.png)
+
+![LabLoop UI](ml-labloop/docs-pub/assets/Screenshot_2026-09-27_05-25-41.png)
+
+
 Two projects, side by side. Each folder is self-contained and usable
 on its own.
 

@@ -32,31 +32,74 @@ def upstream_gui_bases(channels: dict) -> dict:
     }
 
 
-def entity_url(entity_id: str, gui_bases: dict) -> str | None:
-    """An upstream entity id → its owning server's GUI page.
+# id prefix → detail path. Local prefixes resolve through this
+# server's own routes; upstream prefixes through the adaptor-derived
+# GUI bases ({channel: gui_base}). Only kinds with a real page are
+# mapped — anything else returns None and the caller renders the id
+# unlinked rather than guessing.
+_LOCAL_ROUTES = (
+    ("tourn-", "/tournament/"),
+    ("imp-", "/improver/"),
+    ("mcp-", "/proposal/"),
+    ("mcontract-", "/contract/"),
+    ("tcamp-", "/campaign-link/"),
+    ("mdec-", "/decision/"),
+    ("pol-", "/policy/"),
+    ("canary-", "/canary/"),
+    ("tres-", "/result/"),
+)
 
-    Only kinds with a real page link: campaigns and roster entries
-    (anchored on /promotion) live on zetesis (loop1); episteme
-    programmes and evaluation contracts link through loop0; claims
-    through claims. Arete-local kinds (tcamp-, mcontract-) resolve
-    through this server's own routes, not entity_url.
-    """
-    if entity_id.startswith("camp-"):
-        base = gui_bases.get("loop1")
-        return f"{base}/campaign/{entity_id}" if base else None
-    if entity_id.startswith("cand-"):
-        base = gui_bases.get("loop1")
-        return f"{base}/candidate/{entity_id}" if base else None
-    if entity_id.startswith("contract-"):
-        base = gui_bases.get("loop0")
-        return f"{base}/contract/{entity_id}" if base else None
-    if entity_id.startswith("claim-"):
-        base = gui_bases.get("claims")
-        return f"{base}/claim/{entity_id}" if base else None
-    if entity_id.startswith("prog-"):
-        base = gui_bases.get("loop0")
-        return f"{base}/programme/{entity_id}" if base else None
-    if entity_id.startswith("trial-"):
-        base = gui_bases.get("loop0")
-        return f"{base}/trial/{entity_id}" if base else None
+_UPSTREAM_ROUTES = (
+    # zetesis (loop1)
+    ("cand-", "loop1", "/candidate/"),
+    ("camp-", "loop1", "/campaign/"),
+    ("inv-", "loop1", "/investigation/"),
+    ("find-", "loop1", "/finding/"),
+    ("spawn-", "loop1", "/spawn/"),
+    ("cres-", "loop1", "/campaign-result/"),
+    ("spol-", "loop1", "/search-policy/"),
+    # episteme (loop0)
+    ("trial-", "loop0", "/trial/"),
+    ("prog-", "loop0", "/programme/"),
+    ("contract-", "loop0", "/contract/"),
+    ("archive-", "loop0", "/archive/"),
+    ("hyp-", "loop0", "/hypothesis/"),
+    ("obs-", "loop0", "/observation/"),
+    ("conc-", "loop0", "/conclusion/"),
+    ("decision-", "loop0", "/decision/"),
+    ("belief-", "loop0", "/belief/"),
+    # anamnesis (claims)
+    ("claim-", "claims", "/claim/"),
+    # eref- is minted by BOTH arete and zetesis — for ids of unknown
+    # provenance, the anamnesis /ref/ resolver probes both owners'
+    # /evidence-ref/ pages and redirects to the real one.
+    ("eref-", "claims", "/ref/"),
+)
+
+
+def entity_url(entity_id: str, gui_bases: dict) -> str | None:
+    """An entity id → its detail page, local or upstream."""
+    for prefix, path in _LOCAL_ROUTES:
+        if entity_id.startswith(prefix):
+            return f"{path}{entity_id}"
+    for prefix, channel, path in _UPSTREAM_ROUTES:
+        if entity_id.startswith(prefix):
+            base = gui_bases.get(channel)
+            return f"{base}{path}{entity_id}" if base else None
     return None
+
+
+def link_id(entity_id: str | None, gui_bases: dict) -> str:
+    """An entity id, HTML-linked when a page exists — plain otherwise."""
+    from .templates import escape
+
+    if not entity_id:
+        return '<span class="muted">—</span>'
+    mono = f'<span class="mono">{escape(entity_id)}</span>'
+    url = entity_url(entity_id, gui_bases)
+    return f'<a href="{escape(url)}">{mono}</a>' if url else mono
+
+
+def link_ids(ref_ids: list[str], gui_bases: dict) -> str:
+    """A comma-joined ref_ids cell with each id linked where possible."""
+    return ", ".join(link_id(r, gui_bases) for r in ref_ids) or "—"
