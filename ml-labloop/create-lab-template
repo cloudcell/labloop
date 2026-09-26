@@ -166,7 +166,7 @@ else
         --os-variant generic \
         --network network=default,model=virtio \
         --graphics spice,listen=127.0.0.1 \
-        --video qxl \
+        --video virtio \
         --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0 \
         --boot uefi --noautoconsole
     if [[ "$ISO" == *auto* ]]; then
@@ -667,17 +667,18 @@ xml = open(path).read()
 xml = re.sub(r"(<graphics type='spice'[^>]*>)",
              r"\1\n      <clipboard copypaste='no'/>", xml, count=1)
 xml = xml.replace("<clipboard copypaste='yes'/>", "<clipboard copypaste='no'/>")
-# native resolution + VRAM sizing on the qxl model
-# (vgamem is the per-head framebuffer the guest sees as VRAM —
-#  32 MiB at 2560x1440 makes TTM thrash until the DRM path wedges
-#  and the display freezes; 128 MiB gives ~9 frames of headroom)
+# native resolution on the video model; qxl also gets VRAM sizing.
+# virtio is the default (no per-head TTM framebuffer to thrash —
+# QXL's [TTM] buffer-eviction wedge froze the desktop twice even
+# after vgamem was raised 32 -> 128 MiB); the qxl branch stays for
+# domains built before the switch.
 m = re.search(r"<model type='qxl'[^>]*>", xml)
 if m:
     sized = re.sub(r"\bram='\d+'", "ram='262144'",
         re.sub(r"\bvram='\d+'", "vram='131072'",
         re.sub(r"\bvgamem='\d+'", "vgamem='131072'", m.group(0))))
     xml = xml.replace(m.group(0), sized)
-    m = re.search(r"<model type='qxl'[^>]*>", xml)
+m = re.search(r"<model type='(?:virtio|qxl)'[^>]*>", xml)
 if m and "/>" in m.group(0):
     xml = xml.replace(m.group(0),
         m.group(0)[:-2] + ">\n"

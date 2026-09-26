@@ -223,12 +223,17 @@ class MCPExecutorAdaptor(MCPClientAdaptor, ExecutorRole):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         # extra_*_paths, overlay_ro, and python_exe are local-executor
         # hints — a remote executor defines its own isolation and
         # environment; they can't be honored across a network boundary
-        # and are intentionally ignored.
-        return await self.call_tool("execute_code", {"code": code})
+        # and are intentionally ignored. timeout_seconds is passed
+        # through: the remote executor decides whether to honor it.
+        args: dict[str, Any] = {"code": code}
+        if timeout_seconds is not None:
+            args["timeout_seconds"] = timeout_seconds
+        return await self.call_tool("execute_code", args)
 
     async def read_cell_output(self, cell_id: str) -> str:
         return await self.call_tool("read_cell_output", {"cell_id": cell_id})

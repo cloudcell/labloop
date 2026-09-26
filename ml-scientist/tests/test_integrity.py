@@ -85,7 +85,7 @@ def _check(payload, name):
 def test_clean_store_is_ok(store):
     payload = run_checks(store)
     assert payload["status"] == "ok"
-    assert len(payload["checks"]) == 10
+    assert len(payload["checks"]) == 11
     assert all(c["ok"] for c in payload["checks"])
 
 
@@ -409,7 +409,7 @@ async def test_health_deep_route(store):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert len(body["checks"]) == 10
+        assert len(body["checks"]) == 11
 
 
 def test_integrity_gui(store):

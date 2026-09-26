@@ -434,3 +434,48 @@ def test_strace_divergence_ignores_interpreter_files(store):
                if c["name"] == "strace_divergence")
     assert chk["ok"] is True
     assert chk["violations"] == []
+
+
+# ---- Executed-code table render (v2 manifest rows) -----------------
+
+
+def test_executed_code_view_renders_v2_rows(store):
+    """v2 manifest rows carry path/sha256/role/reason — not
+    original_path/code_hash. The table must render the trace fields:
+    every path shown, non-code rows badged by role (not
+    'not in sealed bundle'), undigested rows show their reason."""
+    from ml_episteme_mcp.observability.views.trial import (
+        render_trial_detail,
+    )
+
+    tid = _seed_trial(store)
+    _attach_manifest_blob(store, tid, {
+        "schema_version": 2, "trial_id": tid,
+        "files": [
+            {"path": "/work/executor.py", "original_path": "/work/executor.py",
+             "code_hash": "sha256:" + "a" * 64, "role": "code",
+             "sha256": "sha256:" + "a" * 64, "size_bytes": 120},
+            {"path": "/data/input.csv", "role": "input_data",
+             "sha256": "sha256:" + "b" * 64, "size_bytes": 42},
+            {"path": "/usr/lib/python3.12", "role": "input_data",
+             "sha256": None, "size_bytes": None,
+             "reason": "not readable at finalize: IsADirectoryError"},
+            {"path": "/srv/holdout.csv", "role": "sealed",
+             "sha256": None, "size_bytes": None,
+             "reason": "excluded by policy"},
+        ],
+    })
+    html = render_trial_detail(store, "prog-t", tid).body.decode()
+
+    # Every traced path renders — none collapse to '—'.
+    for p in ("/work/executor.py", "/data/input.csv",
+              "/usr/lib/python3.12", "/srv/holdout.csv"):
+        assert p in html
+    # Non-code rows carry their role badge; 'not in sealed bundle'
+    # is reserved for escaped *code* (the only row that could be).
+    assert html.count("not in sealed bundle") == 1  # the .py row
+    assert "input_data" in html and "sealed" in html
+    # Digests and refusal reasons are visible.
+    assert "sha256:" + "b" * 64 in html
+    assert "IsADirectoryError" in html
+    assert "excluded by policy" in html

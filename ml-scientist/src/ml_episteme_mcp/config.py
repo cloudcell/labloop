@@ -160,6 +160,12 @@ def create_adaptor_from_config(config: dict[str, Any]) -> MCPAdaptor:
     # this is an operator knob, not a code constant.
     executor_timeout = int(executor_cfg.get("timeout_seconds", 300))
     executor_python = executor_cfg.get("python_exe")
+    # Holdout deny-list — armed as real mount-namespace denies when a
+    # namespace applies; "audit" is the explicit trace-only opt-down.
+    executor_sealed_patterns = executor_cfg.get("sealed_path_patterns", [])
+    executor_sealed_enforcement = executor_cfg.get(
+        "sealed_enforcement", "deny"
+    )
 
     if not adaptor_configs:
         # No adaptors configured — use local adaptors (real work, no external services)
@@ -171,6 +177,8 @@ def create_adaptor_from_config(config: dict[str, Any]) -> MCPAdaptor:
             executor_shared_caches=executor_caches,
             executor_timeout=executor_timeout,
             executor_python=executor_python,
+            executor_sealed_path_patterns=executor_sealed_patterns,
+            executor_sealed_enforcement=executor_sealed_enforcement,
         )
 
     # MCP-backed adaptors configured — use them
@@ -206,6 +214,8 @@ def create_adaptor_from_config(config: dict[str, Any]) -> MCPAdaptor:
                 sandbox=executor_sandbox, trace_reads=executor_trace,
                 shared_caches=executor_caches, timeout=executor_timeout,
                 python_exe=executor_python,
+                sealed_path_patterns=executor_sealed_patterns,
+                sealed_enforcement=executor_sealed_enforcement,
             )
         )
 
@@ -229,6 +239,8 @@ def create_adaptor_from_config(config: dict[str, Any]) -> MCPAdaptor:
             data_dir=data_dir, executor=LocalExecutor(
                 sandbox=executor_sandbox, trace_reads=executor_trace,
                 shared_caches=executor_caches, timeout=executor_timeout,
+                sealed_path_patterns=executor_sealed_patterns,
+                sealed_enforcement=executor_sealed_enforcement,
             )
         ))
 

@@ -253,15 +253,45 @@ def render_trial_detail(
             for c in files:
                 ch = c.get("code_hash", "")
                 executed_hashes.add(ch)
-                in_bundle = "" if ch in bundle_set else (
-                    ' <span class="badge" style="background: var(--status-failed); '
-                    'color: #fff">not in sealed bundle</span>'
-                )
+                role = c.get("role", "code")
+                path_label = c.get("original_path") or c.get("path") or "—"
+                if role == "code" and ch not in bundle_set:
+                    in_bundle = (
+                        ' <span class="badge" style="background: var(--status-failed); '
+                        'color: #fff">not in sealed bundle</span>'
+                    )
+                elif role != "code":
+                    # Non-code rows were never bundle candidates —
+                    # badge the trace role instead (input_data /
+                    # sealed / other), so a data open isn't misread
+                    # as an escaped code file.
+                    in_bundle = (
+                        f' <span class="badge">{escape(role)}</span>'
+                    )
+                else:
+                    in_bundle = ""
+                digest = c.get("code_hash") or c.get("sha256")
+                if digest and role == "code":
+                    hash_cell = (
+                        f'<a href="#code-{escape(ch[:12])}">'
+                        f'<span class="hash-prefix">{escape(digest)}'
+                        f'</span></a>'
+                    )
+                elif digest:
+                    hash_cell = (
+                        f'<span class="hash-prefix">{escape(digest)}</span>'
+                    )
+                else:
+                    hash_cell = (
+                        f'<span class="muted">— '
+                        f'{escape(c.get("reason", ""))}</span>'
+                    )
+                size = c.get("size_bytes")
                 rows.append(f"""
                 <tr>
-                    <td>{escape(c.get("original_path", "—"))}{in_bundle}</td>
-                    <td><a href="#code-{escape(ch[:12])}"><span class="hash-prefix">{escape(ch or '—')}</span></a></td>
-                    <td class="muted">{c.get("size_bytes", 0)} bytes</td>
+                    <td>{escape(path_label)}{in_bundle}</td>
+                    <td>{hash_cell}</td>
+                    <td class="muted">{size if size is not None else '—'} bytes</td>
                 </tr>""")
             # Executed files absent from the sealed bundle have no
             # #code- anchor — render them here so the divergence is
@@ -286,9 +316,12 @@ def render_trial_detail(
                 <p class="muted" style="margin-bottom: 0.5rem">
                     Files the trial's process tree actually opened
                     (strace read-trace) — the observed truth of what ran.
-                    Files badged <em>not in sealed bundle</em> escaped
-                    static capture — the archive is not self-contained
-                    for them.
+                    <em>Code</em> files badged <em>not in sealed
+                    bundle</em> escaped static capture — the archive is
+                    not self-contained for them. Non-code rows carry
+                    their trace role (<em>input_data</em>,
+                    <em>sealed</em>, <em>other</em>) — they were never
+                    bundle candidates.
                 </p>
                 <table>
                     <thead><tr><th>Path</th><th>Content Hash</th><th>Size</th></tr></thead>

@@ -85,6 +85,7 @@ class StubExecutor(ExecutorRole):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         return json.dumps({"status": "completed", "output": "stub execution succeeded"})
 
@@ -314,6 +315,8 @@ def create_local_adaptor(
     executor_trace: str = "auto",
     executor_shared_caches: list[str] | None = None,
     executor_python: str | None = None,
+    executor_sealed_path_patterns: list[str] | None = None,
+    executor_sealed_enforcement: str = "deny",
 ) -> MCPAdaptor:
     """Create an adaptor with local implementations for all roles.
 
@@ -346,6 +349,10 @@ def create_local_adaptor(
             server's own sys.executable). Deployments can point this at
             a dedicated env carrying the scientific stack so trials
             don't degrade to dependency-free code.
+        executor_sealed_path_patterns: Holdout deny-list armed inside
+            the trial's mount namespace (fnmatch; '*' crosses '/').
+        executor_sealed_enforcement: "deny" (default — real boundary)
+            or "audit" (trace-only classification at finalize).
     """
     from .local_data_handler import LocalDataHandler
     from .local_executor import LocalExecutor
@@ -357,6 +364,8 @@ def create_local_adaptor(
         trace_reads=executor_trace,
         shared_caches=executor_shared_caches,
         python_exe=executor_python,
+        sealed_path_patterns=executor_sealed_path_patterns,
+        sealed_enforcement=executor_sealed_enforcement,
     )
 
     if data_dir is None:

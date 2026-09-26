@@ -67,8 +67,14 @@ class ExecutorRole(ABC):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         """Execute code and return the output.
+
+        ``timeout_seconds`` overrides the executor's configured
+        per-trial deadline for this call only — None means use the
+        configured default. Callers (run_trial) are responsible for
+        bounding it against the operator's max.
 
         ``overlay_ro`` is a list of ``(host_source, target_path)`` pairs:
         inside a sandbox the host_source file is bind-mounted over
@@ -96,6 +102,7 @@ class ExecutorRole(ABC):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         """Start execution in the background. Returns {'status': 'running'}.
 
@@ -112,6 +119,7 @@ class ExecutorRole(ABC):
             extra_rw_paths=extra_rw_paths,
             python_exe=python_exe,
             overlay_ro=overlay_ro,
+            timeout_seconds=timeout_seconds,
         )
 
     def get_async_status(self, trial_id: str) -> str:

@@ -253,6 +253,42 @@ def _check_input_data_undigested(store) -> dict:
     return _res("input_data_undigested", violations, detail)
 
 
+def _check_sealed_access_attempts(store) -> dict:
+    """Trials whose manifest records a role=sealed entry — an attempt
+    on a policy-sealed path (sealed_path_patterns deny-list). Under
+    sealed_enforcement="deny" the read could not have succeeded — the
+    attempt is the finding; under "audit" the read happened and the
+    recorded exclusion is the finding. Either way a trial touched
+    declared holdout space and that must be acknowledged, not silent.
+    Discharge: acknowledge_violation (the record is insert-only)."""
+    rows = store._fetchall(
+        """SELECT DISTINCT t.id FROM trials t
+           JOIN trial_artifacts ta ON ta.trial_id = t.id
+           WHERE t.status IN ('completed', 'failed')
+             AND ta.filename = 'executed_code.json'"""
+    )
+    violations = []
+    for r in rows:
+        manifest = _executed_code_manifest(store, r["id"])
+        if manifest is None or manifest.get("schema_version", 1) < 2:
+            continue
+        sealed = [
+            {
+                "path": f.get("path"),
+                "denied": bool(f.get("denied")),
+            }
+            for f in manifest.get("files", [])
+            if f.get("role") == "sealed"
+        ]
+        if sealed:
+            violations.append({"trial_id": r["id"], "paths": sealed})
+    return _res(
+        "sealed_access_attempts", violations,
+        f"{len(violations)} trial(s) attempted access to "
+        "policy-sealed paths",
+    )
+
+
 def _check_budget_exceeded(store) -> dict:
     rows = store._fetchall(
         """SELECT p.id, p.budget_max_trials, p.budget_max_wall_time_hours,
@@ -487,6 +523,7 @@ def run_checks(
         _check_unsealed_execution(store),
         _check_strace_divergence(store),
         _check_input_data_undigested(store),
+        _check_sealed_access_attempts(store),
         _check_budget_exceeded(store),
         _check_stuck_hypotheses(store),
         _check_mislabeled_outcome(store),

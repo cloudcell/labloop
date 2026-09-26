@@ -33,6 +33,21 @@ url = "http://localhost:38090/mcp"
 # The applied mode is recorded per trial in executor_output.sandbox.
 [executor]
 # sandbox = "full"
+# Sealed-path deny-list — resolved absolute paths the trial must
+# never read (holdout data). fnmatch globs; '*' crosses '/'.
+# Under sealed_enforcement="deny" each existing match is hidden
+# inside the mount namespace when the sandbox applies
+# (minimal|full): directories vanish (ENOENT), files deny with
+# EACCES, and the binds cannot be unlinked by trial code. Attempts
+# are recorded role=sealed + denied in executed_code.json and
+# surfaced by the sealed_access_attempts integrity check.
+# "deny" + sandbox="none" fails the trial before launch — there is
+# no namespace to arm the boundary in. "audit" is the explicit
+# opt-down to trace-only semantics (open succeeds; the exclusion is
+# recorded, not enforced).
+# Example (lab VM holdouts):
+# sealed_path_patterns = ["/exchange/*/holdout*"]
+# sealed_enforcement = "deny"    # deny|audit — default deny
 # Extra host caches shared rw under full — beyond the built-in
 # HF_HOME / XDG_CACHE_HOME / TRITON_CACHE_DIR. An existing dir is
 # bind-mounted at its real path; a missing one is skipped and reported
@@ -48,6 +63,12 @@ shared_caches = ["~/.cache/pip", "~/.cache/uv", "~/.cache/torch"]
 # Trials legitimately run for hours; size it to the workload. Env
 # override: ML_EPISTEME_EXECUTOR_TIMEOUT. Default: 300.
 # timeout_seconds = 300
+# Ceiling for the per-trial override: run_trial accepts a
+# timeout_seconds argument so the driving agent can size each trial's
+# deadline itself (commitment — the agent is a scientist), but never
+# past this bound. The applied value is recorded per trial in
+# executor_output.timeout_seconds. Default: 14400 (4 h).
+# max_timeout_seconds = 14400
 # Seconds run_trial blocks on the executor before falling back to
 # async dispatch (fire-and-forget + auto-finalize). Server internal —
 # never client-settable. Default: 10.

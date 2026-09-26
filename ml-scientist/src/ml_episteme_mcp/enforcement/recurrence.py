@@ -72,6 +72,8 @@ REMEDY_TOOLS = {
     # No in-store remedy — a digest not taken cannot be
     # reconstructed; acknowledge_violation is the resolution path.
     "input_data_undigested": set(),
+    # A recorded attempt is insert-only — acknowledge_violation only.
+    "sealed_access_attempts": set(),
     "mislabeled_outcome": {"correct_trial_status"},
     "budget_exceeded": {"close_programme"},
     "stuck_hypotheses": {

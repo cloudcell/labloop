@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .roles import ExecutorRole
+from ..sealed_paths import resolve_sealed_denies
 
 
 def _utc_timestamp_fs() -> str:
@@ -83,6 +84,8 @@ class LocalExecutor(ExecutorRole):
         sandbox: str = "auto",
         trace_reads: str = "auto",
         shared_caches: list[str] | None = None,
+        sealed_path_patterns: list[str] | None = None,
+        sealed_enforcement: str = "deny",
     ):
         """Initialize the local executor.
 
@@ -109,6 +112,17 @@ class LocalExecutor(ExecutorRole):
                 bound; a missing one is skipped and reported in
                 ``executor_output.shared_caches.missing`` (no silent
                 host-dir creation, no hidden absence).
+            sealed_path_patterns: fnmatch deny-list ('*' crosses '/')
+                matched against resolved absolute paths — holdout data
+                the trial must never read. Under ``deny`` enforcement
+                each existing match is hidden inside the mount
+                namespace (dirs via tmpfs → ENOENT, files via a
+                mode-000 bind → EACCES); requires sandbox minimal|full.
+            sealed_enforcement: "deny" (default — the boundary is
+                real) or "audit" (trace-only: opens succeed and are
+                recorded role=sealed at finalize). "deny" combined
+                with sandbox="none" refuses the run — there is no
+                namespace to arm the deny in.
         """
         import shutil
 
@@ -138,6 +152,14 @@ class LocalExecutor(ExecutorRole):
             self._sandbox = sandbox
         else:
             self._sandbox = "missing"
+        self._sealed_patterns = [str(p) for p in (sealed_path_patterns or [])]
+        # Unknown values fail closed to "deny" — an unrecognized mode
+        # must not silently become trace-only.
+        self._sealed_enforcement = (
+            sealed_enforcement
+            if sealed_enforcement in ("deny", "audit")
+            else "deny"
+        )
         self._cell_outputs: dict[str, str] = {}
         # Async execution state: trial_id → asyncio.Task
         self._running_tasks: dict[str, asyncio.Task] = {}
@@ -147,6 +169,22 @@ class LocalExecutor(ExecutorRole):
         # elapsed/ETA reporting (in-memory; the DB carries durable state)
         self._started_monotonic: dict[str, float] = {}
         self._artifact_dirs: dict[str, Path] = {}
+
+    def _sealed_fields(
+        self,
+        deny_paths: list[tuple[str, str]],
+        unmatched: list[str],
+    ) -> dict:
+        """The sealed-policy fields every result carries — the run's
+        record must say which denies were armed (or why none were)."""
+        return {
+            "sealed_enforcement": (
+                self._sealed_enforcement if self._sealed_patterns
+                else "none"
+            ),
+            "sealed_denies": [p for p, _ in deny_paths],
+            "sealed_unmatched": list(unmatched),
+        }
 
     async def execute_code(
         self,
@@ -159,6 +197,7 @@ class LocalExecutor(ExecutorRole):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         """Execute Python code in a subprocess and return the output.
 
@@ -171,9 +210,13 @@ class LocalExecutor(ExecutorRole):
 
         When ``artifact_dir`` is not provided, a temp file is used and
         deleted after execution (backward-compatible behavior).
+        ``timeout_seconds`` overrides the configured per-trial
+        deadline for this call (run_trial already clamps it to the
+        operator's max_timeout_seconds); None = configured default.
         """
         ts = _utc_timestamp_fs()
         created_at = datetime.now(timezone.utc).isoformat()
+        timeout = float(timeout_seconds) if timeout_seconds else self._timeout
 
         if artifact_dir is not None:
             artifact_dir = Path(artifact_dir)
@@ -214,6 +257,45 @@ class LocalExecutor(ExecutorRole):
                 "read_trace": self._trace,
                 "seal_enforced": False,
                 "sealed_overlays": 0,
+                "timeout_seconds": timeout,
+                **self._sealed_fields([], []),
+            }
+            if artifact_dir is not None:
+                self._write_artifacts(
+                    artifact_dir, trial_id, programme_id, bundle_id,
+                    ts, created_at, script_path, result,
+                )
+            return json.dumps(result)
+
+        # Sealed-path deny needs a mount namespace to arm in — under
+        # sandbox="none" there is none. Fail closed rather than run
+        # unenforced; sealed_enforcement="audit" is the explicit
+        # opt-down to trace-only behavior.
+        if (
+            self._sealed_patterns
+            and self._sealed_enforcement == "deny"
+            and self._sandbox == "none"
+        ):
+            result = {
+                "status": "failed",
+                "error": (
+                    "sealed_path_patterns configured with "
+                    "sealed_enforcement='deny' but sandbox='none' "
+                    "provides no mount namespace — set "
+                    "sealed_enforcement='audit' for trace-only "
+                    "behavior or sandbox='minimal'|'full'"
+                ),
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "duration_seconds": 0.0,
+                "sandbox": self._sandbox_requested,
+                "python_exe": python_exe or self._python_exe,
+                "read_trace": self._trace,
+                "seal_enforced": False,
+                "sealed_overlays": 0,
+                "timeout_seconds": timeout,
+                **self._sealed_fields([], []),
             }
             if artifact_dir is not None:
                 self._write_artifacts(
@@ -306,6 +388,90 @@ class LocalExecutor(ExecutorRole):
                     "-e", "trace=openat,open,openat2,execve",
                     "-o", str(trace_log),
                 ] + inner
+
+            # Sealed-path runtime deny — resolve patterns to concrete
+            # mounts now (per-run: the filesystem may have changed
+            # since server start). Refusals fail the launch, not the
+            # trial mid-flight.
+            deny_paths: list[tuple[str, str]] = []
+            sealed_unmatched: list[str] = []
+            deny_fd: int | None = None
+            if (
+                self._sealed_patterns
+                and self._sealed_enforcement == "deny"
+                and self._sandbox != "none"
+            ):
+                deny_paths, sealed_unmatched, deny_err = (
+                    resolve_sealed_denies(self._sealed_patterns)
+                )
+                if deny_err is None:
+                    # A deny that collides with a mount the run itself
+                    # needs is a policy conflict — refuse by name,
+                    # never mask into a mid-flight EACCES.
+                    protected = [str(script_path)]
+                    if artifact_dir is not None:
+                        protected.append(str(Path(artifact_dir)))
+                    protected += [
+                        str(t) for _, t in (overlay_ro or [])
+                    ]
+                    protected += [
+                        str(p) for p in (extra_ro_paths or [])
+                    ]
+                    protected += [
+                        str(p) for p in (extra_rw_paths or [])
+                    ]
+                    deny_err = next(
+                        (
+                            f"sealed deny {dp!r} conflicts with "
+                            f"required mount {prot!r} — refusing to "
+                            "launch"
+                            for dp, kind in deny_paths
+                            for prot in protected
+                            if dp == prot
+                            or (
+                                kind == "dir"
+                                and prot.startswith(
+                                    dp.rstrip("/") + "/"
+                                )
+                            )
+                        ),
+                        None,
+                    )
+                if deny_err is not None:
+                    result = {
+                        "status": "failed",
+                        "error": deny_err,
+                        "stdout": "",
+                        "stderr": "",
+                        "exit_code": -1,
+                        "duration_seconds": 0.0,
+                        "sandbox": applied_sandbox,
+                        "python_exe": pyexe,
+                        "read_trace": self._trace,
+                        "seal_enforced": False,
+                        "sealed_overlays": len(overlay_ro or []),
+                        "timeout_seconds": timeout,
+                        "shared_caches": shared_cache_report,
+                        **self._sealed_fields(
+                            deny_paths, sealed_unmatched
+                        ),
+                    }
+                    if artifact_dir is not None:
+                        self._write_artifacts(
+                            artifact_dir, trial_id, programme_id,
+                            bundle_id, ts, created_at, script_path,
+                            result,
+                        )
+                    return json.dumps(result)
+                # bind-data needs an inheritable fd — bwrap copies its
+                # bytes into a tmpfs file mounted mode 000 at each
+                # target. One fd serves every file deny (content is
+                # unreadable at mode 000 regardless).
+                if any(k == "file" for _, k in deny_paths):
+                    deny_fd = os.memfd_create("sealed-deny")
+                    os.write(deny_fd, b"DENIED-BY-POLICY\n")
+                    os.lseek(deny_fd, 0, os.SEEK_SET)
+
             argv = self._sandbox_argv(
                 inner,
                 artifact_dir,
@@ -313,30 +479,40 @@ class LocalExecutor(ExecutorRole):
                 extra_ro_paths,
                 extra_rw_paths,
                 overlay_ro,
+                deny_paths=deny_paths,
+                deny_fd=deny_fd,
             )
             # The seal is enforced only when a mount namespace applies
             # the overlays; without bwrap the live file runs — recorded
             # honestly in the result.
             seal_enforced = bool(overlay_ro) and applied_sandbox != "none"
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=str(artifact_dir) if artifact_dir is not None else None,
-                start_new_session=True,  # creates a new process group
-            )
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *argv,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=str(artifact_dir) if artifact_dir is not None else None,
+                    start_new_session=True,  # creates a new process group
+                    pass_fds=(deny_fd,) if deny_fd is not None else (),
+                )
+            finally:
+                # bwrap consumed the fd during namespace setup —
+                # drop the parent's copy.
+                if deny_fd is not None:
+                    os.close(deny_fd)
 
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=self._timeout
+                    proc.communicate(), timeout=timeout
                 )
             except asyncio.TimeoutError:
                 await self._kill_process_group(proc)
                 duration = time.monotonic() - start
                 result = {
                     "status": "timeout",
-                    "error": f"Execution exceeded {self._timeout}s timeout",
+                    "error": f"Execution exceeded {timeout}s timeout",
+                    "timeout_seconds": timeout,
                     "stdout": "",
                     "stderr": "",
                     "exit_code": -1,
@@ -347,6 +523,7 @@ class LocalExecutor(ExecutorRole):
                     "seal_enforced": seal_enforced,
                     "sealed_overlays": len(overlay_ro or []),
                     "shared_caches": shared_cache_report,
+                    **self._sealed_fields(deny_paths, sealed_unmatched),
                 }
                 if artifact_dir is not None:
                     self._write_artifacts(
@@ -381,6 +558,8 @@ class LocalExecutor(ExecutorRole):
                 "seal_enforced": seal_enforced,
                 "sealed_overlays": len(overlay_ro or []),
                 "shared_caches": shared_cache_report,
+                "timeout_seconds": timeout,
+                **self._sealed_fields(deny_paths, sealed_unmatched),
             }
 
             if proc.returncode != 0:
@@ -406,6 +585,8 @@ class LocalExecutor(ExecutorRole):
         extra_ro_paths: list[str] | None = None,
         extra_rw_paths: list[str] | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        deny_paths: list[tuple[str, str]] | None = None,
+        deny_fd: int | None = None,
     ) -> list[str]:
         """Wrap argv in a bubblewrap sandbox per self._sandbox.
 
@@ -462,6 +643,20 @@ class LocalExecutor(ExecutorRole):
             # re-bind rw (required under full where root is read-only).
             args += ["--bind", str(artifact_dir), str(artifact_dir)]
             args += ["--chdir", str(artifact_dir)]
+        # Sealed-path deny — applied LAST so the boundary shadows every
+        # earlier bind, including the code-seal overlays. Mount-based
+        # denies only: a mountpoint cannot be unlinked by the trial
+        # (EBUSY) even under minimal's writable root. Verified on
+        # bwrap 0.9.0: dir → tmpfs (children ENOENT), file → a
+        # mode-000 bind-data (open → EACCES).
+        for p, kind in deny_paths or []:
+            if kind == "dir":
+                args += ["--tmpfs", p]
+            else:
+                args += [
+                    "--perms", "000",
+                    "--bind-data", str(deny_fd), p,
+                ]
         args += ["--"] + argv
         return args
 
@@ -570,6 +765,7 @@ class LocalExecutor(ExecutorRole):
         extra_rw_paths: list[str] | None = None,
         python_exe: str | None = None,
         overlay_ro: list[tuple[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         """Start execution in the background and return immediately.
 
@@ -591,6 +787,7 @@ class LocalExecutor(ExecutorRole):
                     extra_rw_paths=extra_rw_paths,
                     python_exe=python_exe,
                     overlay_ro=overlay_ro,
+                    timeout_seconds=timeout_seconds,
                 )
                 self._completed_results[trial_id] = result
                 return result

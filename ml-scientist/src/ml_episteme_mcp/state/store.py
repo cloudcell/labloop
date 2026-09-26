@@ -2507,13 +2507,13 @@ class StateStore:
         RESOLVED absolute form (strace paths can be relative to the
         trial's cwd) — [executor] sealed_path_patterns.
         """
-        import fnmatch
         import hashlib
         import json as _json
         import re
         import sysconfig
         import uuid
         from .models import _utc_now
+        from ..sealed_paths import sealed_match
 
         path = Path(artifact_dir)
         if not path.is_dir():
@@ -2534,9 +2534,13 @@ class StateStore:
 
         # openat(AT_FDCWD, "/x", O_RDONLY|O_CLOEXEC) = 3 — every opened
         # path, not only .py; flags decide role. Also matches
-        # `<... openat resumed> ... = 3` continuations.
+        # `<... openat resumed> ... = 3` continuations. Group 3 captures
+        # the errno name on failures (`= -1 EACCES (Permission denied)`)
+        # — a denied sealed-path attempt is a governance event and must
+        # be recorded; all other failed opens are noise.
         call_re = re.compile(
             r'(?:openat2?|open)\([^)]*"([^"]+)"[^)]*\)\s*=\s*(-?\d+)'
+            r'(?:\s+([A-Z]+))?'
         )
         exec_re = re.compile(r'execve\([^=]*=\s*\d+')
         str_re = re.compile(r'"([^"]+\.py)"')
@@ -2554,13 +2558,31 @@ class StateStore:
                 continue
             for line in text.splitlines():
                 for m in call_re.finditer(line):
-                    if int(m.group(2)) < 0:
-                        continue  # failed open — nothing was read
                     raw = m.group(1)
                     pm = pyc_re.match(raw)
                     p = Path(pm.group(1)) / (pm.group(2) + ".py") if pm else Path(raw)
                     key = str(p)
+                    if int(m.group(2)) < 0:
+                        # Failed open — recorded ONLY when the path is
+                        # sealed (a denied attempt is a governance
+                        # event); everything else is ordinary ENOENT
+                        # probing noise and earns no manifest row.
+                        if patterns:
+                            try:
+                                fp = Path(raw)
+                                if not fp.is_absolute():
+                                    fp = artifact_resolved / fp
+                                frp = str(fp.resolve())
+                            except OSError:
+                                continue
+                            if sealed_match(frp, patterns):
+                                entry = observed.setdefault(
+                                    key, {"write": False}
+                                )
+                                entry["denied"] = m.group(3) or "ERR"
+                        continue
                     entry = observed.setdefault(key, {"write": False})
+                    entry["read_ok"] = True
                     if "O_WRONLY" in line or "O_RDWR" in line:
                         entry["write"] = True
                 if "execve(" in line and exec_re.search(line):
@@ -2584,6 +2606,15 @@ class StateStore:
                 rp = p.resolve()
             except OSError:
                 continue
+            is_sealed = patterns and sealed_match(str(rp), patterns)
+            if (
+                flags.get("denied")
+                and not flags.get("read_ok")
+                and not is_sealed
+            ):
+                # Entries created solely by a failed open carry no
+                # evidence unless the attempt hit a sealed path.
+                continue
             if interp_re.search(str(rp)):
                 continue  # interpreter internals — env, not experiment
             try:
@@ -2594,16 +2625,24 @@ class StateStore:
 
             # The deny rule fires on the resolved path BEFORE any file
             # access — a sealed dataset is never opened for hashing.
-            if patterns and any(
-                fnmatch.fnmatch(str(rp), pat) for pat in patterns
-            ):
-                captured.append({
+            # Under runtime deny the open FAILED (recorded as the
+            # attempt: denied + errno); under audit it succeeded and
+            # is excluded from digesting. Both are role=sealed.
+            if is_sealed:
+                entry = {
                     "path": str(rp),
                     "role": "sealed",
                     "sha256": None,
                     "size_bytes": None,
-                    "reason": "excluded by policy",
-                })
+                }
+                if flags.get("denied") and not flags.get("read_ok"):
+                    entry["denied"] = True
+                    entry["reason"] = (
+                        f"denied at runtime ({flags['denied']})"
+                    )
+                else:
+                    entry["reason"] = "excluded by policy"
+                captured.append(entry)
                 continue
 
             if rp.suffix == ".py":

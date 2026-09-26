@@ -53,6 +53,12 @@ Entry timestamps are the commit time in **UTC**.
 
 ### Fixed
 
+- **QXL TTM wedge — second freeze on an already-enlarged
+  framebuffer** — the video model is now `virtio` (virtio-gpu), which
+  has no per-head TTM framebuffer to thrash; the QXL `vgamem` bump
+  only delayed the wedge. New templates build with `--video virtio`;
+  the XML hardening still resizes QXL for domains built before the
+  switch. *(2026-09-26 19:10Z)*
 - **Hostile-zone resource storm wedges the VM** — `lab-cnt-exp`
   was allowed `--cpus 6 --memory 16g` on an 8 vCPU / 16 GiB VM
   (no headroom for the desktop), and `labloop-exec` did not pin

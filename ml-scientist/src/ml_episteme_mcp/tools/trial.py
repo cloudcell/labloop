@@ -530,6 +530,11 @@ def register(
     _exec_cfg = executor_config or {}
     _submit_wait = float(_exec_cfg.get("submit_wait_seconds", 10.0))
     _finalize_poll = float(_exec_cfg.get("finalize_poll_seconds", 5.0))
+    # Per-trial deadline ceiling for client overrides — the executor's
+    # configured timeout_seconds is the default, this is the bound an
+    # agent may raise it to. 4 h covers legitimately long trials while
+    # still bounding a forgotten or runaway one.
+    _max_trial_timeout = float(_exec_cfg.get("max_timeout_seconds", 14400))
 
     @mcp.tool()
     def design_experiment(programme_id: Annotated[str, Field(description='ID of the target research programme.')], hypothesis_id: Annotated[str, Field(description='ID of the target hypothesis.')], config: Annotated[dict | str, Field(description='Trial configuration dict handed to run_training; may be JSON-encoded.')]) -> Annotated[CallToolResult, DesignExperimentOut]:
@@ -920,7 +925,7 @@ def register(
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    async def run_trial(programme_id: Annotated[str, Field(description='ID of the programme owning the trial (orphan check).')], trial_id: Annotated[str, Field(description='ID of the target trial.')]) -> Annotated[CallToolResult, RunTrialOut]:
+    async def run_trial(programme_id: Annotated[str, Field(description='ID of the programme owning the trial (orphan check).')], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float | None, Field(description='Per-trial hard deadline override in seconds — the executor kills the process past it. None uses the server default ([executor] timeout_seconds). Bounded by [executor] max_timeout_seconds; the applied value is recorded in executor_output.timeout_seconds.')] = None) -> Annotated[CallToolResult, RunTrialOut]:
         """Run a trial by calling the executor role.
 
         Imports run_training from the bundle's code_ref and calls it with
@@ -1075,6 +1080,14 @@ def register(
                 # visible inside the private tmpfs.
                 extra_ro_paths.append(str(Path(bundle.env_ref)))
 
+            # Per-trial deadline override: agent-settable (commitment —
+            # the agent is a scientist; it sizes its own trials), bounded
+            # by the operator's max_timeout_seconds.
+            trial_timeout = (
+                min(float(timeout_seconds), _max_trial_timeout)
+                if timeout_seconds else None
+            )
+
             # Try synchronous execution with a short initial wait.
             # If the executor doesn't finish in time, fall back to async dispatch.
             try:
@@ -1088,6 +1101,7 @@ def register(
                         extra_ro_paths=extra_ro_paths,
                         python_exe=python_exe,
                         overlay_ro=overlay_ro,
+                        timeout_seconds=trial_timeout,
                     ),
                     timeout=_submit_wait,
                 )
@@ -1106,6 +1120,7 @@ def register(
                     extra_ro_paths=extra_ro_paths,
                     python_exe=python_exe,
                     overlay_ro=overlay_ro,
+                    timeout_seconds=trial_timeout,
                 )
                 output_data = _parse_executor_output(output)
                 if output_data.get("status") == "running":

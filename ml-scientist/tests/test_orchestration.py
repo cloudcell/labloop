@@ -67,7 +67,7 @@ class MockExecutor(ExecutorRole):
     def __init__(self):
         self.calls: list[str] = []
 
-    async def execute_code(self, code: str, artifact_dir=None, trial_id=None, programme_id=None, bundle_id=None, extra_ro_paths=None, extra_rw_paths=None, python_exe=None, overlay_ro=None) -> str:
+    async def execute_code(self, code: str, artifact_dir=None, trial_id=None, programme_id=None, bundle_id=None, extra_ro_paths=None, extra_rw_paths=None, python_exe=None, overlay_ro=None, timeout_seconds=None) -> str:
         self.calls.append(code)
         return json.dumps({"status": "completed", "output": "mock execution"})
 
@@ -726,7 +726,7 @@ class TestRoleInterfaceNotProductDependent:
                 return {"custom_param": 1.0}
 
         class CustomExecutor(ExecutorRole):
-            async def execute_code(self, code, artifact_dir=None, trial_id=None, programme_id=None, bundle_id=None, extra_ro_paths=None, extra_rw_paths=None, python_exe=None, overlay_ro=None):
+            async def execute_code(self, code, artifact_dir=None, trial_id=None, programme_id=None, bundle_id=None, extra_ro_paths=None, extra_rw_paths=None, python_exe=None, overlay_ro=None, timeout_seconds=None):
                 return "custom output"
             async def read_cell_output(self, cell_id):
                 return "custom"
