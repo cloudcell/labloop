@@ -123,6 +123,32 @@ else
     warn dir:trial-env "/srv/lab/trial-env unpopulated — trials lack numpy/scipy stack"
 fi
 
+# --- display mode ------------------------------------------------------
+# /etc/labloop/display.conf carries the build-time target; the login
+# hook (labloop-display.sh) enforces it, injecting a modeline when the
+# requested rate is absent from the virtio EDID. Headless runs (QGA,
+# pre-login) get WARN not FAIL — there is no session to measure.
+RES_X=2560; RES_Y=1440; REFRESH=75
+[ -r /etc/labloop/display.conf ] && . /etc/labloop/display.conf
+mode="${RES_X}x${RES_Y}"
+xr="$(DISPLAY="${DISPLAY:-:0}" xrandr 2>/dev/null)"
+if [ -z "$xr" ]; then
+    warn display-mode "no X session — cannot measure (target $mode @ $REFRESH Hz)"
+elif printf '%s\n' "$xr" | grep -q "current ${RES_X} x ${RES_Y}"; then
+    # current rate = the '*' flag on the mode line
+    cur="$(printf '%s\n' "$xr" | awk -v m="$mode" \
+        '$1==m {for(i=2;i<=NF;i++) if($i ~ /\*/) {gsub(/[*+]/,"",$i); print $i; exit}}')"
+    if [ -n "$cur" ] && awk -v a="$cur" -v b="$REFRESH" \
+            'BEGIN{exit !(a-b<0.5 && b-a<0.5)}'; then
+        ok display-mode "Virtual-1 at $mode @ ${cur} Hz (target $REFRESH)"
+    else
+        bad display-mode "at $mode but ${cur:-?} Hz — expected ~$REFRESH Hz"
+    fi
+else
+    got="$(printf '%s\n' "$xr" | sed -n 's/.*current \([0-9]* x [0-9]*\).*/\1/p')"
+    bad display-mode "current ${got:-?}, expected $mode @ $REFRESH Hz"
+fi
+
 echo
 echo "== $pass PASS, $warn WARN, $fail FAIL =="
 

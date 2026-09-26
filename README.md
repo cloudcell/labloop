@@ -61,6 +61,12 @@ container is capped at ~5/8 of the guest's vCPUs and ~3/4 of its RAM,
 so the desktop and MCP services keep headroom even under a hostile
 CPU/memory storm.
 
+**Display** is configured there too: `LABLOOP_RES_X`/`LABLOOP_RES_Y`
+(default `2560`×`1440`) and `LABLOOP_REFRESH` (default `75`, any value
+30–75 Hz including non-integer rates like `59.94`). Rates the virtual
+EDID doesn't offer natively are injected as a modeline at login —
+lower rates are perfectly fine for a lab display.
+
 ## Download a prebuilt image
 
 Released VM images live in the public Hugging Face bucket:

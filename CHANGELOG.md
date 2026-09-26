@@ -53,6 +53,18 @@ Entry timestamps are the commit time in **UTC**.
 
 ### Fixed
 
+- **Display resolution silently unconfigured** — the virtio-XML
+  hardening regex matched the NIC's `<model type='virtio'/>` before the
+  video one, so the `<resolution>` child landed on the NIC and libvirt
+  dropped it; the guest fell back to a default mode. The search is now
+  anchored inside `<video>…</video>`. Resolution and refresh are now
+  configurable via `labloop.conf` (`LABLOOP_RES_X/RES_Y`, default
+  2560×1440; `LABLOOP_REFRESH`, any value 30–75 Hz including non-integer
+  rates like 59.94). Rates absent from the virtio EDID are injected at
+  login as a reduced-blanking modeline by `labloop-display.sh`
+  (autostart). `check-lab-ready.sh` gained a `display-mode` check that
+  verifies the active mode and refresh against the configured target.
+  *(2026-09-26 22:20Z)*
 - **QXL TTM wedge — second freeze on an already-enlarged
   framebuffer** — the video model is now `virtio` (virtio-gpu), which
   has no per-head TTM framebuffer to thrash; the QXL `vgamem` bump

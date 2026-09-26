@@ -17,8 +17,8 @@
 # qemu-guest-agent — everything after that is unattended, driven over
 # the qemu guest-agent virtio channel (no ssh, no host TCP listeners).
 #
-# Ends with the guest shut down, XML hardened (clipboard off,
-# 2048x1152 native), and an snp-vN snapshot. Then:
+# Ends with the guest shut down, XML hardened (clipboard off, virtio
+# video at the configured native resolution), and an snp-vN snapshot.
 #   sudo virt-sysprep -d <name>     # scrub identity
 #   ./create-lab-user <user>        # per-user clone
 set -euo pipefail
@@ -31,7 +31,6 @@ esac
 REPO="$(cd "$(dirname "$0")" && pwd)"
 ML_SCIENTIST="${ML_SCIENTIST:-$REPO/../ml-scientist}"
 ISO="${LABLOOP_ISO:-}"
-RES_X=2560; RES_Y=1440
 VIRSH="virsh -c qemu:///system"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -45,6 +44,15 @@ note() { echo; echo "==> $*"; }
 if [ -f "$REPO/labloop.conf" ]; then . "$REPO/labloop.conf"; fi
 VCPUS="${LABLOOP_VCPUS:-16}"
 MEM_MIB="${LABLOOP_MEMORY_MIB:-16384}"
+RES_X="${LABLOOP_RES_X:-2560}"
+RES_Y="${LABLOOP_RES_Y:-1440}"
+REFRESH="${LABLOOP_REFRESH:-75}"
+# refresh must be a number in [30,75] — 59.94-style decimals allowed.
+# Out of range the EDID/modeline injection would produce nonsense.
+if ! awk -v r="$REFRESH" 'BEGIN{
+    exit !(r ~ /^[0-9]+(\.[0-9]+)?$/ && r+0 >= 30 && r+0 <= 75)}'; then
+    die "LABLOOP_REFRESH=$REFRESH invalid (need 30-75 Hz, decimals ok)"
+fi
 host_cores="$(nproc)"
 vcpu_cap=$(( host_cores * 3 / 4 )); [ "$vcpu_cap" -lt 1 ] && vcpu_cap=1
 if [ "$VCPUS" -gt "$vcpu_cap" ]; then
@@ -585,6 +593,20 @@ qga "install -d -m 0755 /usr/local/libexec && \
      install -m 0755 /tmp/labloop-panel-clock.sh /usr/local/libexec/ && \
      install -m 0644 /tmp/labloop-panel-clock.desktop /etc/xdg/autostart/ && \
      rm -f /tmp/labloop-panel-clock.*"
+
+note "display mode: ${RES_X}x${RES_Y} @ ${REFRESH} Hz (login autostart)"
+# the XML pins the EDID native mode; non-native rates (60, 59.94, 30…)
+# are injected by the login hook as a reduced-blanking modeline.
+printf 'RES_X=%s\nRES_Y=%s\nREFRESH=%s\n' "$RES_X" "$RES_Y" "$REFRESH" \
+    > "$WORK/display.conf"
+qga_push "$WORK/display.conf" /tmp/labloop-display.conf
+qga_push "$REPO/deploy/labloop-display.sh" /tmp/labloop-display.sh
+qga_push "$REPO/deploy/labloop-display.desktop" /tmp/labloop-display.desktop
+qga "install -d -m 0755 /usr/local/libexec /etc/labloop && \
+     install -m 0644 /tmp/labloop-display.conf /etc/labloop/display.conf && \
+     install -m 0755 /tmp/labloop-display.sh /usr/local/libexec/ && \
+     install -m 0644 /tmp/labloop-display.desktop /etc/xdg/autostart/ && \
+     rm -f /tmp/labloop-display.*"
 # best-effort immediate patch too — covers the case where lab's panel
 # config already exists (template re-provision after a session)
 qga "python3 - <<'EOF'

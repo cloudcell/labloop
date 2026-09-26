@@ -22,6 +22,15 @@ note() { echo "  ==> $*"; }
 TARGET=${1:?"usage: ./30-ensure-lab-tools.sh <vm>|all"}
 id -nG | grep -qw libvirt || exec sg libvirt -c "$0 $*"
 
+# labloop.conf carries the display target too — the ensure path renders
+# /etc/labloop/display.conf for the guest's login hook from it.
+if [ -f "$REPO/labloop.conf" ]; then . "$REPO/labloop.conf"; fi
+RES_X="${LABLOOP_RES_X:-2560}"
+RES_Y="${LABLOOP_RES_Y:-1440}"
+REFRESH="${LABLOOP_REFRESH:-75}"
+printf 'RES_X=%s\nRES_Y=%s\nREFRESH=%s\n' "$RES_X" "$RES_Y" "$REFRESH" \
+    > "$WORK/display.conf"
+
 # ------------------------------------------------------------------
 # qemu guest-agent driver (exec + push)
 # ------------------------------------------------------------------
@@ -101,9 +110,11 @@ ensure_vm() {
              GENESIS-RESEARCH-PROMPT.md DATA-MOVEMENT-MANUAL.md \
              AGENT-LAB-GUIDE.md SECURITY-MANUAL.md \
              check-lab-ready.sh \
+             labloop-display.sh labloop-display.desktop \
              opencode.json opencode.jsonc; do
         qga_push "$vm" "$REPO/deploy/$f" "/tmp/ensure-$f"
     done
+    qga_push "$vm" "$WORK/display.conf" /tmp/ensure-display.conf
     # render the hostile-zone ceiling against the guest's ACTUAL size
     # (~5/8 of its vcpus, ~3/4 of its RAM) — the quadlet carries
     # @EXP_CPUS@/@EXP_MEM_MIB@ placeholders
@@ -183,6 +194,11 @@ ensure_vm() {
                /home/mcp/.config/containers/systemd/lab-cnt-mcp.container &&
         cmp -s /tmp/ensure-entrypoint.sh \
                /srv/lab/workspace/ml-labloop/containers/mcp/entrypoint.sh &&
+        cmp -s /tmp/ensure-display.conf /etc/labloop/display.conf &&
+        cmp -s /tmp/ensure-labloop-display.sh \
+               /usr/local/libexec/labloop-display.sh &&
+        cmp -s /tmp/ensure-labloop-display.desktop \
+               /etc/xdg/autostart/labloop-display.desktop &&
         test -d /var/lib/labloop-export/user &&
         test -d /var/lib/labloop-export/root &&
         test -d /srv/lab/incoming &&
@@ -200,6 +216,13 @@ ensure_vm() {
             /usr/local/sbin/labloop-update-opencode &&
         install -m 0440 -o root -g root /tmp/ensure-labloop.sudoers /etc/sudoers.d/labloop &&
         install -m 0644 -o root -g root /tmp/ensure-labloop-tmpfiles.conf /etc/tmpfiles.d/labloop.conf &&
+        install -d -m 0755 /etc/labloop &&
+        install -m 0644 -o root -g root /tmp/ensure-display.conf \
+            /etc/labloop/display.conf &&
+        install -m 0755 -o root -g root /tmp/ensure-labloop-display.sh \
+            /usr/local/libexec/labloop-display.sh &&
+        install -m 0644 -o root -g root /tmp/ensure-labloop-display.desktop \
+            /etc/xdg/autostart/labloop-display.desktop &&
         systemd-tmpfiles --create /etc/tmpfiles.d/labloop.conf &&
         rm -rf /run/labloop-export &&
         install -d -m 0755 -o lab -g lab /srv/lab/incoming &&

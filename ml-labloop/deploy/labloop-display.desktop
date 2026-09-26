@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=LabLoop display mode (configured resolution/refresh)
+Exec=/usr/local/libexec/labloop-display.sh
+NoDisplay=true
+X-XFCE-Autostart-Enabled=true
