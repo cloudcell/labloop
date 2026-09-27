@@ -209,7 +209,7 @@ def render_trial_detail(
                 )
             extra_hash_row = f'<tr><th>extra_code_hashes</th><td>{", ".join(extra_links)}</td></tr>'
         bundle_html = f"""
-        <div class="section">
+        <div class="section" id="bundle">
             <h2>Bundle{data_refs_badge}</h2>
             <table>
                 <tr><th>code_hash</th><td><a href="#code-{escape((bundle.code_hash or '')[:12])}"><span class="hash-prefix">{escape(bundle.code_hash or '—')}</span></a></td></tr>

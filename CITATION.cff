@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "LabLoop — isolated KVM lab for agentic ML experimentation (ML-LabLoop + ML-Scientist)"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Bikeyev
+    given-names: Alexander
+    affiliation: Cloudcell Limited
+license: Apache-2.0
+version: "0.0.1"
+date-released: 2026-09-25
+repository-code: "https://github.com/cloudcell/labloop"
+repository-artifact: "https://huggingface.co/buckets/cloudcell/LabLoop"
+abstract: >-
+  LabLoop is a secure, reproducible, per-user experimentation lab for
+  agentic ML work: an isolated KVM/libvirt VM containing VSCodium with
+  AI coding agents, a trusted zone of scientific-state MCP services
+  (agora, arete, zetesis, episteme, anamnesis), and a hostile zone for
+  controlled execution of generated or untrusted experiment code —
+  with rootless Podman, pull-only extraction and push-only ingest
+  channels over the QEMU guest agent, and a frozen, clonable template
+  built unattended from a Linux Mint ISO.
+keywords:
+  - machine-learning
+  - sandboxing
+  - reproducibility
+  - KVM
+  - MCP
+  - experiment-management

@@ -225,6 +225,26 @@ def create_observability_app(
             status_code=404,
         )
 
+    def bundle_shortcut(request: Request) -> Response:
+        """Redirect /bundle/{id} → its trial page's bundle anchor."""
+        bid = request.path_params["bundle_id"]
+        bundle = store.get_bundle(bid)
+        if bundle is not None:
+            trial = store.get_trial(bundle.trial_id)
+            if trial is not None:
+                if url := _archived_programme_url(trial.programme_id):
+                    return RedirectResponse(
+                        f"{url}/trial/{trial.id}#bundle"
+                    )
+                return RedirectResponse(
+                    f"/programme/{trial.programme_id}/trial/"
+                    f"{trial.id}#bundle"
+                )
+        return HTMLResponse(
+            render_error(f"Bundle not found: {bid}", 404),
+            status_code=404,
+        )
+
     def belief_shortcut(request: Request) -> Response:
         """Redirect /belief/{id} → its programme's belief page."""
         bid = request.path_params["belief_id"]
@@ -529,6 +549,7 @@ def create_observability_app(
         Route("/programme/{programme_id}/budget", programme_budget_partial),
         Route("/programme/{programme_id}/trial/{trial_id}", trial_detail),
         Route("/trial/{trial_id}", trial_shortcut),
+        Route("/bundle/{bundle_id}", bundle_shortcut),
         Route("/hypothesis/{hypothesis_id}", hypothesis_shortcut),
         Route("/conclusion/{conclusion_id}", conclusion_shortcut),
         Route("/observation/{observation_id}", observation_shortcut),

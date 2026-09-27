@@ -62,6 +62,7 @@ _PEER_REF_ROUTES = (
     ("cres-", "zetesis", "/campaign-result/"),
     ("spol-", "zetesis", "/search-policy/"),
     ("trial-", "episteme", "/trial/"),
+    ("bundle-", "episteme", "/bundle/"),
     ("prog-", "episteme", "/programme/"),
     ("contract-", "episteme", "/contract/"),
     ("archive-", "episteme", "/archive/"),
@@ -86,6 +87,10 @@ def _ref_link(to_ref: str, ref_type: str) -> str:
     """claim refs link locally; known peer prefixes link cross-GUI."""
     if ref_type == "claim":
         return f'<a class="mono" href="/claim/{escape(to_ref)}">{escape(to_ref)}</a>'
+    if to_ref.startswith("edge-"):
+        # Claim edges are anamnesis-local rows — the /edge/ resolver
+        # lands on the owning claim's anchored row.
+        return f'<a class="mono" href="/edge/{escape(to_ref)}">{escape(to_ref)}</a>'
     if to_ref.startswith("eref-"):
         return (
             f'<a class="mono" href="/ref/{escape(to_ref)}" '
@@ -275,7 +280,7 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
     in_edges = store.edges_to(claim_id)
 
     out_rows = "".join(
-        "<tr>"
+        f'<tr id="edge-{escape(e.id)}">'
         f"<td>{_rel_badge(e.relation.value)}</td>"
         f"<td>{_ref_link(e.to_ref, e.ref_type.value)}</td>"
         f'<td class="muted">{escape(e.ref_type.value)}</td>'
@@ -286,7 +291,7 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
     ) or '<tr><td colspan="5" class="muted">No outgoing edges — this claim cites nothing.</td></tr>'
 
     in_rows = "".join(
-        "<tr>"
+        f'<tr id="edge-{escape(e.id)}">'
         f'<td><a class="mono" href="/claim/{escape(e.from_claim)}">{escape(e.from_claim)}</a></td>'
         f"<td>{_rel_badge(e.relation.value)}</td>"
         f"<td>{e.weight:.2f}</td>"

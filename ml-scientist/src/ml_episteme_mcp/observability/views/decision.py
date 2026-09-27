@@ -18,6 +18,7 @@ from ..templates import (
 # all of which resolve inside this GUI.
 _LOCAL_REF_ROUTES = (
     ("trial-", "/trial/"),
+    ("bundle-", "/bundle/"),
     ("prog-", "/programme/"),
     ("hyp-", "/hypothesis/"),
     ("obs-", "/observation/"),

@@ -28,6 +28,7 @@ def episteme_client(tmp_path):
     )
     from ml_episteme_mcp.state.models import (
         Belief,
+        Bundle,
         CandidateVersion,
         Conclusion,
         EvaluationContract,
@@ -55,7 +56,12 @@ def episteme_client(tmp_path):
         variables_involved=["depth"]))
     store.create_trial(Trial(
         id="trial-test1", programme_id="prog-test1",
-        hypothesis_id="hyp-test1", config_json='{"depth": 4}'))
+        hypothesis_id="hyp-test1", config_json='{"depth": 4}',
+        bundle_id="bundle-test1"))
+    store.create_bundle(Bundle(
+        id="bundle-test1", trial_id="trial-test1",
+        code_ref="/tmp/quick.py", env_ref="env:test",
+        seeds_json="[1]", splits_json="{}"))
     store.create_observation(Observation(
         id="obs-test1", trial_id="trial-test1",
         metrics_json='{"val_perplexity": 11.03}',
@@ -141,6 +147,18 @@ class TestEpistemeEntityRoutes:
         assert (
             r.headers["location"] == "/programme/prog-test1/belief")
 
+    def test_bundle_redirects_to_trial_anchor(self, episteme_client):
+        r = episteme_client.get(
+            "/bundle/bundle-test1", follow_redirects=False)
+        assert r.status_code == 307
+        assert (
+            r.headers["location"]
+            == "/programme/prog-test1/trial/trial-test1#bundle")
+
+    def test_bundle_anchor_exists_on_trial(self, episteme_client):
+        r = episteme_client.get("/programme/prog-test1/trial/trial-test1")
+        assert 'id="bundle"' in r.text
+
     def test_shortcuts_404_on_unknown(self, episteme_client):
         for path in (
             "/hypothesis/hyp-ghost",
@@ -148,6 +166,7 @@ class TestEpistemeEntityRoutes:
             "/conclusion/conc-ghost",
             "/belief/belief-ghost",
             "/decision/decision-ghost",
+            "/bundle/bundle-ghost",
         ):
             assert episteme_client.get(path).status_code == 404, path
 
@@ -435,6 +454,7 @@ class TestRefLinkCoverage:
             ("decision-x", "http://epi.gui/decision/decision-x"),
             ("belief-x", "http://epi.gui/belief/belief-x"),
             ("data-ref-x", "http://epi.gui/dataref/data-ref-x"),
+            ("bundle-x", "http://epi.gui/bundle/bundle-x"),
         ],
     )
     def test_prefix_links(self, ref_id, expected):
@@ -453,6 +473,16 @@ class TestRefLinkCoverage:
         html = _ref_link("claim-x", "claim")
         assert 'href="/claim/claim-x"' in html
 
+    def test_edge_refs_link_locally(self):
+        """edge-* ids are anamnesis-local rows — /edge/ resolves the
+        owning claim at click time."""
+        from ml_anamnesis_mcp.observability.views.claims import (
+            _ref_link,
+        )
+
+        html = _ref_link("edge-x", "external")
+        assert 'href="/edge/edge-x"' in html
+
     def test_eref_routes_through_resolver(self):
         from ml_anamnesis_mcp.observability.views.claims import (
             _ref_link,
@@ -469,3 +499,60 @@ class TestRefLinkCoverage:
         html = _ref_link("vack-x", "entity")
         assert "<a " not in html
         assert "vack-x" in html
+
+
+# ------------------------------------------------------------------
+# Anamnesis — /edge resolver (rc-7b: edge-* refs were unlinked)
+# ------------------------------------------------------------------
+
+
+@pytest.fixture
+def anamnesis_client(tmp_path):
+    from ml_anamnesis_mcp.observability.server import (
+        create_observability_app,
+    )
+    from ml_anamnesis_mcp.state.models import (
+        Claim,
+        ClaimEdge,
+        ClaimType,
+        RefType,
+        Relation,
+    )
+    from ml_anamnesis_mcp.state.store import MemoryStore
+
+    store = MemoryStore(str(tmp_path / "memory.db"))
+    store.connect()
+    store.create_claim(Claim(
+        id="claim-test1", content="edge target claim",
+        type=ClaimType.empirical, confidence=0.5,
+        content_hash="h1"))
+    store.create_claim(Claim(
+        id="claim-test2", content="citing claim",
+        type=ClaimType.empirical, confidence=0.5,
+        content_hash="h2"))
+    store.create_edge(ClaimEdge(
+        id="edge-test1", from_claim="claim-test2",
+        to_ref="claim-test1", ref_type=RefType.claim,
+        relation=Relation.supports))
+    app = create_observability_app(store)
+    yield TestClient(app)
+    store.close()
+
+
+class TestAnamnesisEdgeRoute:
+    def test_edge_redirects_to_claim_anchor(self, anamnesis_client):
+        r = anamnesis_client.get(
+            "/edge/edge-test1", follow_redirects=False)
+        assert r.status_code == 307
+        assert (
+            r.headers["location"]
+            == "/claim/claim-test2#edge-edge-test1")
+
+    def test_edge_anchor_exists_on_claim(self, anamnesis_client):
+        r = anamnesis_client.get("/claim/claim-test2")
+        assert 'id="edge-edge-test1"' in r.text
+
+    def test_edge_404_on_unknown(self, anamnesis_client):
+        assert (
+            anamnesis_client.get("/edge/edge-ghost").status_code == 404
+        )

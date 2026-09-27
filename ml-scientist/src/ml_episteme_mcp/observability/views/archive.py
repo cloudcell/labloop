@@ -543,7 +543,7 @@ def render_archived_trial_detail(
                 )
             extra_hash_html = f'<tr><th>Extra Code Hashes</th><td>{", ".join(extra_links)}</td></tr>'
         bundle_html += f"""
-        <table>
+        <table id="bundle">
             <tr><th>Bundle ID</th><td><code>{escape(b['id'])}</code></td></tr>
             <tr><th>Code Hash</th><td><a href="#code-{escape((b.get('code_hash') or '')[:12])}"><span class="hash-prefix">{escape(b.get('code_hash', '—'))}</span></a></td></tr>
             {extra_hash_html}

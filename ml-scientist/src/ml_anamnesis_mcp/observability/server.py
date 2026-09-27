@@ -64,6 +64,21 @@ def create_observability_app(
             request.path_params["ref_id"]
         )
 
+    def edge_shortcut(request: Request) -> Response:
+        """Redirect /edge/{id} → its claim page's edge- anchor."""
+        from starlette.responses import RedirectResponse
+
+        eid = request.path_params["edge_id"]
+        edge = store.get_edge(eid)
+        if edge is not None:
+            return RedirectResponse(
+                f"/claim/{edge.from_claim}#edge-{eid}"
+            )
+        return HTMLResponse(
+            render_error(f"Edge not found: {eid}", 404),
+            status_code=404,
+        )
+
     def health(request: Request) -> Response:
         """Liveness probe — JSON for plain probes, pill fragment for HTMX."""
         import httpx
@@ -153,6 +168,7 @@ def create_observability_app(
         Route("/favicon.ico", favicon),
         Route("/claim/{claim_id}", claim_detail),
         Route("/ref/{ref_id}", ref_redirect),
+        Route("/edge/{edge_id}", edge_shortcut),
         Route("/integrity", integrity),
         Route("/integrity/help", integrity_help),
         Route("/integrity/status", integrity_status),
