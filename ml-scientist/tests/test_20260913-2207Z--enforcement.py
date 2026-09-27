@@ -1316,7 +1316,7 @@ class TestCandidateLineage:
             r = await call_tool(client, "record_promotion_decision", {
                 "candidate_id": cand["candidate_id"],
                 "verdict": "promote",
-                "evidence_refs": ["trial-1", "obs-1"],
+                "evidence_refs": [cand["candidate_id"]],
                 "rationale": "held-out improvement replicated",
                 "decided_by": "human",
             })
@@ -1390,7 +1390,9 @@ class TestCandidateReadSurface:
         args = {
             "candidate_id": candidate_id,
             "verdict": verdict,
-            "evidence_refs": ["trial-1"],
+            # The candidate id is a real Loop-0 entity — rc-7 Q4 made
+            # fabricated Loop-0 refs a named error.
+            "evidence_refs": [candidate_id],
             "rationale": "test decision",
             "decided_by": "human:tester",
         }
@@ -1596,7 +1598,7 @@ class TestDecisionEvidenceGate:
             r = await call_tool(client, "record_promotion_decision", {
                 "candidate_id": cand,
                 "verdict": "promote",
-                "evidence_refs": ["trial-x9"],
+                "evidence_refs": [cand],
                 "rationale": "held-out improvement",
                 "decided_by": "human:tester",
             })

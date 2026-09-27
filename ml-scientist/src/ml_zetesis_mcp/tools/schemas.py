@@ -133,6 +133,7 @@ class AbandonCampaignOut(TypedDict, total=False):
     campaign_id: str | None
     status: str | None
     abandoned_by: str | None
+    abandoned_at: str | None
 
 
 class DropFindingOut(TypedDict, total=False):
@@ -237,6 +238,12 @@ class AcknowledgeViolationOut(TypedDict, total=False):
     status: str | None
     matched_open_violation: bool | None
     open_violations: int | None
+
+class ReadResourceOut(TypedDict, total=False):
+    uri: str | None
+    contents: list[dict] | None
+
+
 
 
 class ListCandidatesOut(TypedDict, total=False):

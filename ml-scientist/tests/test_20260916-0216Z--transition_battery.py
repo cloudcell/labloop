@@ -838,12 +838,16 @@ class TestLineage:
                     "metrics": {"primary": "accuracy"},
                     "promotion_policy": {"rule": "beat champion"},
                 })
+                # rc-7 Q4 — fabricated Loop-0 refs are refused; cite a
+                # real trial.
+                hid = await mk_hypothesis(s, pid)
+                tid = await design_trial(s, pid, hid)
                 args = {
                     "candidate_id": c["candidate_id"],
                     "contract_id": ct["contract_id"],
                     "verdict": "promote", "rationale": "won",
                     "decided_by": "battery",
-                    "evidence_refs": ["trial-ev1"],
+                    "evidence_refs": [tid],
                 }
                 # invalid verdict
                 bad = dict(args, verdict="crown")

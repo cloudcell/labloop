@@ -103,7 +103,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
     @mcp.tool()
     async def open_arm_campaign(
         tournament_id: Annotated[str, Field(description='ID of the target tournament.')],
-        arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm whose descendant campaign to open: 'parent' | 'candidate'. One campaign per arm.")],
+        arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm to scope the campaign to: 'parent' | 'candidate'. The opened campaign is still a complete two-arm (champion vs challenger) campaign — arm names WHICH tournament context it evaluates, not a single campaign arm.")],
         upstream_contract_id: Annotated[str, Field(description="The upstream evaluation contract the arm's campaign is scored under.")],
         challenger_id: Annotated[str, Field(description="Roster ID of the challenger arm's candidate.")],
         seeds: Annotated[list | str | None, Field(description='Seed set for the arm (list of ints); may be JSON-encoded.')] = None,
@@ -113,8 +113,11 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         Pushes open_campaign through the orchestration channel with
         the tournament's budget carried verbatim — the caller cannot
         redefine it. Records a tournament_campaigns link so the
-        correlation is a data row, not prose. One campaign per arm:
-        a retry on an already-linked arm returns the existing link
+        correlation is a data row, not prose. One campaign per
+        tournament arm — but the campaign itself is a complete
+        two-arm (champion vs challenger) campaign scoped to this arm's
+        context: both of its arms must be spawned before it can close.
+        A retry on an already-linked arm returns the existing link
         rather than multiplying campaigns upstream.
         """
         try:

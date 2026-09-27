@@ -39,6 +39,14 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         Two regimes:
         - generated: runs the generator (via executor), stores output,
           computes hash. Requires generator_code_ref, generator_seed.
+          Generator contract: the file must expose
+          generate_data(config, output_path) — config carries 'seed'
+          plus generator_params; the dataset is written to
+          output_path. A generator may print a single-line
+          {"error": "..."} JSON object to stdout to report a
+          structured failure. The generator runs under the executor's
+          default interpreter ([executor] python) — not a bundle env;
+          only packages installed there are importable.
         - captured: registers an external URI, computes hash if accessible.
           Requires source_uri.
 

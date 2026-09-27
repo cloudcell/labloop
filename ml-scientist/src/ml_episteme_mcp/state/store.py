@@ -2429,15 +2429,24 @@ class StateStore:
             if content_type is None:
                 content_type = "application/octet-stream"
 
-            # Determine artifact type from filename
-            name_lower = fp.name.lower()
-            if "stderr" in name_lower:
+            # Determine artifact type from filename — role suffixes
+            # (the executor's _stderr.log / _stdout.json /
+            # _manifest.json / _wrapper.py conventions) take
+            # precedence over incidental substrings: a code file
+            # named huge_stderr.py is a script, not a stderr log.
+            stem = fp.stem.lower()
+            suffix = fp.suffix.lower()
+            if (
+                stem == "stderr" or stem.endswith("_stderr")
+            ) and suffix in (".log", ".txt"):
                 art_type = "stderr"
-            elif "stdout" in name_lower:
+            elif (
+                stem == "stdout" or stem.endswith("_stdout")
+            ) and suffix in (".log", ".json", ".txt"):
                 art_type = "stdout"
-            elif "manifest" in name_lower:
+            elif stem == "manifest" or stem.endswith("_manifest"):
                 art_type = "manifest"
-            elif "wrapper" in name_lower or fp.suffix == ".py":
+            elif stem.endswith("_wrapper") or suffix == ".py":
                 art_type = "wrapper"
             else:
                 art_type = "other"

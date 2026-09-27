@@ -108,10 +108,14 @@ PART E — code-seal overlay (runs under every outcome)
     SEALED bytes — its stdout must not contain TAMPERED. Report the
     executor_output.seal_enforced and sealed_overlays fields and the
     stdout verbatim.
-15. Delete the live source file entirely and run again — sealed
-    execution must still succeed (staged bytes are mounted over the
-    missing path). If it fails, report the error verbatim — the seal
-    claims to cover deletion.
+15. Delete the live source file entirely and run again — the executor
+    must REFUSE the launch by name (`launch_refused: true`,
+    `seal_enforced: false`, error naming the missing path). bwrap
+    cannot create a mountpoint for a deleted target, so the seal's
+    guarantee is "sealed bytes or no run" — a refused launch is not
+    an execution and is the correct fail-closed behavior. If the run
+    instead *succeeds* or fails with an opaque mount error, that is
+    the defect — report the executor_output verbatim.
 16. check_invariants → strace_divergence must NOT fire for the
     tampered runs (the executed code WAS the sealed bundle). Report
     the check result.

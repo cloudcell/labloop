@@ -96,6 +96,7 @@ class RecordMetaDecisionOut(TypedDict, total=False):
     verdict: str | None
     claim_id: str | None
     claim_status: str | None
+    claim_error: str | None
     edges_created: int | None
 
 
@@ -262,6 +263,12 @@ class AcknowledgeViolationOut(TypedDict, total=False):
     status: str | None
     matched_open_violation: bool | None
     open_violations: int | None
+
+class ReadResourceOut(TypedDict, total=False):
+    uri: str | None
+    contents: list[dict] | None
+
+
 
 
 class PullEvidenceOut(TypedDict, total=False):

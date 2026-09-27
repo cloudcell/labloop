@@ -198,6 +198,56 @@ def _check_unscoreable_campaigns(store) -> dict:
     )
 
 
+def _check_unrunnable_campaigns(store) -> dict:
+    """Open campaigns that can never produce results: they carry an
+    orchestration budget that fails carryability (missing/incorrect
+    programmes_per_arm or trials_per_programme), have no spawn
+    records, and no campaign results. unscoreable_campaigns only sees
+    rows that exist — this check sees the campaign with no way to get
+    any. Budget-free campaigns are caller-driven and don't flag.
+    Reported, not auto-gating; abandon_campaign is the exit."""
+    from ml_zetesis_mcp.enforcement.checks import (
+        check_campaign_budget_carryable,
+    )
+
+    rows = store._fetchall(
+        """SELECT c.id, c.budget_json
+           FROM promotion_campaigns c
+           WHERE c.status = 'open'
+             AND c.budget_json IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM campaign_spawns s
+                 WHERE s.campaign_id = c.id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM campaign_results r
+                 WHERE r.campaign_id = c.id)"""
+    )
+    violations = []
+    for r in rows:
+        try:
+            budget = json.loads(r["budget_json"])
+        except (ValueError, TypeError):
+            budget = {}
+        # An empty budget is caller-driven, not orchestration-bound —
+        # the wedge signature is a *declared* budget that can't spawn.
+        if not budget:
+            continue
+        reason = check_campaign_budget_carryable(budget)
+        if reason is not None:
+            violations.append({
+                "campaign_id": r["id"],
+                "budget": budget,
+                "reason": reason,
+                "exit": "abandon_campaign",
+            })
+    return _res(
+        "unrunnable_campaigns", violations,
+        f"{len(violations)} open campaign(s) carry a budget that "
+        "cannot spawn programmes and have produced nothing "
+        "(structurally wedged; abandon_campaign is the exit)",
+    )
+
+
 def _check_campaign_results_have_campaign(store) -> dict:
     """Campaign results referencing a nonexistent campaign — an
     orphaned result is provenance pointing nowhere."""
@@ -376,6 +426,7 @@ async def run_checks(
         _check_concluded_unminted(store),
         _check_closed_campaigns_scored(store),
         _check_unscoreable_campaigns(store),
+        _check_unrunnable_campaigns(store),
         _check_campaign_results_have_campaign(store),
         _check_spawns_have_campaign(store),
         _check_spawn_budget(store),

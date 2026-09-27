@@ -169,6 +169,10 @@ class MCPClientAdaptor:
         await self._ready.wait()
         if self._error:
             raise self._error
+        # The channel just proved healthy — last_error is transient
+        # (current state), unlike last_failed_* which stay sticky to
+        # name the *last* failure.
+        self.last_error = None
 
     async def disconnect(self) -> None:
         """Disconnect from the upstream MCP server."""
@@ -213,6 +217,10 @@ class MCPClientAdaptor:
             self.last_failed_operation = name
             self.last_failed_at = _utc_now()
             raise result
+        # Transport-level success — the channel is healthy. An
+        # is_error verdict raised above is the upstream's word, not a
+        # channel fault, and does not reach this clear.
+        self.last_error = None
         return result
 
     async def ping(self, timeout: float = 5.0) -> float:
@@ -259,6 +267,7 @@ class MCPClientAdaptor:
         self.last_probe_state = "ok"
         self.last_probe_at = _utc_now()
         self.last_probe_ms = round((time.monotonic() - start) * 1000, 1)
+        self.last_error = None  # a pinged-ok channel is healthy
         return self.last_probe_ms
 
     async def list_tools(self) -> list[str]:

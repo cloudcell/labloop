@@ -70,10 +70,12 @@ PART B — the dead-peer case
 PART C — recovery + sticky attribution
 
 9. Restart anamnesis. Within a few supervisor ticks the channels must
-   return up. Verify: last_error now reflects current state (cleared
-   or a fresh cause), but last_failed_operation / last_failed_at still
-   name the FAULT that killed the channel — the attribution is
-   sticky, the error is transient. Report both fields verbatim.
+   return up. Verify — STRICT: once state is "up" and probe is "ok",
+   last_error must be `null` (not a fresh cause, not the stale
+   ConnectError — rc-7b found the stale error surviving the heal),
+   while last_failed_operation / last_failed_at still name the FAULT
+   that killed the channel — the attribution is sticky, the error is
+   transient and current-tense. Report both fields verbatim.
 
 PART D — the mid-flight case (best-effort)
 

@@ -196,8 +196,10 @@ class TestSurfaces:
 
         async with Client(agora_server) as client:
             tools = await client.list_tools()
-            names = [t.name for t in tools.tools]
-            assert names == ["check_invariants"]
+            names = sorted(t.name for t in tools.tools)
+            # read_resource (rc-7 Q6) is read-only — consistent with
+            # the hub's posture; it is still not a write surface.
+            assert names == ["check_invariants", "read_resource"]
 
 
 async def test_topology_channels_carry_fault_fields(agora_server):

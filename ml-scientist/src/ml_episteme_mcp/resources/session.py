@@ -202,6 +202,7 @@ TOOL_CATALOG = [
     # Integrity — content-address resolution (read-only)
     {"name": "describe_blob", "category": "integrity", "description": "Resolve a content digest to held bytes across the blob stores"},
     {"name": "get_blob", "category": "integrity", "description": "Retrieve a blob's verified bytes by digest (base64)"},
+    {"name": "read_resource", "category": "integrity", "description": "Read one of this server's resources by URI — the resources/read surface for tool-only clients (read-only)"},
 ]
 
 STATE_MACHINE = {

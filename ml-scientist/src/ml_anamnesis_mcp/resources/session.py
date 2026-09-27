@@ -29,6 +29,8 @@ TOOL_CATALOG = [
      "description": "Audit the claim store against its invariants"},
     {"name": "acknowledge_violation", "category": "integrity",
      "description": "Acknowledge an open violation — clears the write gate"},
+    {"name": "read_resource", "category": "integrity",
+     "description": "Read one of this server's resources by URI — the resources/read surface for tool-only clients (read-only)"},
 ]
 
 BOUNDARY_NOTE = (

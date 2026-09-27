@@ -438,6 +438,11 @@ class AcknowledgeViolationOut(TypedDict, total=False):
     open_violations: int | None
 
 
+class ReadResourceOut(TypedDict, total=False):
+    uri: str | None
+    contents: list[dict] | None
+
+
 class DescribeBlobOut(TypedDict, total=False):
     exists: bool | None
     resolved_in: list[str] | None

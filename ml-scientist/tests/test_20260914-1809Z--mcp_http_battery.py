@@ -1,6 +1,7 @@
 """Smoke test: verify the HTTP server fixture works."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -28,7 +29,7 @@ class TestInfrastructure:
             assert resp.status == 200
             body = json.loads(resp.read())
             assert body["status"] in ("ok", "violations")
-            assert len(body["checks"]) == 11
+            assert len(body["checks"]) == 12
             assert "log_file" in body
 
     async def test_server_starts_and_lists_tools(self, server_url):
@@ -1198,7 +1199,9 @@ class TestCandidateLineageHTTP:
             "candidate_id": cand,
             "contract_id": contract["contract_id"],
             "verdict": "hold",
-            "evidence_refs": '["trial-x"]',
+            # rc-7 Q4 — cite a real Loop-0 id (the contract), not a
+            # fabricated trial-*.
+            "evidence_refs": json.dumps([contract["contract_id"]]),
             "rationale": "awaiting replication",
             "decided_by": "human",
         })

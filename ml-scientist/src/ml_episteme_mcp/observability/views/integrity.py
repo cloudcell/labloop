@@ -81,6 +81,18 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "Skipped when no executor is wired.",
     ),
     (
+        "terminal_with_live_executor",
+        "A terminal (<code>retryable</code>/<code>failed</code>/"
+        "<code>abandoned</code>) trial whose executor task is still "
+        "live, or whose recorded "
+        "<code>executor_output.duration_seconds</code> exceeds the "
+        "row's started→finished window — the leaked-subprocess "
+        "signature: the row went terminal but the process ran past "
+        "the mark (e.g. a cancel that landed inside the spawn). "
+        "A restart clears the in-memory task; the residue record "
+        "stays for audit.",
+    ),
+    (
         "completed_without_observation",
         "A <code>completed</code> trial past "
         "<code>observation_grace_seconds</code> (default 86400s — "

@@ -618,6 +618,37 @@ def check_decision_valid(
             "evidence_refs requires ≥1 id — a verdict with no cited "
             "evidence is an ungrounded decision and cannot be recorded."
         )
+    # Existence is validated only for ids this loop mints — a ref
+    # with a Loop-0 prefix naming nothing here is fabricated.
+    # Other-loop prefixes (eref-, mdec-, claim-, camp-, ...) are
+    # opaque references per the protocol convention and pass through.
+    if evidence_refs:
+        _LOOP0_GETTERS = (
+            ("bundle-", store.get_bundle),
+            ("trial-", store.get_trial),
+            ("prog-", store.get_programme),
+            ("obs-", store.get_observation),
+            ("hyp-", store.get_hypothesis),
+            ("decision-", store.get_promotion_decision),
+            ("contract-", store.get_evaluation_contract),
+            ("conc-", store.get_conclusion),
+            ("cand-", store.get_candidate_version),
+            ("belief-", store.get_belief_by_id),
+            ("data-ref-", store.get_data_ref),
+        )
+        missing = []
+        for ref in evidence_refs:
+            for prefix, getter in _LOOP0_GETTERS:
+                if ref.startswith(prefix):
+                    if getter(ref) is None:
+                        missing.append(ref)
+                    break
+        if missing:
+            return (
+                f"evidence_refs reference nonexistent Loop-0 entities: "
+                f"{', '.join(sorted(missing))} — ids minted by this "
+                "server must resolve before a verdict can cite them."
+            )
     if store.get_candidate_version(candidate_id) is None:
         return f"Candidate not found: {candidate_id}."
     if contract_id is not None and store.get_evaluation_contract(contract_id) is None:

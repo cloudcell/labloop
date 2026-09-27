@@ -30,6 +30,14 @@ def register(mcp) -> None:
         return json.dumps({
             "server": "ml-arete-mcp",
             "source": "ADR-0003 boundary classes",
+            "adr_class_map": {
+                "immutable": "first class — immutable / "
+                             "human-governed",
+                "modifiable": "second class — recursively modifiable "
+                              "under evaluation",
+                "conditional": "third class — conditionally "
+                               "modifiable (external review)",
+            },
             "classes": {
                 "immutable": sorted(CLASS_IMMUTABLE),
                 "conditional": sorted(CLASS_CONDITIONAL),

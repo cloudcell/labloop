@@ -183,6 +183,7 @@ class MetaDecision(BaseModel):
     rationale: str
     decided_by: str
     claim_id: str | None = None
+    claim_error: str | None = None
     created_at: str = Field(default_factory=_utc_now)
 
 

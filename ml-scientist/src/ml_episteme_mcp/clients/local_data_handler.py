@@ -151,7 +151,22 @@ class LocalDataHandler(DataSourceRole):
         generator_seed: int | None,
         generator_params: dict[str, Any] | None,
     ) -> str:
-        """Prepare generated data by running the generator."""
+        """Prepare generated data by running the generator.
+
+        Generator contract: generator_code_ref names a Python file
+        exposing ``generate_data(config, output_path)`` — config is a
+        dict carrying ``seed`` plus generator_params, output_path is
+        where the dataset must be written. A generator may also print
+        a single-line ``{"error": "..."}`` JSON object to stdout to
+        report a structured failure; that payload is surfaced when the
+        run fails.
+
+        Environment: the generator runs under the executor's default
+        interpreter (``[executor] python``), not a bundle env — no
+        env_ref exists at prepare time. Use only packages installed in
+        that interpreter; a numpy-based generator will fail if the
+        executor interpreter lacks numpy.
+        """
         if generator_code_ref is None:
             raise ValueError("generator_code_ref is required for generated data")
         if self._executor is None:
@@ -190,9 +205,27 @@ class LocalDataHandler(DataSourceRole):
 
         if result.get("status") != "completed":
             err = result.get("error") or "unknown"
+            # The wrapper reports structured failure as a single-line
+            # {"error": ...} JSON object on stdout — surface it, or a
+            # generator fault collapses to the bare exit code.
+            stdout = (result.get("stdout") or "").strip()
+            stdout_err = None
+            for line in stdout.splitlines():
+                try:
+                    payload = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(payload, dict) and payload.get("error"):
+                    stdout_err = str(payload["error"])
+            if stdout_err:
+                err = f"{err}; {stdout_err}"
+            elif stdout:
+                err = f"{err}; stdout: {_elide_stderr(stdout)}"
             stderr = (result.get("stderr") or "").strip()
             if stderr:
                 err = f"{err}; stderr: {_elide_stderr(stderr)}"
+            if output_path.exists():
+                err = f"{err}; partial output at {output_path}"
             raise RuntimeError(f"Generator failed: {err}")
 
         # Compute hash

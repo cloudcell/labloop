@@ -82,6 +82,10 @@ From the host:
 | `20260927-1450Z-integrity-report-honesty` | rc-6: phantom-ack `no_matching_violation` ×4 (P16), `input_data_undigested` denominators/`skipped` (P5), closed-programme exemption (P10), `improver://classes` (P11) |
 | `20260927-1455Z-retry-reason-ordering` | rc-6: durable `retry_reason` on mark_retryable + correct_trial_status (P14), terminal-before-cancel ordering (P18) |
 | `20260927-1500Z-stderr-elision-and-schema-docs` | rc-6: line-aligned head+tail stderr elision (P15), schema-doc truthfulness nits (P11) |
+| `20260927-1900Z-cancel-spawn-window-kill` | rc-7b: shielded spawn — cancel inside `create_subprocess_exec` kills the child (R1), late finalize keeps the full terminal row (R2), `terminal_with_live_executor` residue check (R3) |
+| `20260927-1905Z-channel-lasterror-heals` | rc-7b: `last_error` clears on connect/call/ping success across all four upstream clients; `last_failed_*` stay sticky (R4) |
+| `20260927-1910Z-claim-valid-until-expiry` | rc-7b: `assert_claim(valid_until=…)` — live→expired write path, normalization, naive/garbage refusals, row never deleted (R6) |
+| `20260927-1915Z-rc7-surface-verification` | rc-7 deferred verification — the last VM run predated the deploy: `read_resource` ×5 + agora routing, 13-check zetesis incl. `unrunnable_campaigns`, `abandoned_at`, `list_trials.retry_reason`, generator stdout error, artifact typing |
 
 The `20260927-03xxZ` set is the rc-5 verification battery — each
 targets one rc-5 fix and exercises both the valid path and the
@@ -89,4 +93,8 @@ negative/refused path the fix introduces. The `20260927-14xxZ` set is
 the rc-6 battery — one diagnostic per coherent fix cluster in
 `docs/e-plans/plan-20260927-1315Z--rc6-diagnostic-findings.md` (P1–P18;
 P0's roster fix is re-verified by `orphan-rollback-derivation`), again
-exercising both valid and refused paths.
+exercising both valid and refused paths. The `20260927-19xxZ` set is
+the rc-7b battery — regressions for the rc-7 VM run's findings
+(`docs/e-plans/plan-20260927-1746Z--rc7b-diagnostic-findings.md`)
+plus the rc-7 surface verification the stale VM build could not
+perform.

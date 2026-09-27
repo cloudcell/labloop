@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS promotion_campaigns (
     claim_id        TEXT,
     abandon_rationale TEXT,
     abandoned_by    TEXT,
+    abandoned_at    TEXT,
     created_at      TEXT NOT NULL,
     closed_at       TEXT
 );
@@ -236,12 +237,24 @@ class SearchStore:
                     "PRAGMA table_info(promotion_campaigns)"
                 )
             }
-            for col in ("abandon_rationale", "abandoned_by"):
+            for col in ("abandon_rationale", "abandoned_by",
+                        "abandoned_at"):
                 if col not in cols:
                     self.conn.execute(
                         f"ALTER TABLE promotion_campaigns "
                         f"ADD COLUMN {col} TEXT"
                     )
+            # Backfill: rows abandoned before abandoned_at existed had
+            # the abandonment instant stamped into closed_at. Move the
+            # value to abandoned_at and clear closed_at — the timestamp
+            # is preserved (provenance kept), the lie is removed.
+            self.conn.execute(
+                """UPDATE promotion_campaigns
+                   SET abandoned_at = closed_at, closed_at = NULL
+                   WHERE status = 'abandoned'
+                     AND abandoned_at IS NULL
+                     AND closed_at IS NOT NULL"""
+            )
             self.conn.commit()
 
     def close(self) -> None:
@@ -712,9 +725,12 @@ class SearchStore:
     def abandon_campaign(
         self, campaign_id: str, rationale: str, decided_by: str
     ) -> None:
+        # abandoned_at, not closed_at — an abandoned campaign never
+        # closed; stamping closed_at would lie to consumers filtering
+        # on it (rc-7 Q5).
         self._execute(
             """UPDATE promotion_campaigns
-               SET status = ?, closed_at = ?, abandon_rationale = ?,
+               SET status = ?, abandoned_at = ?, abandon_rationale = ?,
                    abandoned_by = ?
                WHERE id = ?""",
             (
@@ -763,6 +779,10 @@ class SearchStore:
             abandoned_by=(
                 row["abandoned_by"]
                 if "abandoned_by" in row.keys() else None
+            ),
+            abandoned_at=(
+                row["abandoned_at"]
+                if "abandoned_at" in row.keys() else None
             ),
             created_at=row["created_at"],
             closed_at=row["closed_at"],

@@ -356,11 +356,19 @@ def _finalize_trial(
         except Exception:
             pass  # never let output persistence mask finalization
 
-    # Check if trial is already terminal (idempotent finalization)
+    # Check if trial is already terminal (idempotent finalization).
+    # Full store projection — a late-arriving executor result must not
+    # thin the record: finished_at / retry_reason are the terminal
+    # truth and stay visible after the abandoned task's output lands.
     if trial is not None and trial.status.value in ("completed", "failed", "retryable"):
         return ok({
             "trial_id": trial_id,
             "status": trial.status.value,
+            "started_at": trial.started_at,
+            "finished_at": trial.finished_at,
+            "duration_seconds": trial.duration_seconds,
+            "artifact_path": trial.artifact_path,
+            "retry_reason": trial.retry_reason,
             "executor_output": output,
         })
 
@@ -1286,7 +1294,11 @@ def register(
     async def cancel_trial(programme_id: Annotated[str, Field(description='ID of the target research programme.')], trial_id: Annotated[str, Field(description='ID of the target trial.')]) -> Annotated[CallToolResult, CancelTrialOut]:
         """Cancel a running trial, or abandon a designed one.
 
-        running → failed: kills the subprocess, marks failed.
+        running → failed: kills the subprocess, marks failed. The
+        record's `failed` here reflects the cancellation act, not an
+        observed execution failure — `cancelled: true` in the payload
+        marks the distinction, and a `"No running task"` executor
+        error means the executor had already finished first.
         designed → abandoned: no executor to kill, no evidence lost —
         the honest terminal for a design that will never run (e.g. a
         bundle locked to code that no longer exists). The FSM has
@@ -1458,6 +1470,7 @@ def register(
                             "config": json.loads(t.config_json),
                             "bundle_id": t.bundle_id,
                             "status": t.status.value,
+                            "retry_reason": t.retry_reason,
                             "created_at": t.created_at,
                             "started_at": t.started_at,
                             "finished_at": t.finished_at,

@@ -179,15 +179,18 @@ def register(
     async def pull_evidence(
         investigation_id: Annotated[str, Field(description='ID of the target investigation.')],
         source: Annotated[Literal['loop0', 'anamnesis'], Field(description='Evidence source — the upstream read surface to pull through.')],
-        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate', 'get_candidate_lineage', 'get_candidate_scorecard', 'get_claim', 'get_evaluation_contract', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_programmes', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
+        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_candidate', 'get_candidate_lineage', 'get_candidate_scorecard', 'get_claim', 'get_evaluation_contract', 'get_incumbent', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_programmes', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — validity is per-source: loop0 allows list_active_programmes|list_hypotheses|list_trials|get_trial_status|assess_programme|get_candidate_lineage|list_archives|get_archive|get_archived_programme|list_candidates|get_candidate|list_promotion_decisions|get_incumbent|get_candidate_scorecard|list_programmes|get_evaluation_contract; anamnesis allows get_claim|list_claims|recall.")],
         args: Annotated[dict | str | None, Field(description='Arguments forwarded to the upstream tool; object or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, PullEvidenceOut]:
         """Read upstream evidence through the adaptor — and log it.
 
         source: "loop0" (ml-episteme read surface) or "anamnesis"
-        (claims memory reads). tool must be on the source's read
-        whitelist — the evidence channel is read-only; writes to Loop 0
-        belong to the promotion pipeline, not this tool.
+        (claims memory reads). The tool enum is the union of the
+        per-source whitelists — validity is per-source: loop0 accepts
+        the read tools listed on its whitelist, anamnesis only
+        get_claim|list_claims|recall. The evidence channel is
+        read-only; writes to Loop 0 belong to the promotion pipeline,
+        not this tool.
 
         Every pull is recorded as an evidence_ref — what was consulted,
         with which args, returning which entity ids. The trail is the

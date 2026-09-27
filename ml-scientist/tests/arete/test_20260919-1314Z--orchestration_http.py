@@ -80,7 +80,9 @@ async def _battery_setup(arete_orchestration_server):
     champion = await _mk_candidate(loop0)
     d = await call_tool_http(loop0, "record_promotion_decision", {
         "candidate_id": champion, "verdict": "promote",
-        "evidence_refs": ["trial-seed"],
+        # rc-7 Q4 — fabricated Loop-0 refs are refused; cite the real
+        # candidate id.
+        "evidence_refs": [champion],
         "rationale": "battery incumbent",
         "decided_by": "human:battery",
     })

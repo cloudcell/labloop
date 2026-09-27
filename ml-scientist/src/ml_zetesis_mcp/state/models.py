@@ -148,6 +148,7 @@ class PromotionCampaign(BaseModel):
     claim_id: str | None = None
     abandon_rationale: str | None = None
     abandoned_by: str | None = None
+    abandoned_at: str | None = None
     created_at: str = Field(default_factory=_utc_now)
     closed_at: str | None = None
 

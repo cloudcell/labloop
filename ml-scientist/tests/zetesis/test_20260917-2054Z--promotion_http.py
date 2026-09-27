@@ -32,7 +32,9 @@ async def _decide(loop0_url, candidate_id, verdict, **over):
     args = {
         "candidate_id": candidate_id,
         "verdict": verdict,
-        "evidence_refs": ["trial-battery"],
+        # rc-7 Q4 — fabricated Loop-0 refs are refused; the candidate
+        # is a real entity.
+        "evidence_refs": [candidate_id],
         "rationale": "battery decision",
         "decided_by": "human:battery",
     }

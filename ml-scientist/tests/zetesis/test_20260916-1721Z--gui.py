@@ -73,7 +73,9 @@ async def test_gui_promotion_pages(zetesis_promotion_server):
     }))["candidate_id"]
     await call_tool_http(loop0, "record_promotion_decision", {
         "candidate_id": champion, "verdict": "promote",
-        "evidence_refs": ["trial-g"], "rationale": "gui seed",
+        # rc-7 Q4 — fabricated Loop-0 refs are refused; cite the
+        # real candidate id.
+        "evidence_refs": [champion], "rationale": "gui seed",
         "decided_by": "human:gui",
     })
     await call_tool_http(zet, "refresh_roster", {"dry_run": False})

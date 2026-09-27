@@ -128,18 +128,24 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         class_map: {component_name: declared_boundary_class} for every
         component the delta touches — the kernel classifies
         authoritatively from the ADR-0003 table; the declaration is
-        kept for the record. Kernel classes (see improver://classes):
+        kept for the record. Kernel classes map onto ADR-0003's class
+        vocabulary (see improver://classes):
 
-        - immutable: audit_log, event_log, audit_semantics,
+        - immutable — ADR-0003 first class ("immutable /
+          human-governed"): audit_log, event_log, audit_semantics,
           artifact_hashing, provenance, artifact_provenance,
           capability_model, permission_model, permissions,
           budget_enforcement, compute_ceiling, compute_ceilings,
           budgets, promotion_protocol, holdout_access_control,
           heldout_access_control, held_out_evaluation_access,
           rollback_mechanism, enforcement_kernel, safety_kernel.
-        - conditional: evaluator_implementation, evaluator,
+        - conditional — ADR-0003 third class ("conditionally
+          modifiable"; human review before effect):
+          evaluator_implementation, evaluator,
           metric_weighting, metric_weights, memory_schema, scheduler.
-        - modifiable: prompts, policies, search_policy, planner,
+        - modifiable — ADR-0003 second class ("recursively modifiable
+          under evaluation"; promotion via the pipeline): prompts,
+          policies, search_policy, planner,
           planner_algorithm, optimizer_policy, optimizer,
           role_composition, memory_retrieval, retrieval_strategy,
           code_generation, codegen_strategy, experiment_templates,

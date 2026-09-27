@@ -27,6 +27,14 @@ def ok(payload: dict) -> CallToolResult:
     )
 
 
+def fail(msg: str) -> CallToolResult:
+    """Return a tool-error result — surfaces as MCP isError=True."""
+    return CallToolResult(
+        content=[TextContent(type="text", text=msg)],
+        is_error=True,
+    )
+
+
 # ── Declared output models (W5b) ────────────────────────────────
 
 
@@ -38,3 +46,9 @@ class CheckInvariantsOut(TypedDict, total=False):
     checks: list[dict] | None
     trigger: str | None
     log_file: str | None
+
+class ReadResourceOut(TypedDict, total=False):
+    uri: str | None
+    contents: list[dict] | None
+
+

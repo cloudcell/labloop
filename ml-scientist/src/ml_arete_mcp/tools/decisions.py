@@ -95,6 +95,7 @@ def _decision_json(d: MetaDecision) -> dict:
         "rationale": d.rationale,
         "decided_by": d.decided_by,
         "claim_id": d.claim_id,
+        "claim_error": d.claim_error,
         "created_at": d.created_at,
     }
 
@@ -197,6 +198,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             # exists so the claim's source_id names a durable record.
             claim_status = "skipped"
             claim_id = None
+            claim_error = None
             edges_created = 0
             if adaptors.claims is None:
                 claim_status = "disabled"
@@ -232,10 +234,14 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                     claim_id = minted["claim_id"]
                     edges_created += len(consulted)
                     claim_status = "minted"
-                except Exception:
+                except Exception as exc:
+                    # The mint reason must survive — a bare "failed"
+                    # is undiagnosable (rc-7 Q2).
                     claim_status = "failed"
+                    claim_error = str(exc)
 
             decision.claim_id = claim_id
+            decision.claim_error = claim_error
             store.create_meta_decision(decision)
 
             return ok({
@@ -243,6 +249,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "verdict": verdict,
                 "claim_id": claim_id,
                 "claim_status": claim_status,
+                "claim_error": claim_error,
                 "edges_created": edges_created,
             })
         except Exception as e:

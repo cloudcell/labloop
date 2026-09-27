@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 
 from ..enforcement.checks import (
     PRIOR_CONFIDENCE_MAX,
@@ -48,6 +49,7 @@ def register(
         evidence: Annotated[list | str | None, Field(description='List of {to_ref, ref_type, relation} dicts linking the claim to its support (e.g. {"to_ref": "trial-abc", "ref_type": "trial", "relation": "tested_by"}); may be JSON-encoded. Without ≥1 evidence-bearing edge, confidence is capped at 0.3.')] = None,
         supersedes_id: Annotated[str | None, Field(description='ID of an existing claim this one replaces — the supersedes edge is recorded automatically.')] = None,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity (decision/investigation) that minted this claim.')] = None,
+        valid_until: Annotated[str | None, Field(description="Optional ISO-8601 UTC expiry (e.g. '2026-12-31T00:00:00Z') — the claim's live→expired transition. Claims past valid_until are hidden from list_claims unless include_expired=true; the row is never deleted. A past timestamp mints an already-expired claim — allowed, the record says so.")] = None,
     ) -> Annotated[CallToolResult, AssertClaimOut]:
         """Assert a claim into the memory graph.
 
@@ -62,11 +64,30 @@ def register(
         existing claim this one replaces; the supersedes edge is
         recorded automatically. Claims are deduplicated by normalized
         content — re-asserting identical content returns the existing
-        claim_id.
+        claim_id. valid_until is the agent-reachable expiry: claims
+        past it leave the default list view but are never deleted.
         """
         try:
             if evidence is not None:
                 evidence = coerce_json(evidence, list, "evidence")
+
+            if valid_until is not None:
+                try:
+                    _dt = datetime.fromisoformat(
+                        valid_until.replace("Z", "+00:00")
+                    )
+                except (ValueError, AttributeError):
+                    return fail(json.dumps({
+                        "error": f"valid_until is not ISO-8601: {valid_until!r}"
+                    }))
+                if _dt.tzinfo is None:
+                    return fail(json.dumps({
+                        "error": "valid_until must be timezone-aware "
+                                 "(ISO-8601 UTC — e.g. 2026-12-31T00:00:00Z)"
+                    }))
+                # Normalize to UTC ISO — the expiry filter compares
+                # lexicographically against +00:00-suffixed now().
+                valid_until = _dt.astimezone(timezone.utc).isoformat()
 
             # Dedup first: re-asserting existing content is a lookup,
             # not a new claim — idempotent retries must not be gated
@@ -118,6 +139,7 @@ def register(
                 supersedes_id=supersedes_id,
                 content_hash=chash,
                 source_id=source_id,
+                valid_until=valid_until,
             )
 
             edge_specs = list(evidence)
@@ -149,6 +171,7 @@ def register(
             return ok({
                 "claim_id": claim.id,
                 "edge_ids": edge_ids,
+                "valid_until": claim.valid_until,
                 "status": "asserted",
             })
         except Exception as e:

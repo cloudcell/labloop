@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS meta_decisions (
     rationale TEXT NOT NULL,
     decided_by TEXT NOT NULL,
     claim_id TEXT,
+    claim_error TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_mdec_candidate
@@ -234,6 +235,16 @@ class ImproverStore:
         if "void_json" not in tcols:
             self.conn.execute(
                 "ALTER TABLE tournaments ADD COLUMN void_json TEXT"
+            )
+            self.conn.commit()
+        dcols = {
+            r[1] for r in self.conn.execute(
+                "PRAGMA table_info(meta_decisions)"
+            )
+        }
+        if "claim_error" not in dcols:
+            self.conn.execute(
+                "ALTER TABLE meta_decisions ADD COLUMN claim_error TEXT"
             )
             self.conn.commit()
 
@@ -832,15 +843,16 @@ class ImproverStore:
             """INSERT INTO meta_decisions
                (id, candidate_improver_id, contract_id, tournament_id,
                 verdict, evidence_refs_json, rationale, decided_by,
-                claim_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                claim_id, claim_error, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 decision.id, decision.candidate_improver_id,
                 decision.contract_id, decision.tournament_id,
                 decision.verdict.value,
                 json.dumps(decision.evidence_refs),
                 decision.rationale, decision.decided_by,
-                decision.claim_id, decision.created_at,
+                decision.claim_id, decision.claim_error,
+                decision.created_at,
             ),
         )
         self.conn.commit()
@@ -895,6 +907,7 @@ class ImproverStore:
             rationale=row["rationale"],
             decided_by=row["decided_by"],
             claim_id=row["claim_id"],
+            claim_error=row["claim_error"],
             created_at=row["created_at"],
         )
 

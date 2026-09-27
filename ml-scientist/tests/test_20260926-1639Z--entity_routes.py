@@ -389,10 +389,13 @@ class TestRefLinkCoverage:
 
     @pytest.fixture(autouse=True)
     def _peer_urls(self, monkeypatch):
-        from ml_anamnesis_mcp.observability import templates
+        # views.claims binds PEER_GUI_URLS at import time (from-import),
+        # so patching the templates attribute is dead once the module
+        # is cached — patch the name in the consuming module.
+        from ml_anamnesis_mcp.observability.views import claims
 
         monkeypatch.setattr(
-            templates, "PEER_GUI_URLS",
+            claims, "PEER_GUI_URLS",
             {
                 "episteme": "http://epi.gui",
                 "zetesis": "http://zet.gui",

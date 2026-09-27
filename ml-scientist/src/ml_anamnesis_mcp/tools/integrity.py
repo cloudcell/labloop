@@ -15,7 +15,7 @@ import json
 
 from ..integrity.checks import run_and_log
 from ..enforcement.recurrence import canonical_ref, violation_ack
-from .schemas import ok, AcknowledgeViolationOut, CheckInvariantsOut
+from .schemas import ok, fail, AcknowledgeViolationOut, CheckInvariantsOut, ReadResourceOut
 from mcp.types import CallToolResult
 
 
@@ -69,3 +69,31 @@ def register(mcp, store, integrity_config: dict | None = None) -> None:
         return ok(violation_ack(
             store, check_name, object_ref, disposition, decided_by,
         ))
+
+    @mcp.tool()
+    async def read_resource(
+        uri: Annotated[str, Field(description="Resource URI to read — this server's own scheme only (claims://...).")],
+    ) -> Annotated[CallToolResult, ReadResourceOut]:
+        """Read one of this server's resources by URI (read-only).
+
+        The MCP surface exposes resources only through
+        resources/read — this tool gives tool-only clients the same
+        read surface. Ownership is by construction: a URI outside
+        this server's registered scheme resolves to nothing and
+        errors rather than crossing the loop boundary. Never a write
+        path.
+        """
+        try:
+            contents = await mcp.read_resource(uri)
+            items = []
+            for c in contents:
+                content = c.content
+                if isinstance(content, bytes):
+                    content = content.decode("utf-8", errors="replace")
+                items.append({
+                    "mime_type": c.mime_type,
+                    "content": content,
+                })
+            return ok({"uri": uri, "contents": items})
+        except Exception as e:
+            return fail(json.dumps({"error": str(e)}))

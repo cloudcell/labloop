@@ -61,6 +61,11 @@ REMEDY_TOOLS = {
     "orphaned_running_trials": {
         "correct_trial_status", "cancel_trial", "mark_retryable",
     },
+    # The row is already terminal and the executor-side residue has
+    # no agent-reachable kill (cancel_trial/mark_retryable refuse
+    # terminal rows); a restart clears the in-memory task —
+    # acknowledge_violation only.
+    "terminal_with_live_executor": set(),
     "stalled_running_trials": {
         "correct_trial_status", "cancel_trial", "mark_retryable",
     },

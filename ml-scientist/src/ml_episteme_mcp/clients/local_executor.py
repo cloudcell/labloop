@@ -565,7 +565,16 @@ class LocalExecutor(ExecutorRole):
             # never executed a line).
             seal_armed = bool(overlay_ro) and applied_sandbox != "none"
             try:
-                proc = await asyncio.create_subprocess_exec(
+                # Shield the spawn: a cancel landing *inside*
+                # create_subprocess_exec raises here while the fork is
+                # still in flight — the child can exec moments after the
+                # await raised, leaving no proc to kill. Shielding keeps
+                # the spawn alive past our cancellation so we can finish
+                # it and kill the bound process deterministically; the
+                # bounded wait means a wedged spawn cannot hang the
+                # cancel path (the pgrep sweep in cancel_async remains
+                # the last resort for a child we never bound).
+                spawn = asyncio.ensure_future(asyncio.create_subprocess_exec(
                     *argv,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -573,7 +582,18 @@ class LocalExecutor(ExecutorRole):
                     cwd=str(artifact_dir) if artifact_dir is not None else None,
                     start_new_session=True,  # creates a new process group
                     pass_fds=(deny_fd,) if deny_fd is not None else (),
-                )
+                ))
+                try:
+                    proc = await asyncio.shield(spawn)
+                except asyncio.CancelledError:
+                    try:
+                        proc = await asyncio.wait_for(
+                            asyncio.shield(spawn), timeout=2.0
+                        )
+                        await self._kill_process_group(proc)
+                    except Exception:
+                        pass  # spawn wedged or died — sweep in cancel_async covers it
+                    raise
             finally:
                 # bwrap consumed the fd during namespace setup —
                 # drop the parent's copy.
@@ -1005,27 +1025,31 @@ class LocalExecutor(ExecutorRole):
         except asyncio.CancelledError:
             pass
         # Defense-in-depth: if the subprocess is somehow still alive
-        # (e.g. the task was cancelled before proc was created), find
-        # and kill any process whose command line references this
-        # trial's artifact dir. This catches orphaned children.
+        # (e.g. the task was cancelled before proc was bound, or the
+        # in-flight fork completed after our cancel), find and kill any
+        # process whose command line references this trial. Retried over
+        # ~1s — a fork completing post-cancel can appear in the table
+        # after the task is already dead.
         try:
             import subprocess
-            result = subprocess.run(
-                ["pgrep", "-f", trial_id],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                for pid_str in result.stdout.strip().split("\n"):
-                    pid_str = pid_str.strip()
-                    if pid_str and pid_str != str(os.getpid()):
-                        try:
-                            pgid = os.getpgid(int(pid_str))
-                            os.killpg(pgid, signal.SIGKILL)
-                        except (ProcessLookupError, PermissionError, ValueError):
+            for _ in range(4):
+                result = subprocess.run(
+                    ["pgrep", "-f", trial_id],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    for pid_str in result.stdout.strip().split("\n"):
+                        pid_str = pid_str.strip()
+                        if pid_str and pid_str != str(os.getpid()):
                             try:
-                                os.kill(int(pid_str), signal.SIGKILL)
-                            except (ProcessLookupError, PermissionError):
-                                pass
+                                pgid = os.getpgid(int(pid_str))
+                                os.killpg(pgid, signal.SIGKILL)
+                            except (ProcessLookupError, PermissionError, ValueError):
+                                try:
+                                    os.kill(int(pid_str), signal.SIGKILL)
+                                except (ProcessLookupError, PermissionError):
+                                    pass
+                await asyncio.sleep(0.25)
         except Exception:
             pass  # best-effort cleanup
         del self._running_tasks[trial_id]

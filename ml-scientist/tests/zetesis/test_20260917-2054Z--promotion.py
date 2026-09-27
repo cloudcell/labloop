@@ -1122,7 +1122,11 @@ class TestAbandonCampaign:
         c = search_store.get_campaign(cid)
         assert c.status is CampaignStatus.abandoned
         assert c.abandon_rationale == "mis-opened budget"
-        assert c.closed_at is not None
+        # rc-7 Q5 — abandonment stamps abandoned_at, never closed_at:
+        # an abandoned campaign never closed.
+        assert c.abandoned_at is not None
+        assert c.closed_at is None
+        assert r["abandoned_at"] == c.abandoned_at
 
     async def test_abandoned_refuses_results_spawns_close(
         self, zetesis_server, adaptors

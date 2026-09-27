@@ -85,6 +85,8 @@ def coerce_json(value: Any, expected: type, name: str) -> Any:
 
 class AssertClaimOut(TypedDict, total=False):
     claim_id: str | None
+    edge_ids: list | None
+    valid_until: str | None
     deduplicated: bool | None
     status: str | None
 
@@ -124,3 +126,9 @@ class AcknowledgeViolationOut(TypedDict, total=False):
     status: str | None
     matched_open_violation: bool | None
     open_violations: int | None
+
+class ReadResourceOut(TypedDict, total=False):
+    uri: str | None
+    contents: list[dict] | None
+
+

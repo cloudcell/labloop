@@ -22,6 +22,7 @@ import math
 import uuid
 
 from ..enforcement.checks import (
+    check_campaign_budget_carryable,
     check_campaign_evidence_refs,
     check_campaign_exists,
     check_campaign_open,
@@ -118,6 +119,7 @@ def _campaign_json(c: PromotionCampaign, store: SearchStore) -> dict:
             "claim_id": c.claim_id,
             "abandon_rationale": c.abandon_rationale,
             "abandoned_by": c.abandoned_by,
+            "abandoned_at": c.abandoned_at,
             "created_at": c.created_at,
             "closed_at": c.closed_at,
         },
@@ -986,13 +988,15 @@ def register(
     async def pull_campaign_evidence(
         campaign_id: Annotated[str, Field(description='ID of the target campaign.')],
         source: Annotated[Literal['loop0', 'anamnesis'], Field(description='Evidence source — the upstream read surface to pull through.')],
-        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate', 'get_candidate_lineage', 'get_candidate_scorecard', 'get_claim', 'get_evaluation_contract', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_programmes', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
+        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_candidate', 'get_candidate_lineage', 'get_candidate_scorecard', 'get_claim', 'get_evaluation_contract', 'get_incumbent', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_programmes', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — validity is per-source: loop0 allows list_active_programmes|list_hypotheses|list_trials|get_trial_status|assess_programme|get_candidate_lineage|list_archives|get_archive|get_archived_programme|list_candidates|get_candidate|list_promotion_decisions|get_incumbent|get_candidate_scorecard|list_programmes|get_evaluation_contract; anamnesis allows get_claim|list_claims|recall.")],
         args: Annotated[dict | str | None, Field(description='Arguments forwarded to the upstream tool; object or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, PullCampaignEvidenceOut]:
         """Read upstream evidence under a campaign context — same
         read-only channel as pull_evidence, logged against the campaign
         instead of an investigation. The promotion verdict cites these
-        refs."""
+        refs. The tool enum is the union of the per-source whitelists —
+        validity is per-source (anamnesis accepts only
+        get_claim|list_claims|recall)."""
         try:
             if e := check_campaign_open(store, campaign_id):
                 return _err(e)
@@ -1086,10 +1090,25 @@ def register(
                     by_arm[r.arm].append(float(v))
             missing = [a.value for a, v in by_arm.items() if not v]
             if missing:
+                # If the campaign can never run (orchestration budget
+                # present but not carryable, no spawns), "both arms
+                # must run" misdiagnoses it — name the real exit.
+                spawn_blocked = (
+                    campaign.budget
+                    and check_campaign_budget_carryable(
+                        campaign.budget
+                    ) is not None
+                    and not store.list_campaign_spawns(campaign_id)
+                )
+                hint = (
+                    " Its budget cannot spawn programmes — "
+                    "abandon_campaign is the exit."
+                    if spawn_blocked else ""
+                )
                 return fail(json.dumps({
                     "error": f"Campaign has no {campaign.primary_metric} "
                     f"results for arm(s) {'|'.join(missing)} — both "
-                    "arms must run before close."
+                    f"arms must run before close.{hint}"
                 }))
             champion_mean = (
                 sum(by_arm[CampaignArm.champion])
@@ -1155,10 +1174,12 @@ def register(
             store.abandon_campaign(
                 campaign_id, rationale.strip(), decided_by.strip()
             )
+            c = store.get_campaign(campaign_id)
             return ok({
                 "campaign_id": campaign_id,
                 "status": "abandoned",
                 "abandoned_by": decided_by.strip(),
+                "abandoned_at": c.abandoned_at,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

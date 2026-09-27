@@ -41,7 +41,7 @@ async def test_health_deep_and_integrity_gui(zetesis_http_server):
         assert resp.status == 200
         body = json.loads(resp.read())
         assert body["status"] in ("ok", "violations")
-        assert len(body["checks"]) == 12
+        assert len(body["checks"]) == 13
         names = {c["name"] for c in body["checks"]}
         assert "minted_claims_resolve" in names
     with urllib.request.urlopen(f"{gui}/integrity", timeout=5) as resp:

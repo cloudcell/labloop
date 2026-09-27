@@ -73,6 +73,69 @@ def _check_orphaned_running_trials(store, executor) -> dict:
     )
 
 
+def _check_terminal_with_live_executor(store, executor) -> dict:
+    """Terminal trials whose execution outlived the terminal mark —
+    the leaked-subprocess class. Two prongs:
+
+    (a) live task — a retryable/failed/abandoned row with an
+        executor._running_tasks entry that is not done. Membership
+        alone is NOT the signal: entries persist for done tasks and
+        are only deleted by cancel_async.
+
+    (b) residue — a terminal row whose recorded executor
+        duration_seconds materially exceeds the row's
+        finished_at − started_at window. The leaked process ran past
+        the mark and the late finalize wrote its output over the
+        terminal row — the signature prong (a) cannot see once the
+        task entry is gone.
+    """
+    live_violations: list[str] = []
+    residue_violations: list[str] = []
+    task_map = getattr(executor, "_running_tasks", {}) or {}
+    rows = store._fetchall(
+        """SELECT id, status, started_at, finished_at,
+                  executor_output_json
+           FROM trials
+           WHERE status IN ('retryable', 'failed', 'abandoned')
+             AND started_at IS NOT NULL"""
+    )
+    for r in rows:
+        tid = r["id"]
+        task = task_map.get(tid)
+        if task is not None and not task.done():
+            live_violations.append(f"{tid} ({r['status']} + live task)")
+            continue
+        if r["finished_at"] is None or not r["executor_output_json"]:
+            continue
+        try:
+            out = json.loads(r["executor_output_json"])
+        except ValueError:
+            continue
+        exec_duration = out.get("duration_seconds")
+        if not isinstance(exec_duration, (int, float)):
+            continue
+        try:
+            window = (
+                datetime.fromisoformat(r["finished_at"])
+                - datetime.fromisoformat(r["started_at"])
+            ).total_seconds()
+        except (TypeError, ValueError):
+            continue
+        # A 1s margin absorbs timestamp rounding and normal finalize
+        # lag — only a process that ran *well past* the mark flags.
+        if exec_duration > window + 1.0:
+            residue_violations.append(
+                f"{tid} ({r['status']}; executor ran "
+                f"{exec_duration}s over a {window:.3f}s window)"
+            )
+    violations = live_violations + residue_violations
+    return _res(
+        "terminal_with_live_executor", violations,
+        f"{len(live_violations)} live task(s) under terminal rows; "
+        f"{len(residue_violations)} outlived terminal mark",
+    )
+
+
 def _check_completed_without_observation(
     store, grace_seconds: int
 ) -> dict:
@@ -579,6 +642,7 @@ def run_checks(
     checks = [
         _check_upstream_connectivity(connectivity),
         _check_orphaned_running_trials(store, executor),
+        _check_terminal_with_live_executor(store, executor),
         _check_completed_without_observation(
             store, observation_grace_seconds
         ),

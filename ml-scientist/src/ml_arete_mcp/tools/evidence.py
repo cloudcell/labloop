@@ -55,16 +55,17 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         context_type: Annotated[Literal['proposal', 'tournament'], Field(description="Pull context — pulls belong to a live context, never ambient.")],
         context_id: Annotated[str, Field(description='ID of the proposal or tournament the pull serves.')],
         source: Annotated[Literal['loop0', 'loop1', 'anamnesis'], Field(description='Evidence source — the upstream read surface to pull through.')],
-        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate_lineage', 'get_claim', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
+        tool: Annotated[Literal['assess_programme', 'describe_blob', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate_lineage', 'get_claim', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_trials', 'recall'], Field(description="Upstream read tool to call — validity is per-source: loop0 allows list_active_programmes|list_hypotheses|list_trials|get_trial_status|assess_programme|get_candidate_lineage|list_archives|get_archive|get_archived_programme|describe_blob; loop1 allows list_investigations|get_investigation|list_candidates|get_incumbent|list_campaigns|get_campaign; anamnesis allows get_claim|list_claims|recall.")],
         args: Annotated[dict | str | None, Field(description='Arguments forwarded to the upstream tool; object or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, PullEvidenceOut]:
         """Read upstream evidence through an adaptor — and log it.
 
         context_type: 'proposal' or 'tournament' — pulls belong to a
         live context, never ambient. source: 'loop0' (ml-episteme),
-        'loop1' (ml-zetesis), or 'anamnesis' (claims memory). tool
-        must be on the source's read whitelist — the evidence channel
-        is read-only; writes to the lower loops belong to the
+        'loop1' (ml-zetesis), or 'anamnesis' (claims memory). The tool
+        enum is the union of the per-source whitelists — validity is
+        per-source, see the parameter description. The evidence
+        channel is read-only; writes to the lower loops belong to the
         promotion pipeline, not this tool.
 
         Every pull is recorded as an evidence_ref — what was

@@ -193,7 +193,8 @@ class TestFullStackPromotion:
         )
         r = await call_tool_http(loop0, "record_promotion_decision", {
             "candidate_id": champ, "verdict": "promote",
-            "evidence_refs": ["trial-stack"], "rationale": "champion",
+            # rc-7 Q4 — cite a real Loop-0 id, not a fabricated one.
+            "evidence_refs": [champ], "rationale": "champion",
             "decided_by": "human:stack",
         })
         assert "error" not in r, r
