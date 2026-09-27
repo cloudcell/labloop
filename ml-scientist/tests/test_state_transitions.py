@@ -504,7 +504,7 @@ class TestCloseProgramme:
                 "status": "completed",
             })
             assert "error" in result
-            assert "Illegal programme status transition" in result["error"]
+            assert "closed programme is immutable" in result["error"]
 
     @pytest.mark.asyncio
     async def test_close_programme_rejects_invalid_status(self, client, store):

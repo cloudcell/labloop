@@ -15,6 +15,7 @@ from ..enforcement.commitments import (
     check_duplicate_programme,
     check_evidence_exists,
     check_all_results_recorded,
+    check_no_running_trials,
     check_hypothesis_in_programme,
     check_belief_recorded,
     check_programme_active,
@@ -294,6 +295,13 @@ def register(
             if err:
                 return fail(json.dumps({"error": err}))
 
+            # Enforcement: commitment 1 — no verdict while evidence is
+            # still in flight (a running trial hasn't reached its
+            # end-boundary; the conclusion can't be un-minted)
+            err = check_no_running_trials(programme_id, hypothesis_id, store)
+            if err:
+                return fail(json.dumps({"error": err}))
+
             # Enforcement: commitment 2 — memory precedes optimization (belief must be updated)
             err = check_belief_recorded(programme_id, store)
             if err:
@@ -429,37 +437,28 @@ def register(
                              f"Must be 'completed' or 'abandoned'."
                 }))
 
-            # Fetch trials once — reused by the zero-trial gate below
-            # and the running-trial check further down.
+            # Enforcement: a closed programme is immutable — refuse
+            # before any sweep below can touch state.
+            err = check_programme_active(programme)
+            if err:
+                return fail(json.dumps({"error": err}))
+
             trials = store.list_trials(programme_id)
 
             # Enforcement: commitment 1 — the loop is the unit (no empty
-            # completion). Runs BEFORE any state mutation below so a
-            # rejected close leaves the programme untouched.
+            # completion).
             if status == "completed":
                 err = check_programme_has_trials(programme_id, trials)
                 if err:
                     return fail(json.dumps({"error": err}))
 
             hypotheses = store.list_hypotheses(programme_id)
-            auto_marked = []
-            for h in hypotheses:
-                if h.status.value == "proposed":
-                    store.update_hypothesis_status(h.id, "abandoned")
-                    auto_marked.append({
-                        "hypothesis_id": h.id,
-                        "from": "proposed",
-                        "to": "abandoned",
-                    })
-                elif h.status.value == "under_test":
-                    if status == "abandoned":
-                        store.update_hypothesis_status(h.id, "abandoned")
-                        auto_marked.append({
-                            "hypothesis_id": h.id,
-                            "from": "under_test",
-                            "to": "abandoned",
-                        })
-                    else:
+
+            # Refusal pass — every gate before every mutation, so a
+            # rejected close leaves the programme untouched.
+            if status == "completed":
+                for h in hypotheses:
+                    if h.status.value == "under_test":
                         # Completing a programme with unconcluded
                         # hypotheses is forbidden — the agent must
                         # call conclude_hypothesis first. Auto-marking
@@ -472,13 +471,10 @@ def register(
                                 f"(accepted/rejected/inconclusive) first."
                             ),
                         }))
-
             # Enforcement: no closing with running trials (Rule 5.6 —
             # a running trial is an occurrent that hasn't reached its
             # end-boundary; archiving it would freeze an incomplete
             # process as if it were a complete continuant).
-            # `trials` was already fetched above.
-            trials_auto_marked = []
             for t in trials:
                 if t.status.value == "running":
                     return fail(json.dumps({
@@ -488,7 +484,27 @@ def register(
                             f"failed) or wait for it to complete."
                         ),
                     }))
-                elif t.status.value == "designed":
+
+            # Mutation pass — sweeps run only after every gate passes.
+            auto_marked = []
+            for h in hypotheses:
+                if h.status.value == "proposed":
+                    store.update_hypothesis_status(h.id, "abandoned")
+                    auto_marked.append({
+                        "hypothesis_id": h.id,
+                        "from": "proposed",
+                        "to": "abandoned",
+                    })
+                elif h.status.value == "under_test" and status == "abandoned":
+                    store.update_hypothesis_status(h.id, "abandoned")
+                    auto_marked.append({
+                        "hypothesis_id": h.id,
+                        "from": "under_test",
+                        "to": "abandoned",
+                    })
+            trials_auto_marked = []
+            for t in trials:
+                if t.status.value == "designed":
                     # Auto-mark designed trials as abandoned (no effort
                     # was expended — like proposed hypotheses)
                     store.update_trial_status(t.id, "abandoned")

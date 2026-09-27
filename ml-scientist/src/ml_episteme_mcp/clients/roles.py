@@ -12,6 +12,21 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+def describe_error(e: BaseException) -> str:
+    """Unwrap ExceptionGroup/TaskGroup shells to the leaf cause —
+    'unhandled errors in a TaskGroup (1 sub-exception)' names nothing;
+    'ConnectError: [Errno 111] Connection refused' names the fault."""
+    while isinstance(e, BaseExceptionGroup) and e.exceptions:
+        e = e.exceptions[0]
+    return f"{type(e).__name__}: {e}"
+
+
+class ProbeTimeout(Exception):
+    """The peer's transport is alive but it did not answer a protocol
+    ping in time — busy, not down. The supervisor annotates rather
+    than tears down: a reconnect would not help a live peer."""
+
+
 class OptimizerRole(ABC):
     """The optimizer role: studies, samplers, ask/tell, HPO."""
 

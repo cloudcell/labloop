@@ -45,6 +45,12 @@ PublishPort=127.0.0.1:38082:38082
 EnvironmentFile=/srv/lab/mcp-state/ingest.env
 Volume=/srv/lab/mcp-state:/state
 Volume=/srv/lab/exchange:/exchange:ro
+# ingest channel, read-only: trials inside the executor's bwrap
+# sandbox see it through the recursive --ro-bind / — same mechanism
+# by which /exchange and /state are already visible. The hostile zone
+# holds the same RO view; this grants the *more* trusted executor no
+# capability a weaker zone lacks. Data plane, not a new crossing.
+Volume=/srv/lab/incoming:/incoming:ro
 # Trial interpreter volume: episteme's executor defaults to
 # sys.executable (the slim server venv — no numpy). /srv/lab/trial-env
 # is a populated uv venv (numpy/pandas/scipy/sklearn/matplotlib/

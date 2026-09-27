@@ -50,6 +50,13 @@ Entry timestamps are the commit time in **UTC**.
 - **Readiness warnings** — `check-lab-ready.sh` gains a WARN tier:
   opencode PATH-shadowing and version drift are reported without
   failing the run. *(2026-09-24 05:24Z)*
+- **Trial access to ingested datasets** — `lab-cnt-mcp` now mounts
+  `/srv/lab/incoming:/incoming:ro`, so episteme's executor sandbox
+  (bwrap `--ro-bind / /`) can read host-ingested corpora without
+  staging them through the exp-writable `/exchange`. Read-only at
+  both the volume and namespace layers — verified fail-closed
+  (write attempt → `EROFS`) on lab-vm-rc-4.
+  *(2026-09-26 23:59Z)*
 
 ### Fixed
 

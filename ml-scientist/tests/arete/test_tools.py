@@ -272,7 +272,7 @@ async def test_close_refuses_unpaired_tournament(arete_server):
     assert "error" in closed and "candidate" in closed["error"]
 
 
-async def test_conditional_requires_human_gate(arete_server):
+async def test_conditional_requires_human_gate(arete_server, adaptors):
     mcp = arete_server
     parent = await register_imp(mcp)
     prop = await propose(
@@ -289,27 +289,105 @@ async def test_conditional_requires_human_gate(arete_server):
         "source": "anamnesis", "tool": "list_claims",
     })
     eref = pull["evidence_ref_id"]
-    # Non-human decided_by promotes → still blocked at promote_policy.
+    claims_before = len(adaptors.claims.minted)
+    # Non-human decided_by promote → refused at the write, before the
+    # insert-only record or any claim minting (rc-4 L2-1).
     dec = await call_tool(mcp, "record_meta_decision", {
         "candidate_improver_id": candidate, "verdict": "promote",
         "evidence_refs": [eref], "rationale": "looks good",
         "decided_by": "arete:protocol",
     })
-    assert "error" not in dec
-    promo = await call_tool(mcp, "promote_policy", {
-        "candidate_improver_id": candidate, "policy": {"w": 1},
+    assert "error" in dec and "human" in dec["error"]
+    listed = await call_tool(mcp, "list_decisions", {
+        "candidate_improver_id": candidate,
     })
-    assert "error" in promo and "human" in promo["error"]
-    # Human-signed promote decision → passes.
+    assert listed["total"] == 0
+    assert len(adaptors.claims.minted) == claims_before
+    # Human-signed promote decision → passes the write gate and the
+    # pointer move.
     dec = await call_tool(mcp, "record_meta_decision", {
         "candidate_improver_id": candidate, "verdict": "promote",
         "evidence_refs": [eref], "rationale": "reviewed",
         "decided_by": "human:alice",
     })
+    assert "error" not in dec
     promo = await call_tool(mcp, "promote_policy", {
         "candidate_improver_id": candidate, "policy": {"w": 1},
     })
     assert "error" not in promo
+
+
+async def test_conditional_reject_agent_decider_allowed(arete_server):
+    """Only promote is human-gated — reject/hold/rollback stay
+    agent-authorable on conditional proposals (rollback is the
+    remediation mechanism)."""
+    mcp = arete_server
+    parent = await register_imp(mcp)
+    prop = await propose(
+        mcp, parent, class_map={"metric_weighting": "m"}
+    )
+    assert prop["status"] == "conditional"
+    candidate = await register_imp(
+        mcp, parent_id=parent, proposal_id=prop["proposal_id"]
+    )
+    pull = await call_tool(mcp, "pull_evidence", {
+        "context_type": "proposal",
+        "context_id": prop["proposal_id"],
+        "source": "anamnesis", "tool": "list_claims",
+    })
+    dec = await call_tool(mcp, "record_meta_decision", {
+        "candidate_improver_id": candidate, "verdict": "reject",
+        "evidence_refs": [pull["evidence_ref_id"]],
+        "rationale": "spec does not survive review",
+        "decided_by": "arete:protocol",
+    })
+    assert "error" not in dec
+
+
+async def test_admitted_proposal_agent_promote_allowed(arete_server):
+    """An admitted proposal needs no human gate — agent-authorized
+    promote decisions remain valid."""
+    mcp = arete_server
+    parent = await register_imp(mcp)
+    prop = await propose(mcp, parent)  # planner → modifiable → admitted
+    assert prop["status"] == "admitted"
+    candidate = await register_imp(
+        mcp, parent_id=parent, proposal_id=prop["proposal_id"]
+    )
+    pull = await call_tool(mcp, "pull_evidence", {
+        "context_type": "proposal",
+        "context_id": prop["proposal_id"],
+        "source": "anamnesis", "tool": "list_claims",
+    })
+    dec = await call_tool(mcp, "record_meta_decision", {
+        "candidate_improver_id": candidate, "verdict": "promote",
+        "evidence_refs": [pull["evidence_ref_id"]],
+        "rationale": "r", "decided_by": "arete:protocol",
+    })
+    assert "error" not in dec
+
+
+async def test_proposal_less_improver_agent_promote_allowed(arete_server):
+    """No proposal_id → no conditional gate at the write."""
+    mcp = arete_server
+    parent = await register_imp(mcp)
+    candidate = await register_imp(mcp, parent_id=parent)
+    pull = await call_tool(mcp, "pull_evidence", {
+        "context_type": "tournament",
+        "context_id": (await call_tool(mcp, "open_tournament", {
+            "contract_id": await make_contract(mcp),
+            "parent_improver_id": parent,
+            "candidate_improver_id": candidate,
+            "budget": {"r": 1},
+        }))["tournament_id"],
+        "source": "loop0", "tool": "list_archives",
+    })
+    dec = await call_tool(mcp, "record_meta_decision", {
+        "candidate_improver_id": candidate, "verdict": "promote",
+        "evidence_refs": [pull["evidence_ref_id"]],
+        "rationale": "r", "decided_by": "arete:protocol",
+    })
+    assert "error" not in dec
 
 
 async def test_latest_decision_supersedes_promote(arete_server):

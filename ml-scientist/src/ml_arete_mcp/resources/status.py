@@ -67,10 +67,12 @@ def _upstream_summary(adaptors) -> dict:
     )
     up = sum(1 for e in report if e.get("state") == "up")
     down = sum(1 for e in report if e.get("state") == "down")
+    busy = sum(1 for e in report if e.get("probe") == "busy")
     return {
         "configured": len(report),
         "up": up,
         "down": down,
+        "busy": busy,
         "verdict": "ok" if down == 0 else "violations",
         "channels": report,
     }
@@ -87,12 +89,16 @@ def _blockers(adaptors) -> list[dict]:
     for e in report:
         if e.get("state") == "down":
             role = e.get("role") or e.get("channel")
+            detail = e.get("last_error") or "channel unreachable"
+            op = e.get("last_failed_operation")
+            if op:
+                detail = f"{detail} (failed op: {op})"
             out.append({
                 "kind": "upstream_down",
                 "channel": e.get("channel"),
                 "role": role,
                 "blocks": _BLOCKED_TOOLS.get(role, []),
-                "detail": e.get("last_error") or "channel unreachable",
+                "detail": detail,
             })
     return out
 

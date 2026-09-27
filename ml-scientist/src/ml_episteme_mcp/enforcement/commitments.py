@@ -437,6 +437,33 @@ def check_all_results_recorded(
     return None
 
 
+def check_no_running_trials(
+    programme_id: str, hypothesis_id: str, store: StateStore
+) -> str | None:
+    """Commitment 1 — the loop is the unit; Rule 5.6.
+
+    Rejects if any trial for this hypothesis is still running. A
+    running trial is an occurrent that hasn't reached its
+    end-boundary — a verdict (and the claim it mints) recorded while
+    evidence is still being generated freezes an incomplete process,
+    and the conclusion cannot be un-minted. Designed, retryable and
+    failed trials produce no in-flight evidence and do not block.
+    """
+    running = [
+        t for t in store.list_trials(programme_id)
+        if t.hypothesis_id == hypothesis_id
+        and t.status.value == "running"
+    ]
+    if running:
+        ids = ", ".join(t.id for t in running)
+        return (
+            f"Cannot conclude while trial(s) still running: {ids}. "
+            "Wait for completion or cancel_trial first — a verdict "
+            "minted mid-flight cannot be un-minted."
+        )
+    return None
+
+
 def check_observation_prerequisites(trial: Trial | None) -> str | None:
     """Commitments 6 + 1: an observation requires a completed trial with a
     captured bundle.

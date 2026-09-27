@@ -132,7 +132,7 @@ class TestProgrammeFSM:
             "status": "completed",
         })
         assert "error" in result
-        assert "Illegal programme status transition" in result["error"]
+        assert "closed programme is immutable" in result["error"]
 
     @pytest.mark.asyncio
     async def test_close_archived_rejected(self, server_url):
@@ -149,7 +149,7 @@ class TestProgrammeFSM:
             "status": "abandoned",
         })
         assert "error" in result
-        assert "Illegal programme status transition" in result["error"]
+        assert "closed programme is immutable" in result["error"]
 
     @pytest.mark.asyncio
     async def test_close_invalid_status_rejected(self, server_url):

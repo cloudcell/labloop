@@ -408,6 +408,9 @@ def _check_upstream_connectivity(connectivity) -> dict:
             "role": c.get("role"),
             "target": c.get("target"),
             "last_error": c.get("last_error"),
+            "last_operation": c.get("last_operation"),
+            "last_failed_operation": c.get("last_failed_operation"),
+            "last_failed_at": c.get("last_failed_at"),
         }
         for c in connectivity
         if c.get("state") != "up"

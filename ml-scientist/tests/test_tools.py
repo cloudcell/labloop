@@ -625,6 +625,185 @@ class TestCloseProgramme:
             assert result["status"] == "closed"
 
 
+# --- Shared builders for the gate tests below ---
+
+
+async def _new_programme(client, goal="test"):
+    prog = await call_tool(client, "create_programme", {
+        "goal": goal, "constraints": {}, "allowed_variables": ["lr"],
+        "budget": {"max_trials": 10, "max_wall_time_hours": 5.0},
+    })
+    return prog["programme_id"]
+
+
+async def _new_hypothesis(client, pid, statement="test"):
+    hyp = await call_tool(client, "formulate_hypothesis", {
+        "programme_id": pid, "statement": statement,
+        "failure_criterion": "val < 0.5", "variables_involved": ["lr"],
+    })
+    return hyp["hypothesis_id"]
+
+
+async def _designed_trial(client, pid, hid):
+    trial = await call_tool(client, "design_experiment", {
+        "programme_id": pid, "hypothesis_id": hid,
+        "config": {"lr": 0.001},
+    })
+    return trial["trial_id"]
+
+
+async def _completed_trial(client, store, pid, hid):
+    tid = await _designed_trial(client, pid, hid)
+    await call_tool(client, "capture_bundle", {
+        "trial_id": tid, "code_ref": "tests/fixtures/train_stub.py",
+        "env_ref": "conda:env1", "seeds": [42],
+        "splits": {"train": 0.8},
+    })
+    store.update_trial_status(tid, "running")
+    store.update_trial_executor_output(
+        tid, '{"status": "completed", "exit_code": 0}')
+    store.update_trial_status(tid, "completed")
+    await call_tool(client, "record_observation", {
+        "trial_id": tid, "metrics": {"val_accuracy": 0.92},
+        "variance": {"val_accuracy": 0.003},
+        "spatiotemporal_region": "gpu-0",
+    })
+    return tid
+
+
+def _record_belief(store, pid):
+    from ml_episteme_mcp.state.models import Belief
+    import uuid as _uuid
+    store.create_belief(Belief(
+        id=f"belief-{_uuid.uuid4().hex[:8]}",
+        programme_id=pid, state_json='{"best_trials": []}',
+    ))
+
+
+class TestCloseProgrammeAtomicity:
+    """A refused close leaves the programme untouched — every gate
+    runs before every mutation (rc-4 EP-2)."""
+
+    @pytest.mark.asyncio
+    async def test_completed_refusal_sweeps_nothing(self, client, store):
+        async with client:
+            pid = await _new_programme(client)
+            h1 = await _new_hypothesis(client, pid)
+            t1 = await _designed_trial(client, pid, h1)  # h1 → under_test
+            h2 = await _new_hypothesis(client, pid, "other")  # proposed
+            close = await call_tool(client, "close_programme", {
+                "programme_id": pid, "status": "completed",
+            })
+            assert "error" in close and "under_test" in close["error"]
+            assert store.get_hypothesis(h1).status.value == "under_test"
+            assert store.get_hypothesis(h2).status.value == "proposed"
+            assert store.get_trial(t1).status.value == "designed"
+            assert store.get_programme(pid).status.value == "active"
+
+    @pytest.mark.asyncio
+    async def test_abandoned_refusal_sweeps_nothing(self, client, store):
+        async with client:
+            pid = await _new_programme(client)
+            h1 = await _new_hypothesis(client, pid)
+            t_run = await _designed_trial(client, pid, h1)
+            store.update_trial_status(t_run, "running")
+            h2 = await _new_hypothesis(client, pid, "other")
+            t_des = await _designed_trial(client, pid, h2)
+            h3 = await _new_hypothesis(client, pid, "third")  # proposed
+            close = await call_tool(client, "close_programme", {
+                "programme_id": pid, "status": "abandoned",
+            })
+            assert "error" in close and "running" in close["error"]
+            assert store.get_hypothesis(h1).status.value == "under_test"
+            assert store.get_hypothesis(h2).status.value == "under_test"
+            assert store.get_hypothesis(h3).status.value == "proposed"
+            assert store.get_trial(t_run).status.value == "running"
+            assert store.get_trial(t_des).status.value == "designed"
+            assert store.get_programme(pid).status.value == "active"
+
+    @pytest.mark.asyncio
+    async def test_double_close_refused_by_active_gate(
+        self, client, store
+    ):
+        async with client:
+            pid = await _new_programme(client)
+            h1 = await _new_hypothesis(client, pid)
+            await _designed_trial(client, pid, h1)
+            first = await call_tool(client, "close_programme", {
+                "programme_id": pid, "status": "abandoned",
+            })
+            assert "error" not in first
+            second = await call_tool(client, "close_programme", {
+                "programme_id": pid, "status": "abandoned",
+            })
+            assert "error" in second and "immutable" in second["error"]
+
+    @pytest.mark.asyncio
+    async def test_abandoned_reports_full_sweep(self, client, store):
+        async with client:
+            pid = await _new_programme(client)
+            h_prop = await _new_hypothesis(client, pid)  # stays proposed
+            h_ut = await _new_hypothesis(client, pid, "other")
+            t_des = await _designed_trial(client, pid, h_ut)
+            close = await call_tool(client, "close_programme", {
+                "programme_id": pid, "status": "abandoned",
+            })
+            assert "error" not in close
+            swept = {m["hypothesis_id"] for m in close["auto_marked"]}
+            assert swept == {h_prop, h_ut}
+            marked = {m["trial_id"] for m in close["trials_auto_marked"]}
+            assert marked == {t_des}
+
+
+class TestConcludeRunningGate:
+    """conclude_hypothesis refuses while a same-hypothesis trial is
+    running — a verdict minted mid-flight cannot be un-minted."""
+
+    @pytest.mark.asyncio
+    async def test_refused_while_sibling_running(self, client, store):
+        async with client:
+            pid = await _new_programme(client)
+            h1 = await _new_hypothesis(client, pid)
+            await _completed_trial(client, store, pid, h1)
+            t_run = await _designed_trial(client, pid, h1)
+            store.update_trial_status(t_run, "running")
+            _record_belief(store, pid)
+            result = await call_tool(client, "conclude_hypothesis", {
+                "programme_id": pid, "hypothesis_id": h1,
+                "verdict": "accepted",
+                "evidence_summary": "val improved",
+            })
+            assert "error" in result
+            assert t_run in result["error"]
+            assert "running" in result["error"]
+            store.update_trial_status(t_run, "failed")
+            result = await call_tool(client, "conclude_hypothesis", {
+                "programme_id": pid, "hypothesis_id": h1,
+                "verdict": "accepted",
+                "evidence_summary": "val improved",
+            })
+            assert result.get("verdict") == "accepted"
+
+    @pytest.mark.asyncio
+    async def test_running_on_other_hypothesis_allowed(
+        self, client, store
+    ):
+        async with client:
+            pid = await _new_programme(client)
+            h1 = await _new_hypothesis(client, pid)
+            await _completed_trial(client, store, pid, h1)
+            h2 = await _new_hypothesis(client, pid, "other")
+            t_run = await _designed_trial(client, pid, h2)
+            store.update_trial_status(t_run, "running")
+            _record_belief(store, pid)
+            result = await call_tool(client, "conclude_hypothesis", {
+                "programme_id": pid, "hypothesis_id": h1,
+                "verdict": "accepted",
+                "evidence_summary": "val improved",
+            })
+            assert result.get("verdict") == "accepted"
+
+
 # --- Resources ---
 
 

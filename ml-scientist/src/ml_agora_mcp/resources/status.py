@@ -51,20 +51,34 @@ async def _fetch_digest(
     live = getattr(adaptors, name, None)
     dead = getattr(live, "session_dead", None)
     if live is None or (dead is not None and dead()):
+        detail = (
+            spec.last_error
+            or getattr(spec.adaptor, "last_error", None)
+            or "channel down"
+        )
+        op = getattr(spec.adaptor, "last_failed_operation", None)
+        if op:
+            detail = f"{detail} (failed op: {op})"
         return {
             "status": "unreachable",
             "status_uri": uri,
             "target": spec.target,
-            "detail": spec.last_error or "channel down",
+            "detail": detail,
         }
     try:
         text = await live.read_resource(uri)
     except Exception as e:
+        from ..clients.mcp_client import describe_error
+
+        detail = describe_error(e)
+        op = getattr(live, "last_failed_operation", None)
+        if op:
+            detail = f"{detail} (failed op: {op})"
         return {
             "status": "error",
             "status_uri": uri,
             "target": spec.target,
-            "detail": str(e),
+            "detail": detail,
         }
     try:
         digest = json.loads(text) if isinstance(text, str) else text

@@ -25,6 +25,7 @@ from ..state.models import (
     DecisionVerdict,
     EvidenceContext,
     EvidenceSource,
+    ImproverVersion,
     MetaContract,
     ProposalStatus,
     TournamentStatus,
@@ -579,6 +580,38 @@ def check_decision_evidence(
     return None
 
 
+def check_promote_authority(
+    store: ImproverStore,
+    candidate: ImproverVersion,
+    decided_by: str,
+) -> str | None:
+    """A promote verdict on a conditional proposal requires a human
+    decider — enforced at decision-write (record_meta_decision) AND
+    at the pointer move (promote_policy).
+
+    A candidate implementing a `conditional` proposal (class-3 or
+    unknown component touched) may only be promoted on a decision
+    whose decided_by names a human authority — the 'human:' prefix
+    is the mechanism, not a convention. A missing proposal is not
+    conditional and earns no gate.
+    """
+    if decided_by.startswith("human:"):
+        return None
+    if not candidate.proposal_id:
+        return None
+    proposal = store.get_proposal(candidate.proposal_id)
+    if proposal is None or proposal.status != ProposalStatus.conditional:
+        return None
+    return (
+        f"{candidate.id} implements conditional proposal "
+        f"{proposal.id} (class-3 or unknown component touch). "
+        "Promotion requires a promote decision whose "
+        "decided_by names a human authority ('human:<name>') "
+        f"— got '{decided_by}'. The frozen-review "
+        "gate is a mechanism, not a convention."
+    )
+
+
 def check_promote_allowed(
     store: ImproverStore, candidate_id: str
 ) -> tuple[str | None, object | None]:
@@ -617,22 +650,10 @@ def check_promote_allowed(
             "promote decision first.",
             None,
         )
-    if candidate.proposal_id:
-        proposal = store.get_proposal(candidate.proposal_id)
-        if (
-            proposal is not None
-            and proposal.status == ProposalStatus.conditional
-            and not decision.decided_by.startswith("human:")
-        ):
-            return (
-                f"{candidate_id} implements conditional proposal "
-                f"{proposal.id} (class-3 or unknown component touch). "
-                "Promotion requires a promote decision whose "
-                "decided_by names a human authority ('human:<name>') "
-                f"— got '{decision.decided_by}'. The frozen-review "
-                "gate is a mechanism, not a convention.",
-                None,
-            )
+    if err := check_promote_authority(
+        store, candidate, decision.decided_by
+    ):
+        return err, None
     return None, decision
 
 

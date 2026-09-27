@@ -293,6 +293,8 @@ Examples:
         is a byproduct, never a gate on startup. Required roles warn on
         failure but stay wired — the server still serves state reads.
         """
+        from .clients.roles import describe_error
+
         roles = [
             ("optimizer", adaptor._optimizer),
             ("executor", adaptor._executor),
@@ -306,8 +308,8 @@ Examples:
                 print(f"{name} adaptor connected", file=sys.stderr)
             except Exception as e:
                 print(
-                    f"WARNING: {name} adaptor unreachable ({e}) — "
-                    f"{name} calls will fail",
+                    f"WARNING: {name} adaptor unreachable "
+                    f"({describe_error(e)}) — {name} calls will fail",
                     file=sys.stderr,
                 )
         # Claims is a retryable upstream channel, not a one-shot role:
@@ -323,9 +325,10 @@ Examples:
                 await ch["role_obj"].connect()
             except Exception as e:
                 ch["state"] = "down"
-                ch["last_error"] = str(e)
+                ch["last_error"] = describe_error(e)
                 print(
-                    f"WARNING: claims adaptor unreachable ({e}) — "
+                    f"WARNING: claims adaptor unreachable "
+                    f"({describe_error(e)}) — "
                     "the supervisor will keep retrying",
                     file=sys.stderr,
                 )

@@ -20,7 +20,14 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from .roles import ClaimsRole, DataSourceRole, ExecutorRole, OptimizerRole
+from .roles import (
+    ClaimsRole,
+    DataSourceRole,
+    ExecutorRole,
+    OptimizerRole,
+    ProbeTimeout,
+    describe_error,
+)
 
 
 def _utc_now() -> str:
@@ -246,6 +253,10 @@ class MCPAdaptor:
             "state": "down",
             "attempts": 0,
             "last_error": None,
+            "last_failed_operation": None,
+            "last_failed_at": None,
+            "probe": None,
+            "last_probe_at": None,
             "connected_at": None,
         }
 
@@ -275,7 +286,15 @@ class MCPAdaptor:
                     else "up"
                 ),
                 "attempts": None,
-                "last_error": None,
+                "last_error": getattr(role, "last_error", None),
+                "last_operation": getattr(role, "last_operation", None),
+                "last_failed_operation": getattr(
+                    role, "last_failed_operation", None
+                ),
+                "last_failed_at": getattr(role, "last_failed_at", None),
+                "probe": getattr(role, "last_probe_state", None),
+                "last_probe_at": getattr(role, "last_probe_at", None),
+                "last_probe_ms": getattr(role, "last_probe_ms", None),
                 "connected_at": None,
             })
         ch = self._claims_channel
@@ -283,13 +302,25 @@ class MCPAdaptor:
             live = self._claims
             dead = getattr(live, "session_dead", None)
             up = live is not None and not (dead and dead())
+            src = live if live is not None else ch["role_obj"]
             report.append({
                 "channel": "claims",
                 "role": "claims",
                 "target": ch["target"],
                 "state": "up" if up else "down",
                 "attempts": ch["attempts"],
-                "last_error": ch["last_error"],
+                "last_error": ch["last_error"]
+                or getattr(src, "last_error", None),
+                "last_operation": getattr(src, "last_operation", None),
+                "last_failed_operation": ch.get("last_failed_operation")
+                or getattr(src, "last_failed_operation", None),
+                "last_failed_at": ch.get("last_failed_at")
+                or getattr(src, "last_failed_at", None),
+                "probe": ch.get("probe")
+                or getattr(src, "last_probe_state", None),
+                "last_probe_at": ch.get("last_probe_at")
+                or getattr(src, "last_probe_at", None),
+                "last_probe_ms": getattr(src, "last_probe_ms", None),
                 "connected_at": ch["connected_at"],
             })
         return report
@@ -385,6 +416,7 @@ async def run_claims_supervisor(
     adaptor: MCPAdaptor,
     interval_seconds: float,
     *,
+    probe_timeout_seconds: float = 5.0,
     log=print,
 ) -> None:
     """Keep the configured claims channel connected — the convergence
@@ -410,15 +442,58 @@ async def run_claims_supervisor(
                     pass
                 adaptor.set_claims(None)
                 ch["state"] = "down"
-                ch["last_error"] = "upstream session ended"
+                op = getattr(live, "in_flight_operation", None) or getattr(
+                    live, "last_failed_operation", None
+                )
+                if op:
+                    ch["last_failed_operation"] = op
+                    ch["last_failed_at"] = _utc_now()
+                ch["last_error"] = (
+                    f"upstream session ended during {op}"
+                    if op
+                    else "upstream session ended"
+                )
                 log("WARNING: claims channel lost — will retry")
+                continue
+            # Passive detection is blind on an idle channel — a dead
+            # peer's session only dies when the channel does I/O. One
+            # protocol ping per tick is the least intrusive liveness
+            # signal: transport error → the peer is gone (drop and
+            # retry); timeout → alive but unresponsive (busy — keep
+            # the session, reconnecting would not help).
+            ping = getattr(live, "ping", None)
+            if ping is not None:
+                try:
+                    await ping(probe_timeout_seconds)
+                except ProbeTimeout:
+                    ch["probe"] = "busy"
+                    ch["last_probe_at"] = _utc_now()
+                    log(
+                        "WARNING: claims channel alive but not "
+                        "answering (ping timeout) — busy, not down"
+                    )
+                except Exception as e:
+                    try:
+                        await live.disconnect()
+                    except Exception:
+                        pass
+                    adaptor.set_claims(None)
+                    ch["state"] = "down"
+                    ch["probe"] = "down"
+                    ch["last_error"] = (
+                        f"ping failed: {describe_error(e)}"
+                    )
+                    log("WARNING: claims channel lost — will retry")
+                else:
+                    ch["probe"] = "ok"
+                    ch["last_probe_at"] = _utc_now()
             continue
         ch["attempts"] += 1
         try:
             await ch["role_obj"].connect()
         except Exception as e:
             ch["state"] = "down"
-            ch["last_error"] = str(e)
+            ch["last_error"] = describe_error(e)
             continue
         adaptor.set_claims(ch["role_obj"])
         ch["state"] = "up"

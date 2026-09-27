@@ -22,6 +22,7 @@ from ..enforcement.checks import (
     check_decision_evidence,
     check_decision_inputs,
     check_promote_allowed,
+    check_promote_authority,
 )
 from ..state.models import (
     CanaryDeployment,
@@ -122,6 +123,15 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             )
             if err := check_decision_inputs(
                 verdict, rationale, decided_by, evidence_refs
+            ):
+                return fail(json.dumps({"error": err}))
+            # The conditional-proposal human gate fires at the write,
+            # not only at the pointer move — an agent-authored promote
+            # must never reach the insert-only record or mint a claim.
+            if verdict == "promote" and (
+                err := check_promote_authority(
+                    store, candidate, decided_by
+                )
             ):
                 return fail(json.dumps({"error": err}))
             if err := check_decision_evidence(

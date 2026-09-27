@@ -48,7 +48,11 @@ lab-<role>-<identifier>      the grammar — volatile part is the suffix
 /srv/lab/exchange      THE handoff: hostile writes artifacts, lab reads
 /srv/lab/incoming      ingested datasets — UTC-timestamped batches,
                        lab-owned, READ-ONLY in the hostile container
-                       at /incoming (visible there after next restart)
+                       at /incoming, and READ-ONLY inside the trial
+                       sandbox too (episteme's executor bwraps a
+                       read-only root, so the mcp container's
+                       /incoming:ro mount propagates — trial code can
+                       read datasets but never modify them)
 /srv/lab/experiments   exp-owned persistent experiment state
 /srv/lab/mcp-state     trusted MCP state — owned by the `mcp` service
                        account, mode 700. NOT readable from `lab` —
@@ -220,9 +224,10 @@ If unsure which tools exist, call `search` inside the same sandbox:
 - **Getting data IN → the human pushes it.** There is no guest-initiated
   channel; the host runs `./80-ingest-lab-data.sh <vm> <src>` which
   lands the batch at `/srv/lab/incoming/<name>-<UTCts>/` — lab-owned,
-  read-only inside the hostile zone at `/incoming/<name>-<UTCts>/`.
-  Read datasets from there; never write into `/incoming` (it's mounted
-  read-only anyway).
+  read-only inside the hostile zone at `/incoming/<name>-<UTCts>/` and
+  inside the executor's trial sandbox at the same path. Trial code and
+  hostile-zone code read datasets from there; neither can write into
+  `/incoming` (it's mounted read-only at both layers).
 - Secrets (API keys etc.) go in `/home/lab`, mode `600`. Never in the
   workspace payload (it is mounted read-only into the hostile zone)
   and never in committed files.

@@ -146,11 +146,13 @@ def main() -> None:
                       f"report not_configured", file=sys.stderr)
                 continue
             spec.attempts += 1
+            from .clients.mcp_client import describe_error
             try:
                 await spec.adaptor.connect()
             except Exception as e:
-                spec.mark_down(str(e))
-                print(f"WARNING: {label} channel unreachable ({e}) — "
+                spec.mark_down(describe_error(e))
+                print(f"WARNING: {label} channel unreachable "
+                      f"({describe_error(e)}) — "
                       f"the supervisor will keep retrying",
                       file=sys.stderr)
                 continue

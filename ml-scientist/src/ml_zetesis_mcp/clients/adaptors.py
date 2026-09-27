@@ -21,7 +21,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from .mcp_client import MCPClientAdaptor
+from .mcp_client import MCPClientAdaptor, ProbeTimeout, describe_error
 
 
 class UpstreamAdaptor(MCPClientAdaptor):
@@ -119,6 +119,10 @@ class ChannelSpec:
         self.state = "down"  # "down" | "up" — set by the supervisor
         self.attempts = 0
         self.last_error: str | None = None
+        self.last_failed_operation: str | None = None
+        self.last_failed_at: str | None = None
+        self.probe: str | None = None
+        self.last_probe_at: str | None = None
         self.connected_at: str | None = None
 
     def mark_up(self) -> None:
@@ -172,13 +176,25 @@ class Adaptors:
             live = getattr(self, name, None)
             dead = getattr(live, "session_dead", None)
             up = live is not None and not (dead and dead())
+            src = live if live is not None else spec.adaptor
             report.append({
                 "channel": name,
                 "role": spec.role,
                 "target": spec.target,
                 "state": "up" if up else "down",
                 "attempts": spec.attempts,
-                "last_error": spec.last_error,
+                "last_error": spec.last_error
+                or getattr(src, "last_error", None),
+                "last_operation": getattr(src, "last_operation", None),
+                "last_failed_operation": spec.last_failed_operation
+                or getattr(src, "last_failed_operation", None),
+                "last_failed_at": spec.last_failed_at
+                or getattr(src, "last_failed_at", None),
+                "probe": spec.probe
+                or getattr(src, "last_probe_state", None),
+                "last_probe_at": spec.last_probe_at
+                or getattr(src, "last_probe_at", None),
+                "last_probe_ms": getattr(src, "last_probe_ms", None),
                 "connected_at": spec.connected_at,
             })
         return report
@@ -189,6 +205,7 @@ async def run_connectivity_supervisor(
     adaptors: Adaptors,
     interval_seconds: float,
     *,
+    probe_timeout_seconds: float = 5.0,
     log=print,
 ) -> None:
     """Keep configured channels connected — the convergence path that
@@ -211,17 +228,70 @@ async def run_connectivity_supervisor(
                     except Exception:
                         pass
                     setattr(adaptors, name, None)
-                    spec.mark_down("upstream session ended")
+                    op = getattr(
+                        live, "in_flight_operation", None
+                    ) or getattr(live, "last_failed_operation", None)
+                    if op:
+                        spec.last_failed_operation = op
+                        spec.last_failed_at = datetime.now(
+                            timezone.utc
+                        ).isoformat(timespec="seconds")
+                    spec.mark_down(
+                        f"upstream session ended during {op}"
+                        if op
+                        else "upstream session ended"
+                    )
                     log(
                         f"WARNING: {name} ({spec.role}) channel lost — "
                         "will retry"
                     )
+                    continue
+                # Passive detection is blind on an idle channel — a
+                # dead peer's session only dies when the channel does
+                # I/O. One protocol ping per tick is the least
+                # intrusive liveness signal: transport error → the
+                # peer is gone (drop and retry); timeout → alive but
+                # unresponsive (busy — keep the session, reconnecting
+                # would not help).
+                ping = getattr(live, "ping", None)
+                if ping is not None:
+                    try:
+                        await ping(probe_timeout_seconds)
+                    except ProbeTimeout:
+                        spec.probe = "busy"
+                        spec.last_probe_at = datetime.now(
+                            timezone.utc
+                        ).isoformat(timespec="seconds")
+                        log(
+                            f"WARNING: {name} ({spec.role}) channel "
+                            "alive but not answering (ping timeout) — "
+                            "busy, not down"
+                        )
+                    except Exception as e:
+                        try:
+                            await live.disconnect()
+                        except Exception:
+                            pass
+                        setattr(adaptors, name, None)
+                        spec.probe = "down"
+                        spec.mark_down(
+                            f"ping failed: {describe_error(e)}"
+                        )
+                        log(
+                            f"WARNING: {name} ({spec.role}) channel "
+                            "lost — will retry"
+                        )
+                    else:
+                        spec.probe = "ok"
+                        spec.last_probe_at = datetime.now(
+                            timezone.utc
+                        ).isoformat(timespec="seconds")
                 continue
             spec.attempts += 1
             try:
                 await spec.adaptor.connect()
             except Exception as e:
-                spec.mark_down(str(e))
+                spec.mark_down(describe_error(e))
                 continue
             setattr(adaptors, name, spec.adaptor)
             spec.mark_up()

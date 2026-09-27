@@ -79,6 +79,12 @@ async def test_registered_channel_reports_down_until_connected():
         "state": "down",
         "attempts": 0,
         "last_error": None,
+        "last_operation": None,
+        "last_failed_operation": None,
+        "last_failed_at": None,
+        "probe": None,
+        "last_probe_at": None,
+        "last_probe_ms": None,
         "connected_at": None,
     }]
     # Unconfigured channels are absent — supported standalone mode,
