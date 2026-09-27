@@ -395,7 +395,8 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             evidence_refs = coerce_json(evidence_refs, list, "evidence_refs")
             # Enforcement: valid verdict + attribution + real references
             err = check_decision_valid(
-                verdict, rationale, decided_by, candidate_id, contract_id, store
+                verdict, rationale, decided_by, candidate_id, contract_id,
+                store, evidence_refs,
             )
             if err:
                 return fail(json.dumps({"error": err}))

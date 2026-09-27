@@ -10,6 +10,7 @@ Report-only: no check mutates state.
 from __future__ import annotations
 
 import json
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -155,6 +156,45 @@ def _check_closed_campaigns_scored(store) -> dict:
         "closed_campaigns_scored", violations,
         f"{len(violations)} closed campaign(s) carry no "
         "promotion_score",
+    )
+
+
+def _check_unscoreable_campaigns(store) -> dict:
+    """Open campaigns whose results carry an unscorable primary_metric
+    (null/non-numeric/non-finite — rows predating the write gate, or
+    written before it existed). Such a campaign can never score at
+    close and cannot be repaired — results are insert-only;
+    abandon_campaign is the exit. Reported, not auto-gating."""
+    rows = store._fetchall(
+        """SELECT r.id AS result_id, r.campaign_id, r.metrics_json,
+                  c.primary_metric
+           FROM campaign_results r
+           JOIN promotion_campaigns c ON c.id = r.campaign_id
+           WHERE c.status = 'open'"""
+    )
+    violations = []
+    for r in rows:
+        try:
+            metrics = json.loads(r["metrics_json"])
+        except (ValueError, TypeError):
+            metrics = {}
+        v = metrics.get(r["primary_metric"])
+        if (
+            not isinstance(v, (int, float))
+            or isinstance(v, bool)
+            or not math.isfinite(v)
+        ):
+            violations.append({
+                "campaign_id": r["campaign_id"],
+                "result_id": r["result_id"],
+                "metric": r["primary_metric"],
+                "value": v,
+            })
+    return _res(
+        "unscoreable_campaigns", violations,
+        f"{len(violations)} open campaign result(s) carry an "
+        "unscorable primary_metric (close would wedge; "
+        "abandon_campaign is the exit)",
     )
 
 
@@ -335,6 +375,7 @@ async def run_checks(
         _check_asserted_without_claim(store),
         _check_concluded_unminted(store),
         _check_closed_campaigns_scored(store),
+        _check_unscoreable_campaigns(store),
         _check_campaign_results_have_campaign(store),
         _check_spawns_have_campaign(store),
         _check_spawn_budget(store),

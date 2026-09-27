@@ -208,8 +208,9 @@ def check_campaign_exists(store: SearchStore, campaign_id: str) -> str | None:
 
 
 def check_campaign_open(store: SearchStore, campaign_id: str) -> str | None:
-    """Load the campaign; error if missing or already closed — closed
-    campaigns freeze results and evidence."""
+    """Load the campaign; error if missing or already terminal —
+    closed campaigns freeze results and evidence, abandoned ones are
+    equally immutable."""
     campaign = store.get_campaign(campaign_id)
     if campaign is None:
         return f"Campaign not found: {campaign_id}."
@@ -217,6 +218,11 @@ def check_campaign_open(store: SearchStore, campaign_id: str) -> str | None:
         return (
             f"Campaign '{campaign_id}' is already closed — its "
             "promotion_score and evidence trail are frozen."
+        )
+    if campaign.status is CampaignStatus.abandoned:
+        return (
+            f"Campaign '{campaign_id}' was abandoned — a terminal "
+            "record that accrues no further writes."
         )
     return None
 

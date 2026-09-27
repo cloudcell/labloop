@@ -596,6 +596,7 @@ def check_decision_valid(
     candidate_id: str,
     contract_id: str | None,
     store: StateStore,
+    evidence_refs: list | None = None,
 ) -> str | None:
     """Promotion decisions require a valid verdict, attribution, and real
     references. Attribution is first-class: a decision with no decided_by
@@ -611,6 +612,11 @@ def check_decision_valid(
         return (
             "decided_by is required — attribution is a first-class "
             "property of a promotion decision."
+        )
+    if evidence_refs is not None and not evidence_refs:
+        return (
+            "evidence_refs requires ≥1 id — a verdict with no cited "
+            "evidence is an ungrounded decision and cannot be recorded."
         )
     if store.get_candidate_version(candidate_id) is None:
         return f"Candidate not found: {candidate_id}."

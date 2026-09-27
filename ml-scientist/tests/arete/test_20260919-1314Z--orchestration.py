@@ -100,6 +100,10 @@ class TestOpenArmCampaign:
         })
         assert "error" not in r, r
         assert r["campaign_id"] == "camp-up1"
+        # rc-6 P8 — the response itself carries the declared budget and
+        # resolved seeds; callers must not re-derive them.
+        assert r["budget"] == BUDGET
+        assert r["seeds"] == [1, 2]
         # Budget carried verbatim from the tournament
         tool, args = orchestration.pushed[-1]
         assert tool == "open_campaign"

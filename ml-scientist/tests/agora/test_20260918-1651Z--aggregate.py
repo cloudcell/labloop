@@ -198,3 +198,30 @@ class TestSurfaces:
             tools = await client.list_tools()
             names = [t.name for t in tools.tools]
             assert names == ["check_invariants"]
+
+
+async def test_topology_channels_carry_fault_fields(agora_server):
+    """rc-6 P6 — lab://topology entries expose the same diagnostic
+    channel fields as the connectivity check: probe timing, fault
+    attribution, in-flight op. A topology that omits them cannot
+    answer 'what went wrong'."""
+    from mcp.client import Client
+
+    async with Client(agora_server) as client:
+        result = await client.read_resource("lab://topology")
+        topo = json.loads(result.contents[0].text)
+        for ch in topo["channels"]:
+            for k in (
+                "probe", "last_probe_ms", "last_probe_at",
+                "last_operation", "last_failed_operation",
+                "last_failed_at", "in_flight_operation",
+                "in_flight_since",
+            ):
+                assert k in ch, (ch["channel"], k)
+
+
+async def test_agora_connectivity_report_in_flight_fields(adaptors):
+    """rc-6 P4 — agora's own channel report carries in-flight fields."""
+    for ch in adaptors.connectivity_report():
+        assert "in_flight_operation" in ch
+        assert "in_flight_since" in ch

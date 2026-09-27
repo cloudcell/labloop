@@ -842,13 +842,17 @@ class TestLineage:
                     "candidate_id": c["candidate_id"],
                     "contract_id": ct["contract_id"],
                     "verdict": "promote", "rationale": "won",
-                    "decided_by": "battery", "evidence_refs": [],
+                    "decided_by": "battery",
+                    "evidence_refs": ["trial-ev1"],
                 }
                 # invalid verdict
                 bad = dict(args, verdict="crown")
                 await err(s, "record_promotion_decision", bad)
                 # empty rationale
                 bad = dict(args, rationale="")
+                await err(s, "record_promotion_decision", bad)
+                # empty evidence_refs — ungrounded decision (rc-6 P3)
+                bad = dict(args, evidence_refs=[])
                 await err(s, "record_promotion_decision", bad)
                 # valid
                 await ok(s, "record_promotion_decision", args)

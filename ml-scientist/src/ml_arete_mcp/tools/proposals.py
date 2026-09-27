@@ -128,23 +128,31 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         class_map: {component_name: declared_boundary_class} for every
         component the delta touches — the kernel classifies
         authoritatively from the ADR-0003 table; the declaration is
-        kept for the record. Recognized class-1 (immutable) names:
-        audit_log, event_log, audit_semantics, artifact_hashing,
-        provenance, artifact_provenance, capability_model,
-        permission_model, permissions, budget_enforcement,
-        compute_ceiling(s), budgets, promotion_protocol,
-        holdout_access_control, heldout_access_control,
-        held_out_evaluation_access, rollback_mechanism,
-        enforcement_kernel, safety_kernel. Class-2 (conditional):
-        evaluator_implementation, evaluator, metric_weighting,
-        metric_weights, memory_schema, scheduler. Unrecognized names
-        classify as 'unknown' → conditional, never silently writable.
+        kept for the record. Kernel classes (see improver://classes):
 
-        Admission: any class-1 (immutable/human-governed) component
-        touch → status 'rejected' at ingress, stored with the reason.
-        Any class-3 (conditionally modifiable) or unknown component →
-        'conditional' — promotable only behind a human decided_by.
-        Otherwise 'admitted'. Rejection is durable, not silent.
+        - immutable: audit_log, event_log, audit_semantics,
+          artifact_hashing, provenance, artifact_provenance,
+          capability_model, permission_model, permissions,
+          budget_enforcement, compute_ceiling, compute_ceilings,
+          budgets, promotion_protocol, holdout_access_control,
+          heldout_access_control, held_out_evaluation_access,
+          rollback_mechanism, enforcement_kernel, safety_kernel.
+        - conditional: evaluator_implementation, evaluator,
+          metric_weighting, metric_weights, memory_schema, scheduler.
+        - modifiable: prompts, policies, search_policy, planner,
+          planner_algorithm, optimizer_policy, optimizer,
+          role_composition, memory_retrieval, retrieval_strategy,
+          code_generation, codegen_strategy, experiment_templates,
+          model_choice, fine_tuning, tool_adapters, tool_adaptors.
+
+        Unrecognized names classify as 'unknown' → conditional, never
+        silently writable.
+
+        Admission: any 'immutable' component touch → status 'rejected'
+        at ingress, stored with the reason. Any 'conditional' or
+        'unknown' component → 'conditional' — promotable only behind a
+        human decided_by. Otherwise 'admitted'. Rejection is durable,
+        not silent.
         """
         try:
             if store.get_improver(proposer_improver_id) is None:
@@ -188,9 +196,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 payload["rejection_reason"] = reason
             if proposal.status == ProposalStatus.conditional:
                 payload["conditional_note"] = (
-                    "Class-3 or unknown component touched — promotion "
-                    "will require a promote decision whose decided_by "
-                    "names a human authority ('human:<name>')."
+                    "Conditional or unknown component touched — "
+                    "promotion will require a promote decision whose "
+                    "decided_by names a human authority "
+                    "('human:<name>')."
                 )
             return ok(payload)
         except Exception as e:

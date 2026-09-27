@@ -129,6 +129,12 @@ class CloseCampaignOut(TypedDict, total=False):
     challenger_mean: int | float | None
 
 
+class AbandonCampaignOut(TypedDict, total=False):
+    campaign_id: str | None
+    status: str | None
+    abandoned_by: str | None
+
+
 class DropFindingOut(TypedDict, total=False):
     finding_id: str | None
     status: str | None

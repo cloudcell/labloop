@@ -195,6 +195,12 @@ class Adaptors:
                 "last_probe_at": spec.last_probe_at
                 or getattr(src, "last_probe_at", None),
                 "last_probe_ms": getattr(src, "last_probe_ms", None),
+                "in_flight_operation": getattr(
+                    src, "in_flight_operation", None
+                ),
+                "in_flight_since": getattr(
+                    src, "in_flight_since", None
+                ),
                 "connected_at": spec.connected_at,
             })
         return report

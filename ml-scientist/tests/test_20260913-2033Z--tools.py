@@ -1173,10 +1173,12 @@ class TestTerminalStorePrecedence:
     async def test_mark_retryable_kills_task_and_store_wins(
         self, store
     ):
-        """mark_retryable cancels the executor task BEFORE flipping
-        state — a terminal record must not orphan a live subprocess —
-        and get_trial_status then serves the persisted 'retryable',
-        not the stale 'running' the executor still reports."""
+        """mark_retryable flips the row terminal BEFORE awaiting
+        executor cancel (rc-6 P18) — a terminal row with a briefly
+        live task is not an orphan, whereas the old order (task gone,
+        row still 'running') opened a transient violation window —
+        and get_trial_status serves the persisted 'retryable', not
+        the stale 'running' the executor still reports."""
         from mcp.client import Client
 
         from ml_episteme_mcp.clients.adaptor import create_stub_adaptor
@@ -1221,7 +1223,8 @@ class TestTerminalStorePrecedence:
                 "reason": "executor state lost",
             })
             assert r["status"] == "retryable"
-            # Cancellation ran before the state flip.
+            # Cancellation ran — a terminal record must not orphan a
+            # live subprocess.
             assert ex.cancelled == ["trial-c3"]
 
             # The executor still says 'running' — the terminal store
@@ -1230,3 +1233,131 @@ class TestTerminalStorePrecedence:
                 "programme_id": "prog-c3", "trial_id": "trial-c3",
             })
             assert r["status"] == "retryable"
+            # rc-6 P14 — the mandatory reason is persisted on the row,
+            # not just echoed in the reply.
+            assert r["retry_reason"] == "executor state lost"
+            row = store.get_trial("trial-c3")
+            assert row.retry_reason == "executor state lost"
+
+    @pytest.mark.asyncio
+    async def test_mark_retryable_terminal_before_cancel(self, store):
+        """rc-6 P18 — when cancel_async runs, the trial row is already
+        terminal. The old order (cancel → flip) left a transient
+        'running' row that orphaned_running_trials could gate on."""
+        from mcp.client import Client
+
+        from ml_episteme_mcp.clients.adaptor import create_stub_adaptor
+        from ml_episteme_mcp.state.models import (
+            Hypothesis,
+            Programme,
+            ProgrammeStatus,
+            Trial,
+            TrialStatus,
+        )
+
+        observed = []
+
+        class OrderProbingExecutor(_FakeExecutor):
+            async def cancel_async(self, trial_id):
+                # Read the row mid-cancel: it must already be retryable.
+                observed.append(store.get_trial(trial_id).status.value)
+                return await super().cancel_async(trial_id)
+
+        ex = OrderProbingExecutor()
+        adaptor = create_stub_adaptor()
+        adaptor.set_executor(ex)
+        mcp = create_server(
+            store, adaptor=adaptor,
+            enforcement_config={"recurrent_protocol": False},
+        )
+        client = Client(mcp)
+
+        store.create_programme(Programme(
+            id="prog-ord", goal="g", constraints={},
+            allowed_variables=["x"], budget_max_trials=10,
+            budget_max_wall_time_hours=1.0,
+            status=ProgrammeStatus.active,
+        ))
+        store.create_hypothesis(Hypothesis(
+            id="hyp-ord", programme_id="prog-ord",
+            statement="s", failure_criterion="f",
+            variables_involved=["x"],
+        ))
+        store.create_trial(Trial(
+            id="trial-ord", programme_id="prog-ord",
+            hypothesis_id="hyp-ord", config_json="{}",
+            status=TrialStatus.designed,
+        ))
+        store.update_trial_status("trial-ord", "running")
+
+        async with client:
+            r = await call_tool(client, "mark_retryable", {
+                "programme_id": "prog-ord", "trial_id": "trial-ord",
+                "reason": "probe ordering",
+            })
+            assert r["status"] == "retryable"
+        assert observed == ["retryable"]
+
+    @pytest.mark.asyncio
+    async def test_correct_trial_status_persists_retry_reason(
+        self, store
+    ):
+        """rc-6 P14 — a correction TO retryable lands its reason on the
+        retry_reason column too, same durable mechanism as
+        mark_retryable (the corrections trail alone is not the
+        read surface get_trial_status serves)."""
+        from mcp.client import Client
+
+        from ml_episteme_mcp.clients.adaptor import create_stub_adaptor
+        from ml_episteme_mcp.state.models import (
+            Hypothesis,
+            Programme,
+            ProgrammeStatus,
+            Trial,
+            TrialStatus,
+        )
+
+        adaptor = create_stub_adaptor()
+        mcp = create_server(
+            store, adaptor=adaptor,
+            enforcement_config={"recurrent_protocol": False},
+        )
+        client = Client(mcp)
+
+        store.create_programme(Programme(
+            id="prog-corr", goal="g", constraints={},
+            allowed_variables=["x"], budget_max_trials=10,
+            budget_max_wall_time_hours=1.0,
+            status=ProgrammeStatus.active,
+        ))
+        store.create_hypothesis(Hypothesis(
+            id="hyp-corr", programme_id="prog-corr",
+            statement="s", failure_criterion="f",
+            variables_involved=["x"],
+        ))
+        store.create_trial(Trial(
+            id="trial-corr", programme_id="prog-corr",
+            hypothesis_id="hyp-corr", config_json="{}",
+            status=TrialStatus.designed,
+        ))
+        store.update_trial_status("trial-corr", "running")
+        store.update_trial_executor_output(
+            "trial-corr",
+            json.dumps({"status": "completed", "exit_code": 0}),
+        )
+        store.update_trial_status("trial-corr", "completed")
+
+        async with client:
+            r = await call_tool(client, "correct_trial_status", {
+                "programme_id": "prog-corr", "trial_id": "trial-corr",
+                "to_status": "retryable",
+                "reason": "output truncated — rerun on bigger budget",
+            })
+            assert r["to"] == "retryable"
+            r = await call_tool(client, "get_trial_status", {
+                "programme_id": "prog-corr", "trial_id": "trial-corr",
+            })
+            assert r["status"] == "retryable"
+            assert r["retry_reason"] == (
+                "output truncated — rerun on bigger budget"
+            )

@@ -282,6 +282,12 @@ class Trial(BaseModel):
         description="When the trial reached its end boundary "
         "(→completed/failed/retryable/abandoned)",
     )
+    retry_reason: str | None = Field(
+        default=None,
+        description="Why the trial was marked retryable — persisted "
+        "attribution, set by mark_retryable (a retried trial must be "
+        "answerable to 'why, and by whom').",
+    )
     created_at: str = Field(default_factory=_utc_now)
 
     ontological_category: str = "data item"

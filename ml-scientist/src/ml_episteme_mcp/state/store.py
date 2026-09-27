@@ -429,6 +429,7 @@ CREATE TABLE IF NOT EXISTS trials (
     executor_output_json TEXT,
     started_at TEXT,
     finished_at TEXT,
+    retry_reason TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (programme_id) REFERENCES programmes(id),
     FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(id)
@@ -737,7 +738,7 @@ class StateStore:
 
         # Add started_at/finished_at columns to trials (the execution
         # window — created_at is design time, not run time)
-        for col in ("started_at", "finished_at"):
+        for col in ("started_at", "finished_at", "retry_reason"):
             if col not in trial_cols:
                 self._conn.execute(
                     f"ALTER TABLE trials ADD COLUMN {col} TEXT"
@@ -1078,10 +1079,13 @@ class StateStore:
             executor_output_json=row["executor_output_json"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
+            retry_reason=row["retry_reason"],
             created_at=row["created_at"],
         )
 
-    def update_trial_status(self, trial_id: str, status: str) -> None:
+    def update_trial_status(
+        self, trial_id: str, status: str, reason: str | None = None
+    ) -> None:
         with self._lock:
             trial = self.get_trial(trial_id)
             if trial is None:
@@ -1113,11 +1117,21 @@ class StateStore:
                     (status, now, trial_id),
                 )
             elif status in ("completed", "failed", "retryable", "abandoned"):
-                self.conn.execute(
-                    "UPDATE trials SET status = ?, "
-                    "finished_at = COALESCE(finished_at, ?) WHERE id = ?",
-                    (status, now, trial_id),
-                )
+                # retryable carries its attribution on the row — the
+                # reason is part of the record, not just the reply.
+                if status == "retryable" and reason is not None:
+                    self.conn.execute(
+                        "UPDATE trials SET status = ?, "
+                        "finished_at = COALESCE(finished_at, ?), "
+                        "retry_reason = ? WHERE id = ?",
+                        (status, now, reason, trial_id),
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE trials SET status = ?, "
+                        "finished_at = COALESCE(finished_at, ?) WHERE id = ?",
+                        (status, now, trial_id),
+                    )
             else:
                 self.conn.execute(
                     "UPDATE trials SET status = ? WHERE id = ?", (status, trial_id)
@@ -1183,11 +1197,21 @@ class StateStore:
                 "reason": reason,
                 "corrected_at": now,
             })
-            self.conn.execute(
-                "UPDATE trials SET status = ?, executor_output_json = ? "
-                "WHERE id = ?",
-                (status, _json.dumps(out), trial_id),
-            )
+            if status == "retryable":
+                # Same durable mechanism as mark_retryable — a retryable
+                # row carries its attribution on the row, not only in
+                # the corrections trail.
+                self.conn.execute(
+                    "UPDATE trials SET status = ?, executor_output_json "
+                    "= ?, retry_reason = ? WHERE id = ?",
+                    (status, _json.dumps(out), reason, trial_id),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE trials SET status = ?, executor_output_json = ? "
+                    "WHERE id = ?",
+                    (status, _json.dumps(out), trial_id),
+                )
             self.conn.commit()
             return {
                 "trial_id": trial_id,
@@ -1283,6 +1307,7 @@ class StateStore:
                 executor_output_json=r["executor_output_json"],
                 started_at=r["started_at"],
                 finished_at=r["finished_at"],
+                retry_reason=r["retry_reason"],
                 created_at=r["created_at"],
             )
             for r in rows
@@ -1411,6 +1436,7 @@ class StateStore:
                 executor_output_json=r["executor_output_json"],
                 started_at=r["started_at"],
                 finished_at=r["finished_at"],
+                retry_reason=r["retry_reason"],
                 created_at=r["created_at"],
             )
             for r in rows

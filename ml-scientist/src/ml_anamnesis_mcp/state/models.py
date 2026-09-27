@@ -31,7 +31,9 @@ class RefType(str, Enum):
     """What a claim_edge's to_ref points at.
 
     'claim' refs are verified against the claims table; the rest are
-    opaque IDs trusted across the protocol boundary (ADR-0002).
+    opaque IDs trusted across the protocol boundary (ADR-0002). The
+    vocabulary covers every entity family a Loop can cite — Loop-2
+    entities are first-class citizens of the claim graph.
     """
 
     claim = "claim"
@@ -39,6 +41,17 @@ class RefType(str, Enum):
     observation = "observation"
     conclusion = "conclusion"
     programme = "programme"
+    investigation = "investigation"
+    finding = "finding"
+    archive = "archive"
+    improver = "improver"
+    tournament = "tournament"
+    tournament_result = "tournament_result"
+    proposal = "proposal"
+    meta_contract = "meta_contract"
+    meta_decision = "meta_decision"
+    policy_version = "policy_version"
+    canary_deployment = "canary_deployment"
     external = "external"
 
 

@@ -304,9 +304,13 @@ def violation_ack(
         created_at=_utc_now_iso(),
     )
     remaining = open_violations(store)
+    matched = (check_name, object_ref) in open_before
     return {
         "ack_id": ack_id,
-        "status": "acknowledged",
-        "matched_open_violation": (check_name, object_ref) in open_before,
+        # The ack row is recorded either way (insert-only ledger —
+        # the attempt itself is a governance event), but the status
+        # must not masquerade as evidence a fault existed.
+        "status": "acknowledged" if matched else "no_matching_violation",
+        "matched_open_violation": matched,
         "open_violations": len(remaining),
     }

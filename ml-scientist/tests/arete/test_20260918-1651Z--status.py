@@ -119,3 +119,20 @@ class TestSurfaces:
             result = await client.get_prompt("status_report", {})
             text = result.messages[0].content.text
             assert "status" in text.lower()
+
+
+async def test_improver_classes_resource(arete_server):
+    """rc-6 P11 — improver://classes exposes the boundary-class
+    registry as a queryable resource (no docstring parsing)."""
+    from mcp.client import Client
+
+    async with Client(arete_server) as client:
+        result = await client.read_resource("improver://classes")
+        body = json.loads(result.contents[0].text)
+    assert body["server"] == "ml-arete-mcp"
+    classes = body["classes"]
+    assert "enforcement_kernel" in classes["immutable"]
+    assert "evaluator" in classes["conditional"]
+    assert "prompts" in classes["modifiable"]
+    for cls in ("immutable", "conditional", "modifiable"):
+        assert isinstance(classes[cls], list)

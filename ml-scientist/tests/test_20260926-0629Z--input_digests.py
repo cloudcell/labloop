@@ -691,3 +691,66 @@ async def test_acked_violation_annotated_in_payload(store):
         if c["name"] == "input_data_undigested"
     )
     assert chk["violations"][0]["acknowledged"] is True
+
+
+def test_input_data_undigested_denominators(store):
+    """rc-6 P5 — the detail must carry the denominator: 'K of N
+    input_data entries across M manifest(s)'. A vacuous pass and a
+    real pass must read differently."""
+    from ml_episteme_mcp.integrity.checks import run_checks
+
+    tid = _seed_trial(store)
+    _attach_manifest_blob(store, tid, {
+        "schema_version": 2,
+        "files": [
+            {"path": "/a.json", "role": "input_data",
+             "sha256": "sha256:" + "a" * 64},
+            {"path": "/b.json", "role": "input_data",
+             "sha256": None, "reason": "vanished"},
+            {"path": "/dir", "role": "directory", "sha256": None},
+        ],
+    })
+    res = run_checks(store)
+    chk = next(c for c in res["checks"]
+               if c["name"] == "input_data_undigested")
+    assert chk["ok"] is False
+    assert "1 of 2" in chk["detail"]
+    assert "1 manifest" in chk["detail"]
+
+
+def test_input_data_undigested_skipped_when_no_manifests(store):
+    """rc-6 P5 — an empty applicable population reports 'skipped',
+    never vacuous green."""
+    from ml_episteme_mcp.integrity.checks import run_checks
+
+    res = run_checks(store)
+    chk = next(c for c in res["checks"]
+               if c["name"] == "input_data_undigested")
+    assert chk["ok"] is True
+    assert chk["detail"].startswith("skipped")
+
+    # A completed trial WITHOUT a manifest is also an empty population.
+    _seed_trial(store)
+    res = run_checks(store)
+    chk = next(c for c in res["checks"]
+               if c["name"] == "input_data_undigested")
+    assert chk["detail"].startswith("skipped")
+
+
+def test_input_data_undigested_clean_denominator(store):
+    """A fully digested manifest reports '0 of N' — not 'skipped'."""
+    from ml_episteme_mcp.integrity.checks import run_checks
+
+    tid = _seed_trial(store)
+    _attach_manifest_blob(store, tid, {
+        "schema_version": 2,
+        "files": [
+            {"path": "/a.json", "role": "input_data",
+             "sha256": "sha256:" + "a" * 64},
+        ],
+    })
+    res = run_checks(store)
+    chk = next(c for c in res["checks"]
+               if c["name"] == "input_data_undigested")
+    assert chk["ok"] is True
+    assert "0 of 1" in chk["detail"]

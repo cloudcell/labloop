@@ -328,3 +328,15 @@ async def test_open_violations_heals_with_live_state(
         decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
     )
     assert recurrence.open_violations(improver_store) == []
+
+
+async def test_channel_report_carries_in_flight_fields(improver_store):
+    """rc-6 P4 — in_flight_operation/in_flight_since on every channel."""
+    adaptors = Adaptors()
+    fake = FakeChannelAdaptor()
+    adaptors.register_channel("claims", "claims", fake)
+    await fake.connect()
+    adaptors.claims = fake
+    for ch in adaptors.connectivity_report():
+        assert "in_flight_operation" in ch
+        assert "in_flight_since" in ch

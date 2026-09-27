@@ -234,3 +234,45 @@ async def test_check_invariants_tool(arete_server):
     )
     assert payload["status"] == "ok"
     assert payload["trigger"] == "tool"
+
+
+# --- rc-6 P16: phantom acknowledgements must not read as real --------
+
+
+def _write_violation(store, check_name, object_ref):
+    from ml_arete_mcp.integrity.checks import log_dir_for
+    from ml_arete_mcp.integrity.log import write_check_log
+
+    write_check_log(log_dir_for(store), {
+        "server": "test",
+        "checked_at": "2026-01-01T00:00:00+00:00",
+        "checks": [{
+            "name": check_name, "ok": False,
+            "violations": [object_ref], "detail": "synthetic",
+        }],
+    }, max_files=30)
+
+
+def test_violation_ack_matched(improver_store):
+    from ml_arete_mcp.enforcement.recurrence import violation_ack
+
+    _write_violation(improver_store, "open_tournament_debt", "tourn-x")
+    r = violation_ack(
+        improver_store, "open_tournament_debt", "tourn-x",
+        "accepted: test", "human:tester",
+    )
+    assert r["status"] == "acknowledged"
+    assert r["matched_open_violation"] is True
+
+
+def test_violation_ack_no_match_is_not_acknowledged(improver_store):
+    from ml_arete_mcp.enforcement.recurrence import violation_ack
+
+    _write_violation(improver_store, "open_tournament_debt", "tourn-x")
+    r = violation_ack(
+        improver_store, "open_tournament_debt", "tourn-OTHER",
+        "accepted: unrelated", "human:tester",
+    )
+    assert r["matched_open_violation"] is False
+    assert r["status"] == "no_matching_violation"
+    assert r["ack_id"].startswith("vack-")

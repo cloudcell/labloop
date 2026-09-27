@@ -85,6 +85,8 @@ async def test_registered_channel_reports_down_until_connected():
         "probe": None,
         "last_probe_at": None,
         "last_probe_ms": None,
+        "in_flight_operation": None,
+        "in_flight_since": None,
         "connected_at": None,
     }]
     # Unconfigured channels are absent — supported standalone mode,
@@ -371,3 +373,15 @@ async def test_open_violations_heals_with_live_state(
         decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
     )
     assert recurrence.open_violations(search_store) == []
+
+
+async def test_channel_report_carries_in_flight_fields(search_store):
+    """rc-6 P4 — in_flight_operation/in_flight_since on every channel."""
+    adaptors = Adaptors()
+    fake = FakeChannelAdaptor()
+    adaptors.register_channel("evidence", "loop0-read", fake)
+    await fake.connect()
+    adaptors.evidence = fake
+    for ch in adaptors.connectivity_report():
+        assert "in_flight_operation" in ch
+        assert "in_flight_since" in ch

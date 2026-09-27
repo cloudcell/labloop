@@ -138,13 +138,14 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                     "status": "already_linked",
                 })
 
+            resolved_seeds = (
+                seeds if seeds is not None else (tournament.seeds or [])
+            )
             data, err = await _push(adaptors, "open_campaign", {
                 "contract_id": upstream_contract_id,
                 "challenger_id": challenger_id,
                 "budget": tournament.budget,
-                "seeds": seeds if seeds is not None else (
-                    tournament.seeds or []
-                ),
+                "seeds": resolved_seeds,
             })
             if err:
                 return fail(json.dumps({"error": err}))
@@ -169,6 +170,8 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "tournament_id": tournament_id,
                 "arm": arm,
                 "link_id": link.id,
+                "budget": tournament.budget,
+                "seeds": resolved_seeds,
                 "status": "opened",
             })
         except Exception as e:

@@ -56,7 +56,7 @@ def _finding(iid, fid="find-t1", **kw):
 async def test_clean_store_is_ok(search_store, adaptors):
     payload = await run_checks(search_store, claims=adaptors.claims)
     assert payload["status"] == "ok"
-    assert len(payload["checks"]) == 11
+    assert len(payload["checks"]) == 12
 
 
 async def test_stale_open_investigation(search_store):
@@ -238,7 +238,7 @@ async def test_health_deep_route(search_store, adaptors):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert len(body["checks"]) == 11
+        assert len(body["checks"]) == 12
 
 
 def test_integrity_gui(search_store):
@@ -294,3 +294,123 @@ def test_integrity_help(search_store):
         "single_roster_champion", "minted_claims_resolve",
     ):
         assert name in r.text
+
+
+# --- rc-6 P16: phantom acknowledgements must not read as real --------
+
+
+def _write_violation(store, check_name, object_ref):
+    from ml_zetesis_mcp.integrity.checks import log_dir_for
+    from ml_zetesis_mcp.integrity.log import write_check_log
+
+    write_check_log(log_dir_for(store), {
+        "server": "test",
+        "checked_at": "2026-01-01T00:00:00+00:00",
+        "checks": [{
+            "name": check_name, "ok": False,
+            "violations": [object_ref], "detail": "synthetic",
+        }],
+    }, max_files=30)
+
+
+def test_violation_ack_matched(search_store):
+    from ml_zetesis_mcp.enforcement.recurrence import violation_ack
+
+    _write_violation(search_store, "stale_open_investigations", "inv-x")
+    r = violation_ack(
+        search_store, "stale_open_investigations", "inv-x",
+        "accepted: test", "human:tester",
+    )
+    assert r["status"] == "acknowledged"
+    assert r["matched_open_violation"] is True
+
+
+def test_violation_ack_no_match_is_not_acknowledged(search_store):
+    """An ack on a violation that never existed is recorded (insert-only
+    ledger) but its status must not masquerade as evidence."""
+    from ml_zetesis_mcp.enforcement.recurrence import violation_ack
+
+    _write_violation(search_store, "stale_open_investigations", "inv-x")
+    r = violation_ack(
+        search_store, "stale_open_investigations", "inv-OTHER",
+        "accepted: unrelated", "human:tester",
+    )
+    assert r["matched_open_violation"] is False
+    assert r["status"] == "no_matching_violation"
+    assert r["ack_id"].startswith("vack-")
+
+
+async def test_unscoreable_campaigns_flags_wedged_rows(search_store):
+    """rc-6 P12 — an open campaign with a null primary_metric result
+    can never score at close; the check must report the wedge."""
+    from ml_zetesis_mcp.state.models import (
+        CampaignArm,
+        CampaignResult,
+        PromotionCampaign,
+    )
+
+    search_store.create_campaign(PromotionCampaign(
+        id="camp-w", contract_id="c1", champion_id="cand-a",
+        challenger_id="cand-b", primary_metric="hits",
+    ))
+    search_store.create_campaign_result(CampaignResult(
+        id="cres-bad", campaign_id="camp-w", arm=CampaignArm.challenger,
+        programme_id="prog-x", metrics={"hits": None},
+    ))
+    search_store.create_campaign_result(CampaignResult(
+        id="cres-bool", campaign_id="camp-w", arm=CampaignArm.champion,
+        programme_id="prog-y", metrics={"hits": True},
+    ))
+
+    payload = await run_checks(search_store)
+    chk = next(
+        c for c in payload["checks"]
+        if c["name"] == "unscoreable_campaigns"
+    )
+    assert chk["ok"] is False
+    flagged = {v["result_id"] for v in chk["violations"]}
+    assert flagged == {"cres-bad", "cres-bool"}
+    assert "abandon_campaign" in chk["detail"]
+
+
+async def test_unscoreable_campaigns_ignores_scorable_and_closed(
+    search_store,
+):
+    """Numeric results and closed campaigns don't flag — the wedge
+    report covers only open campaigns that can never close."""
+    from ml_zetesis_mcp.state.models import (
+        CampaignArm,
+        CampaignResult,
+        CampaignStatus,
+        PromotionCampaign,
+    )
+
+    search_store.create_campaign(PromotionCampaign(
+        id="camp-good", contract_id="c1", champion_id="cand-a",
+        challenger_id="cand-b", primary_metric="hits",
+    ))
+    search_store.create_campaign_result(CampaignResult(
+        id="cres-ok", campaign_id="camp-good", arm=CampaignArm.champion,
+        programme_id="prog-x", metrics={"hits": 42},
+    ))
+    # A closed campaign with a null row is historical debris — the
+    # check reports wedges that still need an exit, not the frozen
+    # past.
+    search_store.create_campaign(PromotionCampaign(
+        id="camp-closed", contract_id="c1", champion_id="cand-a",
+        challenger_id="cand-b", primary_metric="hits",
+        status=CampaignStatus.closed,
+    ))
+    search_store.create_campaign_result(CampaignResult(
+        id="cres-old", campaign_id="camp-closed",
+        arm=CampaignArm.challenger,
+        programme_id="prog-y", metrics={"hits": None},
+    ))
+
+    payload = await run_checks(search_store)
+    chk = next(
+        c for c in payload["checks"]
+        if c["name"] == "unscoreable_campaigns"
+    )
+    assert chk["ok"] is True
+    assert chk["violations"] == []

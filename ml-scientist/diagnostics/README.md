@@ -73,7 +73,20 @@ From the host:
 | `20260927-0320Z-connectivity-live-gating` | rc-5: `channels` observability array ×5, live-over-logged gating, `channel:` ack refs |
 | `20260927-0325Z-trial-terminal-precedence` | rc-5: persisted-terminal status precedence, `mark_retryable` cancellation, `prepare_data` stderr surfacing |
 | `20260927-0330Z-boundary-class-registry` | rc-5: boundary-class registry discoverability, kernel authoritative classification, `rejected` reachability |
+| `20260927-1420Z-claim-mint-loop2-reftypes` | rc-6: Loop-2 `RefType` claim minting (P1), `evidence_refs ≥1` verdict gate (P3) |
+| `20260927-1425Z-sandbox-env-scrub` | rc-6: credential/`ML_EPISTEME_*` env blacklist vs runtime-var survival (P2), seal fields on every result shape (P7) |
+| `20260927-1430Z-campaign-value-gate-abandon` | rc-6: metric *value* write gate + `unscoreable_campaigns` wedge check (P12), `abandon_campaign` terminal path (P9) |
+| `20260927-1435Z-spawn-guard-ordering` | rc-6: override-legality-before-cap, spawn-scope-before-attribution ordering, `open_arm_campaign` budget/seeds (P8) |
+| `20260927-1440Z-orphan-rollback-derivation` | rc-6: orphan-rollback (no prior promote) must not mark `rolled_back` (P13) |
+| `20260927-1445Z-channel-current-fields` | rc-6: `in_flight_operation`/`in_flight_since` on all channel dicts (P4), `lab://topology` full field set (P6), `probe: "n/a"` on local channels (P17) |
+| `20260927-1450Z-integrity-report-honesty` | rc-6: phantom-ack `no_matching_violation` ×4 (P16), `input_data_undigested` denominators/`skipped` (P5), closed-programme exemption (P10), `improver://classes` (P11) |
+| `20260927-1455Z-retry-reason-ordering` | rc-6: durable `retry_reason` on mark_retryable + correct_trial_status (P14), terminal-before-cancel ordering (P18) |
+| `20260927-1500Z-stderr-elision-and-schema-docs` | rc-6: line-aligned head+tail stderr elision (P15), schema-doc truthfulness nits (P11) |
 
 The `20260927-03xxZ` set is the rc-5 verification battery — each
 targets one rc-5 fix and exercises both the valid path and the
-negative/refused path the fix introduces.
+negative/refused path the fix introduces. The `20260927-14xxZ` set is
+the rc-6 battery — one diagnostic per coherent fix cluster in
+`docs/e-plans/plan-20260927-1315Z--rc6-diagnostic-findings.md` (P1–P18;
+P0's roster fix is re-verified by `orphan-rollback-derivation`), again
+exercising both valid and refused paths.

@@ -686,3 +686,30 @@ def test_open_violations_still_down_gates_with_stable_ref(
         decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
     )
     assert recurrence.open_violations(store) == []
+
+
+def test_channel_report_carries_in_flight_fields(store):
+    """rc-6 P4 — every channel dict emits in_flight_operation /
+    in_flight_since so a consumer can distinguish 'working right now'
+    from 'idle'. Historical last_* fields must not double for it."""
+    from ml_episteme_mcp.clients.adaptor import MCPAdaptor
+
+    adaptor = MCPAdaptor({})
+    report = adaptor.connectivity_report()
+    assert report  # local channels exist even unconfigured
+    for ch in report:
+        assert "in_flight_operation" in ch, ch["channel"]
+        assert "in_flight_since" in ch, ch["channel"]
+
+
+def test_local_channel_probe_is_na(store):
+    """rc-6 P17 — probe: null on a local channel is ambiguous (never
+    probed vs nothing to probe); local targets report 'n/a'."""
+    from ml_episteme_mcp.clients.adaptor import MCPAdaptor
+
+    adaptor = MCPAdaptor({})
+    report = adaptor.connectivity_report()
+    local = [c for c in report if c["target"] == "local"]
+    assert local, "expected local channels in the report"
+    for ch in local:
+        assert ch["probe"] == "n/a"

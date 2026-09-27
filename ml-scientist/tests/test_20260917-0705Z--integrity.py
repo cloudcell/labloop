@@ -651,3 +651,52 @@ def test_finalize_empty_output_marks_failed(store):
     store.update_trial_status("trial-t2", "running")
     res = _finalize_trial(store, "trial-t2", "{}").structured_content
     assert res["status"] == "failed"
+
+
+def test_completed_without_observation_exempts_closed_programmes(store):
+    """rc-6 P10 — trials on a non-active programme can never gain an
+    observation (record_observation refuses the write), so flagging
+    them is unremediable debt. They are exempted and counted."""
+    _seed(store)
+    store.update_trial_status("trial-t1", "running")
+    store.update_trial_executor_output(
+        "trial-t1", '{"status": "completed", "exit_code": 0}'
+    )
+    store.update_trial_status("trial-t1", "completed")
+    old = (
+        datetime.now(timezone.utc) - timedelta(days=2)
+    ).isoformat()
+    store.conn.execute(
+        "UPDATE trials SET finished_at = ? WHERE id = 'trial-t1'",
+        (old,),
+    )
+    store.conn.execute(
+        "UPDATE programmes SET status = 'abandoned' WHERE id = 'prog-t1'"
+    )
+    store.conn.commit()
+    c = _check(run_checks(store), "completed_without_observation")
+    assert c["ok"] is True
+    assert c["violations"] == []
+    assert "exempt" in c["detail"]
+    assert "1" in c["detail"]
+
+
+def test_completed_without_observation_still_flags_active(store):
+    """The exemption doesn't swallow real debt — a stale completed
+    trial on an ACTIVE programme is still flagged."""
+    _seed(store)
+    store.update_trial_status("trial-t1", "running")
+    store.update_trial_executor_output(
+        "trial-t1", '{"status": "completed", "exit_code": 0}'
+    )
+    store.update_trial_status("trial-t1", "completed")
+    old = (
+        datetime.now(timezone.utc) - timedelta(days=2)
+    ).isoformat()
+    store.conn.execute(
+        "UPDATE trials SET finished_at = ? WHERE id = 'trial-t1'",
+        (old,),
+    )
+    store.conn.commit()
+    c = _check(run_checks(store), "completed_without_observation")
+    assert not c["ok"] and "trial-t1" in c["violations"]

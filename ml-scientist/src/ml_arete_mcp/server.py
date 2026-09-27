@@ -60,6 +60,7 @@ def create_server(
 
     from .prompts import status as status_prompts
     from .prompts import workflows
+    from .resources import classes as classes_resource
     from .resources import graph as graph_resource
     from .resources import session as session_resource
     from .resources import status as status_resource
@@ -82,6 +83,7 @@ def create_server(
             "stale_tournament_seconds"
         ),
     )
+    classes_resource.register(mcp)
     graph_resource.register(mcp, store)
     workflows.register(mcp)
     status_prompts.register(mcp, store, adaptors)

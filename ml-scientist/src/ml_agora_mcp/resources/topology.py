@@ -32,12 +32,27 @@ def register(mcp, adaptors) -> None:
             }
             if spec is not None:
                 live = report.get(name, {})
+                # Full channel passthrough — the topology resource must
+                # answer "what went wrong", not just "is it up": probe,
+                # timing, and fault-attribution fields come along.
                 entry.update({
                     "role": spec.role,
                     "target": spec.target,
                     "state": live.get("state", "down"),
                     "attempts": live.get("attempts"),
                     "last_error": live.get("last_error"),
+                    "last_operation": live.get("last_operation"),
+                    "last_failed_operation": live.get(
+                        "last_failed_operation"
+                    ),
+                    "last_failed_at": live.get("last_failed_at"),
+                    "probe": live.get("probe"),
+                    "last_probe_at": live.get("last_probe_at"),
+                    "last_probe_ms": live.get("last_probe_ms"),
+                    "in_flight_operation": live.get(
+                        "in_flight_operation"
+                    ),
+                    "in_flight_since": live.get("in_flight_since"),
                     "connected_at": live.get("connected_at"),
                 })
             channels.append(entry)

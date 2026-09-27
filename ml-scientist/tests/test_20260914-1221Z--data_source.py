@@ -411,3 +411,44 @@ class TestAdaptorDataSource:
                 data_dir=str(Path(tmpdir) / "data"),
             )
             assert adaptor.data_source is not None
+
+
+# --- rc-6 P15: stderr elision keeps both ends, line-aligned ----------
+
+
+def test_elide_stderr_keeps_traceback_header_and_tail():
+    """Tail-only truncation discarded the 'Traceback' header AND could
+    cut mid-line, reading as garbage. The elision keeps head+tail and
+    cuts on newlines only."""
+    from ml_episteme_mcp.clients.local_data_handler import _elide_stderr
+
+    head = "Traceback (most recent call last):\n  File \"gen.py\"\n"
+    middle = "x" * 4000 + "\n"
+    tail = "RuntimeError: sentinel-fault\n"
+    out = _elide_stderr(head + middle + tail)
+    assert out.startswith("Traceback (most recent call last):")
+    assert "RuntimeError: sentinel-fault" in out
+    assert "bytes elided" in out
+    # No mid-line fragment at the start of the tail.
+    tail_seg = out.split("bytes elided…]\n", 1)[1]
+    assert tail_seg.split("\n")[0].strip() != "x" * 10
+
+
+def test_elide_stderr_short_is_untouched():
+    from ml_episteme_mcp.clients.local_data_handler import _elide_stderr
+
+    short = "line1\nline2\n"
+    assert _elide_stderr(short) == short
+
+
+def test_elide_stderr_head_cuts_on_newline():
+    """The head cut lands on a newline — no half-line at the mark."""
+    from ml_episteme_mcp.clients.local_data_handler import _elide_stderr
+
+    head = "ok-line\n" * 300          # 2100 chars of clean lines
+    middle = "partial-line-fragment"  # no newline — inside head region
+    tail = "\n" + "TAIL-END\n" * 40
+    out = _elide_stderr(head + middle + tail)
+    marker = "[…"
+    idx = out.index(marker)
+    assert out[: idx].endswith("\n")

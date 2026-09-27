@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS promotion_campaigns (
     promotion_score REAL,
     decision_id     TEXT,
     claim_id        TEXT,
+    abandon_rationale TEXT,
+    abandoned_by    TEXT,
     created_at      TEXT NOT NULL,
     closed_at       TEXT
 );
@@ -186,44 +188,61 @@ class SearchStore:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        if "evidence_refs" not in tables:
-            return
-        cols = {
-            r["name"]
-            for r in self.conn.execute("PRAGMA table_info(evidence_refs)")
-        }
-        if "campaign_id" in cols:
-            return
-        self.conn.execute("PRAGMA foreign_keys = OFF")
-        self.conn.executescript(
-            """
-            CREATE TABLE evidence_refs_new (
-                id               TEXT PRIMARY KEY,
-                investigation_id TEXT REFERENCES investigations(id),
-                campaign_id      TEXT REFERENCES promotion_campaigns(id),
-                source           TEXT NOT NULL,
-                tool             TEXT NOT NULL,
-                args_json        TEXT NOT NULL,
-                ref_ids_json     TEXT NOT NULL,
-                created_at       TEXT NOT NULL,
-                CHECK ((investigation_id IS NULL) != (campaign_id IS NULL))
-            );
-            INSERT INTO evidence_refs_new
-                (id, investigation_id, campaign_id, source, tool,
-                 args_json, ref_ids_json, created_at)
-                SELECT id, investigation_id, NULL, source, tool,
-                       args_json, ref_ids_json, created_at
-                FROM evidence_refs;
-            DROP TABLE evidence_refs;
-            ALTER TABLE evidence_refs_new RENAME TO evidence_refs;
-            CREATE INDEX IF NOT EXISTS idx_eref_inv
-                ON evidence_refs(investigation_id);
-            CREATE INDEX IF NOT EXISTS idx_eref_camp
-                ON evidence_refs(campaign_id);
-            """
-        )
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.commit()
+        if "evidence_refs" in tables:
+            cols = {
+                r["name"]
+                for r in self.conn.execute(
+                    "PRAGMA table_info(evidence_refs)"
+                )
+            }
+            if "campaign_id" not in cols:
+                self.conn.execute("PRAGMA foreign_keys = OFF")
+                self.conn.executescript(
+                    """
+                    CREATE TABLE evidence_refs_new (
+                        id               TEXT PRIMARY KEY,
+                        investigation_id TEXT REFERENCES investigations(id),
+                        campaign_id      TEXT REFERENCES promotion_campaigns(id),
+                        source           TEXT NOT NULL,
+                        tool             TEXT NOT NULL,
+                        args_json        TEXT NOT NULL,
+                        ref_ids_json     TEXT NOT NULL,
+                        created_at       TEXT NOT NULL,
+                        CHECK ((investigation_id IS NULL) != (campaign_id IS NULL))
+                    );
+                    INSERT INTO evidence_refs_new
+                        (id, investigation_id, campaign_id, source, tool,
+                         args_json, ref_ids_json, created_at)
+                        SELECT id, investigation_id, NULL, source, tool,
+                               args_json, ref_ids_json, created_at
+                        FROM evidence_refs;
+                    DROP TABLE evidence_refs;
+                    ALTER TABLE evidence_refs_new RENAME TO evidence_refs;
+                    CREATE INDEX IF NOT EXISTS idx_eref_inv
+                        ON evidence_refs(investigation_id);
+                    CREATE INDEX IF NOT EXISTS idx_eref_camp
+                        ON evidence_refs(campaign_id);
+                    """
+                )
+                self.conn.execute("PRAGMA foreign_keys = ON")
+                self.conn.commit()
+
+        # promotion_campaigns gained abandon_rationale/abandoned_by with
+        # the abandon_campaign tool — plain additive columns.
+        if "promotion_campaigns" in tables:
+            cols = {
+                r["name"]
+                for r in self.conn.execute(
+                    "PRAGMA table_info(promotion_campaigns)"
+                )
+            }
+            for col in ("abandon_rationale", "abandoned_by"):
+                if col not in cols:
+                    self.conn.execute(
+                        f"ALTER TABLE promotion_campaigns "
+                        f"ADD COLUMN {col} TEXT"
+                    )
+            self.conn.commit()
 
     def close(self) -> None:
         if self.conn:
@@ -690,6 +709,24 @@ class SearchStore:
         )
         self.conn.commit()
 
+    def abandon_campaign(
+        self, campaign_id: str, rationale: str, decided_by: str
+    ) -> None:
+        self._execute(
+            """UPDATE promotion_campaigns
+               SET status = ?, closed_at = ?, abandon_rationale = ?,
+                   abandoned_by = ?
+               WHERE id = ?""",
+            (
+                CampaignStatus.abandoned.value,
+                _now_iso(),
+                rationale,
+                decided_by,
+                campaign_id,
+            ),
+        )
+        self.conn.commit()
+
     def set_campaign_decision(
         self, campaign_id: str, decision_id: str
     ) -> None:
@@ -719,6 +756,14 @@ class SearchStore:
             promotion_score=row["promotion_score"],
             decision_id=row["decision_id"],
             claim_id=row["claim_id"],
+            abandon_rationale=(
+                row["abandon_rationale"]
+                if "abandon_rationale" in row.keys() else None
+            ),
+            abandoned_by=(
+                row["abandoned_by"]
+                if "abandoned_by" in row.keys() else None
+            ),
             created_at=row["created_at"],
             closed_at=row["closed_at"],
         )

@@ -81,24 +81,40 @@ def _check_completed_without_observation(
     normal loop order and the analysis phase can lag execution by a
     whole session, so flagging mid-gap is transient noise, not debt.
     Grace defaults to a day; conclude_hypothesis is the hard
-    enforcement point, this check only surfaces abandoned debt."""
+    enforcement point, this check only surfaces abandoned debt.
+    Trials on a non-active programme are exempt — a closed record
+    cannot acquire remediable debt (record_observation would refuse
+    the write anyway)."""
     rows = store._fetchall(
-        """SELECT t.id, COALESCE(t.finished_at, t.created_at) AS done_at
+        """SELECT t.id, COALESCE(t.finished_at, t.created_at) AS done_at,
+                  p.status AS programme_status
            FROM trials t
+           JOIN programmes p ON p.id = t.programme_id
            LEFT JOIN observations o ON o.trial_id = t.id
            WHERE t.status = 'completed' AND o.id IS NULL"""
     )
-    violations = [
-        r["id"] for r in rows
-        if r["done_at"] is None
-        or _iso_age_seconds(r["done_at"]) > grace_seconds
-    ]
-    return _res(
-        "completed_without_observation", violations,
+    exempt = 0
+    violations = []
+    for r in rows:
+        if r["programme_status"] != "active":
+            exempt += 1
+            continue
+        if (
+            r["done_at"] is None
+            or _iso_age_seconds(r["done_at"]) > grace_seconds
+        ):
+            violations.append(r["id"])
+    detail = (
         f"{len(violations)} completed trial(s) lack an observation "
         f"past the {grace_seconds}s grace — conclude_hypothesis "
-        "will reject",
+        "will reject"
     )
+    if exempt:
+        detail += (
+            f"; {exempt} exempt — programme not active, debt is "
+            "unremediable by design"
+        )
+    return _res("completed_without_observation", violations, detail)
 
 
 def _iso_age_seconds(ts: str) -> float:
@@ -218,7 +234,11 @@ def _check_input_data_undigested(store) -> dict:
     required and is missing. schema_version<2 manifests predate the
     input-digest projection: they are 'unrecorded' provenance gaps
     (reported in detail, never flagged — a digest not taken cannot
-    be reconstructed)."""
+    be reconstructed). Files under ML_SCI_ARTIFACT_DIR are excluded
+    from manifests by design (the artifact workspace is the output
+    side, not input data), so under sandbox=full an undigested-input
+    row is reachable only via read paths outside the artifact dir —
+    the denominators in the detail show what was actually examined."""
     rows = store._fetchall(
         """SELECT DISTINCT t.id FROM trials t
            JOIN trial_artifacts ta ON ta.trial_id = t.id
@@ -227,6 +247,8 @@ def _check_input_data_undigested(store) -> dict:
     )
     violations = []
     unrecorded = 0
+    manifests_examined = 0
+    input_data_total = 0
     for r in rows:
         manifest = _executed_code_manifest(store, r["id"])
         if manifest is None:
@@ -234,10 +256,16 @@ def _check_input_data_undigested(store) -> dict:
         if manifest.get("schema_version", 1) < 2:
             unrecorded += 1
             continue
+        manifests_examined += 1
+        entries = [
+            f for f in manifest.get("files", [])
+            if f.get("role") == "input_data"
+        ]
+        input_data_total += len(entries)
         undigested = [
             f.get("path")
-            for f in manifest.get("files", [])
-            if f.get("role") == "input_data" and not f.get("sha256")
+            for f in entries
+            if not f.get("sha256")
             # Pre-v3 manifests recorded directory opens as input_data
             # with an IsADirectoryError reason — a directory has no
             # file digest to take; new manifests role them
@@ -248,9 +276,18 @@ def _check_input_data_undigested(store) -> dict:
             violations.append(
                 {"trial_id": r["id"], "paths": undigested}
             )
+    if manifests_examined == 0:
+        reason = "no completed trials with v2+ manifests"
+        if unrecorded:
+            reason += (
+                f"; {unrecorded} trial(s) carry pre-v2 manifests "
+                "(unrecorded — digests never taken)"
+            )
+        return _skipped("input_data_undigested", reason)
     detail = (
-        f"{len(violations)} completed trial(s) have input_data files "
-        "with no recorded digest"
+        f"{sum(len(v['paths']) for v in violations)} of "
+        f"{input_data_total} input_data entries across "
+        f"{manifests_examined} manifest(s) lack a recorded digest"
     )
     if unrecorded:
         detail += (

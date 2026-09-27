@@ -18,6 +18,7 @@ actually wanted, not because tournaments require them.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 
 from ..enforcement.checks import (
@@ -50,7 +51,7 @@ from ..state.models import (
 from ..state.store import SearchStore
 from .investigation import _extract_ref_ids, _ref_type_for
 from mcp.types import CallToolResult
-from .schemas import coerce_json, fail, ok, CloseCampaignOut, GetCampaignOut, ListCampaignsOut, ListSearchPoliciesOut, OpenCampaignOut, PullCampaignEvidenceOut, RecordCampaignResultOut, RecordPromotionVerdictOut, RefreshRosterOut, RegisterChallengerOut, RegisterSearchPolicyOut, SpawnCampaignProgrammeOut, GetIncumbentOut, ListCandidatesOut
+from .schemas import coerce_json, fail, ok, AbandonCampaignOut, CloseCampaignOut, GetCampaignOut, ListCampaignsOut, ListSearchPoliciesOut, OpenCampaignOut, PullCampaignEvidenceOut, RecordCampaignResultOut, RecordPromotionVerdictOut, RefreshRosterOut, RegisterChallengerOut, RegisterSearchPolicyOut, SpawnCampaignProgrammeOut, GetIncumbentOut, ListCandidatesOut
 from typing import Annotated, Literal
 from pydantic import Field
 
@@ -115,6 +116,8 @@ def _campaign_json(c: PromotionCampaign, store: SearchStore) -> dict:
             "promotion_score": c.promotion_score,
             "decision_id": c.decision_id,
             "claim_id": c.claim_id,
+            "abandon_rationale": c.abandon_rationale,
+            "abandoned_by": c.abandoned_by,
             "created_at": c.created_at,
             "closed_at": c.closed_at,
         },
@@ -171,6 +174,15 @@ def register(
 
         dry_run=true performs the read-only pulls and reports
         {would_adopt, would_reconcile} without writing the roster.
+
+        Reconciliation semantics: `rolled_back`/`unrolled` cover
+        status flips on non-incumbent rows — a candidate whose latest
+        verdict is 'rollback' after a prior 'promote' flips to
+        rolled_back; a later 'promote' flips it back (candidate).
+        A rollback of the INCUMBENT lands under `champion`/`demoted`
+        instead — incumbent reconciliation owns that row — so
+        `unrolled` can legitimately stay empty when the un-rolled
+        candidate became champion in the same refresh.
         """
         try:
             if adaptors.evidence is None:
@@ -251,6 +263,27 @@ def register(
                                 notes={"promoted_by": "refresh_roster"},
                             ))
                             champion = incumbent_id
+            elif not err:
+                # Upstream answered with NO incumbent — every roster
+                # 'champion' row is stale (its promote was rolled back
+                # upstream, which is how an incumbent disappears). The
+                # rollback pass below re-marks any whose latest verdict
+                # is 'rollback' as rolled_back; the rest land as plain
+                # candidates. A FAILED pull (err) must never trigger
+                # this — silence is not an empty incumbent.
+                for e in store.list_roster_entries(status="champion")[0]:
+                    if not dry_run:
+                        with store.transaction():
+                            store.upsert_roster_entry(RosterEntry(
+                                id=e.id,
+                                parent_id=e.parent_id,
+                                derived_status=DerivedStatus.candidate,
+                                notes={
+                                    "superseded_by": "no incumbent",
+                                    "reconciled_by": "refresh_roster",
+                                },
+                            ))
+                    demoted.append(e.id)
 
             # Rollback reconciliation: an upstream 'rollback' verdict
             # revokes a promotion — the roster mirrors the verdict
@@ -281,8 +314,11 @@ def register(
                 recon = [
                     (e.id, e.derived_status is DerivedStatus.rolled_back)
                     for e in store.list_roster_entries(limit=10000)[0]
-                    # incumbent reconciliation owns the champion row
-                    if e.derived_status is not DerivedStatus.champion
+                    # Only the INCUMBENT row is owned by incumbent
+                    # reconciliation — a champion whose promote was
+                    # rolled back upstream is exactly the row this
+                    # pass exists to catch (rc-6 row-30 failure).
+                    if e.id != incumbent_id
                 ]
             for cid, was_rb in recon:
                 data, derr = _parse_upstream(
@@ -300,6 +336,19 @@ def register(
                     decisions, key=lambda d: d.get("created_at") or ""
                 )
                 is_rb = latest.get("verdict") == "rollback"
+                if is_rb:
+                    # An orphaned rollback revokes nothing — mirror
+                    # the upstream predicate: rolled_back requires a
+                    # promote earlier in the candidate's trail. Since
+                    # latest is the rollback, any promote in the trail
+                    # precedes it.
+                    promoted_before = any(
+                        d.get("verdict") == "promote"
+                        and (d.get("created_at") or "")
+                        <= (latest.get("created_at") or "")
+                        for d in decisions
+                    )
+                    is_rb = promoted_before
                 if is_rb == was_rb:
                     continue
                 new_status = (
@@ -707,9 +756,6 @@ def register(
             if budget is not None:
                 budget = coerce_json(budget, dict, "budget")
 
-            if e := check_spawn_cap(store, campaign_id, arm, campaign.budget):
-                return _err(e)
-
             carried = campaign.budget or {}
             tpp = carried.get("trials_per_programme")
             if tpp is None:
@@ -723,6 +769,9 @@ def register(
                 spawn_budget["max_wall_time_hours"] = carried[
                     "max_wall_time_hours"
                 ]
+            # Override legality is validated before the cap check — an
+            # illegal override on a capped arm must report the override
+            # violation, not the cap.
             if budget:
                 for k, v in budget.items():
                     if k not in spawn_budget:
@@ -746,6 +795,9 @@ def register(
                             "not comparable to the carried value."
                         }))
                     spawn_budget[k] = v
+
+            if e := check_spawn_cap(store, campaign_id, arm, campaign.budget):
+                return _err(e)
 
             # Direction from the authoritative contract, through the
             # read-only evidence channel — never from the caller.
@@ -825,7 +877,7 @@ def register(
         campaign_id: Annotated[str, Field(description='ID of the target campaign.')],
         arm: Annotated[Literal['champion', 'challenger'], Field(description="Campaign arm the result belongs to: 'champion' | 'challenger' — attribution is verified upstream.")],
         programme_id: Annotated[str, Field(description='ID of the target research programme.')],
-        metrics: Annotated[dict | str, Field(description="Result metrics — must carry the contract's primary_metric; may be JSON-encoded.")],
+        metrics: Annotated[dict | str, Field(description="Result metrics — must carry the contract's primary_metric as a finite number (exact, case-sensitive match); may be JSON-encoded.")],
     ) -> Annotated[CallToolResult, RecordCampaignResultOut]:
         """Attach an executed-arm result to an open campaign.
 
@@ -852,6 +904,15 @@ def register(
                 campaign.champion_id if arm_e is CampaignArm.champion
                 else campaign.challenger_id
             )
+            # Spawn-scope is a local check — it runs before the upstream
+            # attribution pull so a wrong-arm report on a spawned
+            # campaign gets the scoping message, not the generic
+            # attribution refusal. Zero-spawn campaigns return None here
+            # and keep caller-driven behavior.
+            if e := check_spawn_scoped_result(
+                store, campaign_id, arm, programme_id
+            ):
+                return _err(e)
             if adaptors.evidence is None:
                 return fail(json.dumps({
                     "error": "No evidence adaptor configured — cannot "
@@ -872,14 +933,13 @@ def register(
                     f"attributed to {arm_candidate} upstream — a result "
                     "can only count for the arm that produced it."
                 }))
-            if e := check_spawn_scoped_result(
-                store, campaign_id, arm, programme_id
-            ):
-                return _err(e)
             # Write-boundary: the row that enters the insert-only
             # record must carry the contract's scored metric — a
             # missing primary_metric is caught at write, not later
-            # at close (where it reads as missing evidence).
+            # at close (where it reads as missing evidence). Presence
+            # alone is not enough: a null or non-numeric value wedges
+            # close_campaign's scoring on a TypeError, and the
+            # insert-only record offers no repair.
             if campaign.primary_metric not in metrics:
                 return fail(json.dumps({
                     "error": f"Result must carry the contract's "
@@ -887,6 +947,20 @@ def register(
                              f"— got keys {sorted(metrics)}. A result "
                              "without the scored metric cannot ground "
                              "a verdict."
+                }))
+            mv = metrics[campaign.primary_metric]
+            if (
+                not isinstance(mv, (int, float))
+                or isinstance(mv, bool)
+                or not math.isfinite(mv)
+            ):
+                return fail(json.dumps({
+                    "error": f"Result metric "
+                             f"'{campaign.primary_metric}' must be a "
+                             f"finite number — got {mv!r}. An "
+                             "unscorable value cannot ground a "
+                             "verdict and cannot be repaired "
+                             "(results are insert-only)."
                 }))
 
             result = CampaignResult(
@@ -963,9 +1037,15 @@ def register(
         """Close an open campaign and freeze its promotion score.
 
         Requires at least one result per arm — a campaign that never
-        ran both arms has nothing to compare. The score is the
-        challenger/champion ratio on the contract's primary metric
-        (mean across recorded results); equal arms score 1.0.
+        ran both arms has nothing to compare, and a single-arm
+        campaign opened via arete's open_arm_campaign cannot close on
+        its own. The score is the challenger/champion ratio on the
+        contract's primary metric (mean across recorded results);
+        equal arms score 1.0.
+
+        Ordering: pull the evidence a verdict will cite via
+        pull_campaign_evidence BEFORE closing — close freezes the
+        trail and evidence pulls refuse a closed campaign.
         """
         try:
             campaign = store.get_campaign(campaign_id)
@@ -986,9 +1066,24 @@ def register(
             }
             for r in results:
                 if campaign.primary_metric in r.metrics:
-                    by_arm[r.arm].append(
-                        float(r.metrics[campaign.primary_metric])
-                    )
+                    v = r.metrics[campaign.primary_metric]
+                    # Defensive: a persisted unscorable value (null,
+                    # string, non-finite — rows predating the write
+                    # gate) must name the refusal, never leak a raw
+                    # TypeError. abandon_campaign is the remediation.
+                    if (
+                        not isinstance(v, (int, float))
+                        or isinstance(v, bool)
+                        or not math.isfinite(v)
+                    ):
+                        return fail(json.dumps({
+                            "error": f"Campaign result {r.id} carries "
+                            f"an unscorable '{campaign.primary_metric}' "
+                            f"value ({v!r}) — the campaign cannot be "
+                            "scored at close. abandon_campaign is the "
+                            "remediation; results are insert-only."
+                        }))
+                    by_arm[r.arm].append(float(v))
             missing = [a.value for a, v in by_arm.items() if not v]
             if missing:
                 return fail(json.dumps({
@@ -1020,6 +1115,55 @@ def register(
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
+    def abandon_campaign(
+        campaign_id: Annotated[str, Field(description='ID of the target campaign.')],
+        rationale: Annotated[str, Field(description='Non-empty reason for abandoning — recorded on the campaign permanently.')],
+        decided_by: Annotated[str, Field(description="Attributable decider (e.g. 'human:<name>' or 'agent:<name>') — abandonment is a governance act, not cleanup.")],
+    ) -> Annotated[CallToolResult, AbandonCampaignOut]:
+        """Abandon an open campaign — terminal, attributed, never erased.
+
+        The exit for campaigns that cannot close: mis-opened budget,
+        wedge-prone results, an abandoned upstream lineage. Results,
+        spawns, evidence pulls and close all refuse an abandoned
+        campaign identically to a closed one. The rationale and
+        decided_by persist on the record — abandonment is recorded,
+        not silent. Roster entries and tournament links are
+        untouched: abandonment frees nothing upstream.
+        """
+        try:
+            campaign = store.get_campaign(campaign_id)
+            if campaign is None:
+                return fail(json.dumps({
+                    "error": f"Campaign not found: {campaign_id}"
+                }))
+            if campaign.status is not CampaignStatus.open:
+                return fail(json.dumps({
+                    "error": f"Campaign {campaign_id} is already "
+                    f"{campaign.status.value} — abandonment applies "
+                    "to open campaigns only."
+                }))
+            if not rationale or not rationale.strip():
+                return fail(json.dumps({
+                    "error": "rationale is required — a terminal "
+                    "decision must say why."
+                }))
+            if not decided_by or not decided_by.strip():
+                return fail(json.dumps({
+                    "error": "decided_by is required — abandonment "
+                    "is attributed."
+                }))
+            store.abandon_campaign(
+                campaign_id, rationale.strip(), decided_by.strip()
+            )
+            return ok({
+                "campaign_id": campaign_id,
+                "status": "abandoned",
+                "abandoned_by": decided_by.strip(),
+            })
+        except Exception as e:
+            return fail(json.dumps({"error": str(e)}))
+
+    @mcp.tool()
     async def record_promotion_verdict(
         campaign_id: Annotated[str, Field(description='ID of the target campaign.')],
         verdict: Annotated[Literal['promote', 'retain', 'rollback'], Field(description="promote | retain | rollback — 'rollback' requires decided_by starting with 'human:'.")],
@@ -1034,7 +1178,9 @@ def register(
         requires decided_by starting with 'human:' (corrective
         verdicts need human authority). At least one campaign-scoped
         evidence ref is required — a verdict with no consulted trail
-        is a bare assertion.
+        is a bare assertion. Ordering: pull those refs via
+        pull_campaign_evidence while the campaign is still open —
+        close freezes the trail.
 
         The write goes through the promotion adaptor — whitelisted to
         Loop 0's insert-only record_promotion_decision. On 'promote'
@@ -1255,7 +1401,7 @@ def register(
 
     @mcp.tool()
     def list_campaigns(
-        status: Annotated[Literal['open', 'closed'] | None, Field(description='Optional status filter.')] = None,
+        status: Annotated[Literal['open', 'closed', 'abandoned'] | None, Field(description='Optional status filter.')] = None,
         limit: Annotated[int, Field(description='Max rows to return (pagination).')] = 50,
         offset: Annotated[int, Field(description='Rows to skip before returning (pagination).')] = 0,
     ) -> Annotated[CallToolResult, ListCampaignsOut]:

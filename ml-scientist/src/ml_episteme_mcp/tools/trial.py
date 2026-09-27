@@ -379,9 +379,14 @@ def _finalize_trial(
         if isinstance(inner, dict):
             inner_rc = inner.get("_exit_code") or inner.get("exit_code")
             if inner.get("status") == "error" or inner.get("error") or inner_rc:
+                tail = (inner.get("_stderr_tail") or "")[-500:]
+                # Align to a line boundary — a mid-line fragment reads
+                # as garbage at the start of the error.
+                if "\n" in tail:
+                    tail = tail[tail.index("\n") + 1:]
                 inner_error = (
                     inner.get("error")
-                    or (inner.get("_stderr_tail") or "")[-500:]
+                    or tail
                     or "inner job reported failure"
                 )
 
@@ -925,7 +930,7 @@ def register(
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    async def run_trial(programme_id: Annotated[str, Field(description='ID of the programme owning the trial — required; the programme_id returned by design_experiment/list_trials (orphan check).')], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float | None, Field(description='Per-trial hard deadline override in seconds — the executor kills the process past it. None uses the server default ([executor] timeout_seconds). Bounded by [executor] max_timeout_seconds; the applied value is recorded in executor_output.timeout_seconds.')] = None) -> Annotated[CallToolResult, RunTrialOut]:
+    async def run_trial(programme_id: Annotated[str, Field(description="ID of the programme owning the trial — required; the programme_id returned by design_experiment/list_trials (orphan check). The programme must be status=active — completed/abandoned/archived programmes are closed, immutable records.")], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float | None, Field(description='Per-trial hard deadline override in seconds — the executor kills the process past it. None uses the server default ([executor] timeout_seconds). Bounded by [executor] max_timeout_seconds; the applied value is recorded in executor_output.timeout_seconds.')] = None) -> Annotated[CallToolResult, RunTrialOut]:
         """Run a trial by calling the executor role.
 
         Imports run_training from the bundle's code_ref and calls it with
@@ -1207,6 +1212,7 @@ def register(
                     "finished_at": trial.finished_at,
                     "duration_seconds": trial.duration_seconds,
                     "artifact_path": trial.artifact_path,
+                    "retry_reason": trial.retry_reason,
                     "executor_output": trial.executor_output_json,
                 })
 
@@ -1236,6 +1242,7 @@ def register(
                 "finished_at": trial.finished_at,
                 "duration_seconds": trial.duration_seconds,
                 "artifact_path": trial.artifact_path,
+                "retry_reason": trial.retry_reason,
                 "executor_output": trial.executor_output_json,
             })
         except Exception as e:
@@ -1352,6 +1359,16 @@ def register(
                     ),
                 }))
 
+            # Flip the row terminal BEFORE killing the executor task:
+            # a terminal row is never flagged by
+            # orphaned_running_trials, whereas the opposite order
+            # (task gone, row still 'running') opens a transient
+            # violation window — a write issued in that window gets
+            # an unexplained refusal. The reason lands on the row
+            # (P14: persisted attribution, not just the reply).
+            store.update_trial_status(
+                trial_id, "retryable", reason=reason
+            )
             # Kill the executor task too — a terminal record must not
             # leave an orphaned subprocess running (same as
             # cancel_trial). The cancelled process's last output is
@@ -1364,7 +1381,6 @@ def register(
             )
             if callable(cancel):
                 cancel_output = await cancel(trial_id)
-            store.update_trial_status(trial_id, "retryable")
             try:
                 out = (
                     json.loads(cancel_output) if cancel_output else {}

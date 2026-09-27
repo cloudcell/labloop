@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import signal
 import sys
 import tempfile
@@ -28,6 +29,30 @@ from pathlib import Path
 
 from .roles import ExecutorRole
 from ..sealed_paths import resolve_sealed_denies
+
+
+# Credential-shaped env keys never reach sandboxed bundle code —
+# a blacklist, not a whitelist: stripping unknown keys wholesale would
+# silently drop CUDA_*/NVIDIA_*/LD_LIBRARY_PATH/VIRTUAL_ENV and break
+# GPU trials. Operators needing a credential inside a trial pass it
+# through the bundle's declared parameters, never ambient env.
+_CREDENTIAL_ENV_RE = re.compile(
+    r"TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY$", re.IGNORECASE
+)
+
+
+def _scrubbed_env() -> dict[str, str]:
+    """os.environ minus server-internal and credential-shaped keys.
+
+    ML_EPISTEME_* holds server config incl. the ingest token — exactly
+    the surface untrusted bundle code must not see. ML_SCI_* trial
+    vars are set on top of this copy by the caller.
+    """
+    return {
+        k: v for k, v in os.environ.items()
+        if not k.startswith("ML_EPISTEME_")
+        and not _CREDENTIAL_ENV_RE.search(k)
+    }
 
 
 def _utc_timestamp_fs() -> str:
@@ -257,6 +282,8 @@ class LocalExecutor(ExecutorRole):
                 "read_trace": self._trace,
                 "seal_enforced": False,
                 "sealed_overlays": 0,
+                "seal_staged": 0,
+                "launch_refused": False,
                 "timeout_seconds": timeout,
                 **self._sealed_fields([], []),
             }
@@ -294,6 +321,8 @@ class LocalExecutor(ExecutorRole):
                 "read_trace": self._trace,
                 "seal_enforced": False,
                 "sealed_overlays": 0,
+                "seal_staged": 0,
+                "launch_refused": True,
                 "timeout_seconds": timeout,
                 **self._sealed_fields([], []),
             }
@@ -310,7 +339,7 @@ class LocalExecutor(ExecutorRole):
             # and ids via env vars. User code may write
             # $ML_SCI_ARTIFACT_DIR/progress.json — surfaced through
             # get_async_status as live progress + ETA.
-            env = dict(os.environ)
+            env = _scrubbed_env()
             shared_cache_report: dict | None = None
             if artifact_dir is not None:
                 env["ML_SCI_ARTIFACT_DIR"] = str(artifact_dir)
@@ -571,6 +600,8 @@ class LocalExecutor(ExecutorRole):
                     "read_trace": self._trace,
                     "seal_enforced": seal_armed,
                     "sealed_overlays": len(overlay_ro or []),
+                    "seal_staged": len(overlay_ro or []),
+                    "launch_refused": False,
                     "shared_caches": shared_cache_report,
                     **self._sealed_fields(deny_paths, sealed_unmatched),
                 }
@@ -617,6 +648,8 @@ class LocalExecutor(ExecutorRole):
                 "read_trace": self._trace,
                 "seal_enforced": seal_armed and not sandbox_setup_failed,
                 "sealed_overlays": len(overlay_ro or []),
+                "seal_staged": len(overlay_ro or []),
+                "launch_refused": False,
                 "shared_caches": shared_cache_report,
                 "timeout_seconds": timeout,
                 **self._sealed_fields(deny_paths, sealed_unmatched),

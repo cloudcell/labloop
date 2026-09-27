@@ -257,6 +257,10 @@ async def test_unmatched_ack_still_records(episteme):
         "decided_by": "human:test",
     })
     assert ack["matched_open_violation"] is False
+    # rc-6 P16 — the status must not masquerade as evidence a fault
+    # existed; the row is still recorded (insert-only ledger).
+    assert ack["status"] == "no_matching_violation"
+    assert ack["ack_id"].startswith("vack-")
     # The real violation is still open and still gating.
     r = await call_tool(mcp, "create_programme", {
         "goal": "g", "constraints": {}, "allowed_variables": ["x"],

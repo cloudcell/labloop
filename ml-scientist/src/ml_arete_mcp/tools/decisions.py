@@ -61,11 +61,26 @@ _REF_TYPE_BY_PREFIX = {
     "canary-": "canary_deployment",
 }
 
+# Anamnesis's RefType vocabulary, mirrored locally (ADR-0001/0002: no
+# cross-package imports — the test suite pins this mirror to the real
+# enum). A mapped value outside this set degrades to external rather
+# than emitting a ref_type the claim graph rejects.
+_CLAIM_REF_TYPES = frozenset({
+    "claim", "trial", "observation", "conclusion", "programme",
+    "investigation", "finding", "archive", "improver", "tournament",
+    "tournament_result", "proposal", "meta_contract", "meta_decision",
+    "policy_version", "canary_deployment", "external",
+})
+
 
 def _ref_type_for(ref_id: str) -> str:
     for prefix, ref_type in _REF_TYPE_BY_PREFIX.items():
         if ref_id.startswith(prefix):
-            return ref_type
+            return (
+                ref_type
+                if ref_type in _CLAIM_REF_TYPES
+                else "external"
+            )
     return "external"
 
 

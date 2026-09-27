@@ -1562,3 +1562,43 @@ class TestCandidateReadSurface:
         assert "error" not in r
         assert r["programme_count"] == 0
         assert r["programmes"] == []
+
+
+class TestDecisionEvidenceGate:
+    """rc-6 P3 — a verdict with no cited evidence is ungrounded."""
+
+    async def _register(self, client):
+        r = await call_tool(client, "register_candidate", {
+            "code_artifact_digest": "none",
+            "model_ref": "m",
+            "capability_profile": {},
+        })
+        assert "error" not in r, r
+        return r["candidate_id"]
+
+    async def test_empty_evidence_refs_refused(self, client):
+        async with client:
+            cand = await self._register(client)
+            r = await call_tool(client, "record_promotion_decision", {
+                "candidate_id": cand,
+                "verdict": "promote",
+                "evidence_refs": [],
+                "rationale": "vibes",
+                "decided_by": "human:tester",
+            })
+        assert "error" in r
+        assert "evidence" in r["error"]
+        assert "decision-" not in r.get("decision_id", "")
+
+    async def test_nonempty_evidence_refs_recorded(self, client):
+        async with client:
+            cand = await self._register(client)
+            r = await call_tool(client, "record_promotion_decision", {
+                "candidate_id": cand,
+                "verdict": "promote",
+                "evidence_refs": ["trial-x9"],
+                "rationale": "held-out improvement",
+                "decided_by": "human:tester",
+            })
+        assert "error" not in r
+        assert r["decision_id"].startswith("decision-")

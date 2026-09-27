@@ -801,13 +801,17 @@ class TestRolledBackDerivation:
     ):
         adaptors.evidence = _evidence_adaptor_with_decisions({
             "cand-beta": [
-                {"id": "d1", "verdict": "rollback",
+                {"id": "d1", "verdict": "promote",
                  "created_at": "2026-01-01T00:00:00+00:00"},
+                {"id": "d2", "verdict": "rollback",
+                 "created_at": "2026-01-02T00:00:00+00:00"},
             ],
         })
         r = await call_tool(
             zetesis_server, "refresh_roster", {"dry_run": True})
         assert r["dry_run"] is True
+        # A dry run previews the would-be roster — promote→rollback
+        # flips the previewed row to rolled_back.
         assert "cand-beta" in r["would_reconcile"]["rolled_back"]
         assert search_store.list_roster_entries()[1] == 0
 
@@ -844,3 +848,502 @@ class TestRolledBackDerivation:
             zetesis_server, "refresh_roster", {"dry_run": False})
         e = search_store.get_roster_entry("cand-beta")
         assert e.derived_status is not DerivedStatus.rolled_back
+
+
+def _evidence_adaptor_deriving_incumbent(decisions_by_cand):
+    """Upstream fake whose get_incumbent derives from the verdict trail
+    like the real store: newest promote not shadowed by a later rollback
+    wins; when the incumbent's promote is rolled back there is no
+    incumbent at all."""
+    base = _evidence_adaptor_with_decisions(decisions_by_cand)
+
+    def _incumbent():
+        all_d = sorted(
+            (
+                {**d, "candidate_id": cid}
+                for cid, ds in decisions_by_cand.items()
+                for d in ds
+            ),
+            key=lambda d: d.get("created_at") or "",
+            reverse=True,
+        )
+        for d in all_d:
+            if d.get("verdict") != "promote":
+                continue
+            shadowed = any(
+                x.get("verdict") == "rollback"
+                and (x.get("created_at") or "") > (d.get("created_at") or "")
+                for x in all_d
+                if x["candidate_id"] == d["candidate_id"]
+            )
+            if not shadowed:
+                return d["candidate_id"]
+        return None
+
+    class F(base.__class__):
+        async def pull(self, tool, args):
+            if tool == "get_incumbent":
+                return json.dumps({"candidate_id": _incumbent()})
+            return await super().pull(tool, args)
+
+    return F()
+
+
+class TestRolledBackIncumbent:
+    """rc-6 state-machine row 30: when the CHAMPION's promote is rolled
+    back, upstream incumbent goes null — the roster row must land
+    rolled_back, not linger as champion. The earlier reconciliation
+    exempted champion rows and skipped everything when the incumbent
+    pull answered null — a rolled-back incumbent was checked by
+    neither path."""
+
+    async def test_rolled_back_incumbent_derives(
+        self, zetesis_server, adaptors, search_store
+    ):
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-alpha": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert "error" not in r
+        assert search_store.get_roster_entry(
+            "cand-alpha").derived_status is DerivedStatus.champion
+
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-alpha": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+                {"id": "d2", "verdict": "rollback",
+                 "created_at": "2026-01-02T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert r["incumbent"] is None
+        assert "cand-alpha" in r["reconciled"]["rolled_back"]
+        e = search_store.get_roster_entry("cand-alpha")
+        assert e.derived_status is DerivedStatus.rolled_back
+        assert e.notes["decision_id"] == "d2"
+
+    async def test_no_incumbent_demotes_stale_champion(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """A champion row with no incumbent upstream and no rollback
+        trail still demotes — upstream truth (no incumbent) governs."""
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-alpha": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert search_store.get_roster_entry(
+            "cand-alpha").derived_status is DerivedStatus.champion
+
+        # Incumbent pull succeeds but names nobody and no decision
+        # trail exists — the row cannot keep claiming champion.
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({})
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert r["incumbent"] is None
+        e = search_store.get_roster_entry("cand-alpha")
+        assert e.derived_status is DerivedStatus.candidate
+
+    async def test_failed_incumbent_pull_never_demotes(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """A failed get_incumbent pull is not an empty incumbent —
+        transient connectivity must not demote anyone."""
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-alpha": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert search_store.get_roster_entry(
+            "cand-alpha").derived_status is DerivedStatus.champion
+
+        class Down(FakeUpstreamAdaptor):
+            async def pull(self, tool, args):
+                return json.dumps({"error": "upstream unreachable"})
+
+        adaptors.evidence = Down()
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        e = search_store.get_roster_entry("cand-alpha")
+        assert e.derived_status is DerivedStatus.champion
+
+
+# --- rc-6 W4: guard ordering, abandonment, metric-value gate ---------
+
+
+class _SpawnCapablePromotionAdaptor(FakePromotionAdaptor):
+    """Promotion fake whose create_programme push mints a programme id —
+    the spawn path needs it; the base fake errors on unexpected tools."""
+
+    def __init__(self):
+        super().__init__()
+        self._prog_n = 0
+
+    async def push(self, tool, args):
+        if tool == "create_programme":
+            self._prog_n += 1
+            self.pushed.append((tool, args))
+            return json.dumps(
+                {"programme_id": f"prog-spawn{self._prog_n}"}
+            )
+        return await super().push(tool, args)
+
+
+class TestGuardOrdering:
+    """rc-6 P8 — the cap must not shadow the illegal-override check."""
+
+    async def _open_capped_campaign(self, mcp, adaptors):
+        adaptors.evidence = _evidence_adaptor()
+        await call_tool(mcp, "refresh_roster", {"dry_run": False})
+        r = await call_tool(mcp, "open_campaign", {
+            "contract_id": "contract-c1",
+            "challenger_id": "cand-beta",
+            "budget": {
+                "programmes_per_arm": 1,
+                "trials_per_programme": 2,
+            },
+        })
+        assert "error" not in r, r
+        return r["campaign_id"]
+
+    async def test_illegal_override_beats_cap_error(
+        self, zetesis_server, adaptors
+    ):
+        """An arm already at cap + an illegal override key must report
+        the OVERRIDE violation, not the cap — the ordering proved
+        backwards on the VM (cap shadowed the real refusal)."""
+        adaptors.promotion = _SpawnCapablePromotionAdaptor()
+        cid = await self._open_capped_campaign(zetesis_server, adaptors)
+        # Fill the arm's cap.
+        r = await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        assert "error" not in r, r
+        # Arm is now at cap AND carries an illegal override key.
+        r = await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+            "budget": {"max_trials": 99},
+        })
+        assert "error" in r
+        assert "cap" not in r["error"]
+        assert "override" in r["error"] or "may only" in r["error"]
+
+    async def test_cap_still_fires_on_legal_spawn(
+        self, zetesis_server, adaptors
+    ):
+        """The cap is still enforced — a legal repeat spawn on a full
+        arm gets the cap refusal."""
+        adaptors.promotion = _SpawnCapablePromotionAdaptor()
+        cid = await self._open_capped_campaign(zetesis_server, adaptors)
+        await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        r = await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        assert "error" in r and "cap" in r["error"]
+
+    async def test_arm_scope_message_reachable(
+        self, zetesis_server, adaptors
+    ):
+        """A result naming a programme spawned for the OTHER arm must
+        get the arm-scope refusal, not generic attribution — the check
+        now runs before the upstream attribution pull."""
+        adaptors.promotion = _SpawnCapablePromotionAdaptor()
+        cid = await self._open_capped_campaign(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "champion",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        assert "error" not in r, r
+        # prog-spawn1 was spawned for champion; report it as challenger.
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-spawn1", "metrics": {"hits": 5},
+        })
+        assert "error" in r
+        assert "arm" in r["error"]
+        assert "'champion'" in r["error"]
+
+    async def test_unspawned_programme_named(
+        self, zetesis_server, adaptors
+    ):
+        """A result naming a programme never spawned under the campaign
+        gets the not-spawned refusal."""
+        adaptors.promotion = _SpawnCapablePromotionAdaptor()
+        cid = await self._open_capped_campaign(zetesis_server, adaptors)
+        await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-outsider", "metrics": {"hits": 5},
+        })
+        assert "error" in r and "not spawned" in r["error"]
+
+
+class TestAbandonCampaign:
+    """rc-6 P9 — the exit for campaigns that cannot close."""
+
+    async def test_open_to_abandoned_terminal(
+        self, zetesis_server, adaptors, search_store
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "mis-opened budget",
+            "decided_by": "human:operator",
+        })
+        assert r["status"] == "abandoned"
+        assert r["abandoned_by"] == "human:operator"
+        c = search_store.get_campaign(cid)
+        assert c.status is CampaignStatus.abandoned
+        assert c.abandon_rationale == "mis-opened budget"
+        assert c.closed_at is not None
+
+    async def test_abandoned_refuses_results_spawns_close(
+        self, zetesis_server, adaptors
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "wedged", "decided_by": "human:x",
+        })
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall", "metrics": {"hits": 1},
+        })
+        assert "error" in r and "abandoned" in r["error"]
+        r = await call_tool(zetesis_server, "spawn_campaign_programme", {
+            "campaign_id": cid, "arm": "challenger",
+            "goal": "g", "constraints": {},
+            "allowed_variables": ["x"],
+        })
+        assert "error" in r and "abandoned" in r["error"]
+        r = await call_tool(zetesis_server, "close_campaign", {
+            "campaign_id": cid,
+        })
+        assert "error" in r and "abandoned" in r["error"]
+        r = await call_tool(zetesis_server, "pull_campaign_evidence", {
+            "campaign_id": cid, "source": "loop0",
+            "tool": "list_trials",
+        })
+        assert "error" in r and "abandoned" in r["error"]
+
+    async def test_double_abandon_refused(
+        self, zetesis_server, adaptors
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "first", "decided_by": "human:x",
+        })
+        r = await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "again", "decided_by": "human:x",
+        })
+        assert "error" in r and "abandoned" in r["error"]
+
+    async def test_abandon_requires_attribution(
+        self, zetesis_server, adaptors
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid, "rationale": "", "decided_by": "h",
+        })
+        assert "error" in r and "rationale" in r["error"]
+        r = await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid, "rationale": "r", "decided_by": "  ",
+        })
+        assert "error" in r and "decided_by" in r["error"]
+        # Still open — refused abandonment leaves the campaign live.
+        r = await call_tool(zetesis_server, "get_campaign", {
+            "campaign_id": cid,
+        })
+        assert r["campaign"]["status"] == "open"
+
+    async def test_abandon_skips_budget_audit(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """Abandonment is the exit for campaigns that can never satisfy
+        the close audit — no both-arms requirement, no spend check."""
+        cid = await _open_campaign(zetesis_server, adaptors)
+        # No results at all — close would refuse on missing arms.
+        r = await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "upstream lineage abandoned",
+            "decided_by": "human:x",
+        })
+        assert r["status"] == "abandoned"
+
+    async def test_list_campaigns_filters_abandoned(
+        self, zetesis_server, adaptors
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        await call_tool(zetesis_server, "abandon_campaign", {
+            "campaign_id": cid,
+            "rationale": "x", "decided_by": "human:x",
+        })
+        r = await call_tool(zetesis_server, "list_campaigns", {
+            "status": "abandoned",
+        })
+        assert cid in [c["id"] for c in r["campaigns"]]
+        r = await call_tool(zetesis_server, "list_campaigns", {
+            "status": "open",
+        })
+        assert cid not in [c["id"] for c in r["campaigns"]]
+
+
+class TestMetricValueGate:
+    """rc-6 P12 — key presence is not enough; the value must score."""
+
+    async def _open(self, mcp, adaptors):
+        return await _open_campaign(mcp, adaptors)
+
+    async def test_null_metric_refused_naming_key_and_value(
+        self, zetesis_server, adaptors, search_store
+    ):
+        cid = await self._open(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall", "metrics": {"hits": None},
+        })
+        assert "error" in r
+        assert "'hits'" in r["error"]
+        assert "None" in r["error"]
+        # Nothing persisted — insert-only rows can't be repaired.
+        assert search_store.get_campaign(cid) is not None
+        results = search_store._fetchall(
+            "SELECT * FROM campaign_results WHERE campaign_id = ?",
+            (cid,),
+        )
+        assert results == []
+
+    async def test_string_metric_refused(self, zetesis_server, adaptors):
+        cid = await self._open(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall",
+            "metrics": {"hits": "high"},
+        })
+        assert "error" in r and "'high'" in r["error"]
+
+    async def test_bool_metric_refused(self, zetesis_server, adaptors):
+        """bool is an int subclass — must be refused explicitly."""
+        cid = await self._open(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall", "metrics": {"hits": True},
+        })
+        assert "error" in r and "True" in r["error"]
+
+    async def test_nan_metric_refused(self, zetesis_server, adaptors):
+        cid = await self._open(zetesis_server, adaptors)
+        # JSON can't carry NaN — go through the dict surface.
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall",
+            "metrics": {"hits": float("nan")},
+        })
+        assert "error" in r and "finite" in r["error"]
+
+    async def test_valid_numeric_accepted(
+        self, zetesis_server, adaptors
+    ):
+        cid = await self._open(zetesis_server, adaptors)
+        for v in (0, -1, 1e-9, 120.5):
+            r = await call_tool(
+                zetesis_server, "record_campaign_result", {
+                    "campaign_id": cid, "arm": "challenger",
+                    "programme_id": "prog-chall",
+                    "metrics": {"hits": v},
+                })
+            assert "error" not in r, (v, r)
+
+    async def test_wedged_close_names_the_refusal(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """A historical null row (pre-gate) must produce a named close
+        refusal, never a raw TypeError — abandon is the remediation."""
+        cid = await self._open(zetesis_server, adaptors)
+        # Simulate the pre-gate row landing directly in the store.
+        from ml_zetesis_mcp.state.models import CampaignResult as CR
+        search_store.create_campaign_result(CR(
+            id="cres-null", campaign_id=cid, arm=CampaignArm.challenger,
+            programme_id="prog-chall", metrics={"hits": None},
+        ))
+        search_store.create_campaign_result(CR(
+            id="cres-ok", campaign_id=cid, arm=CampaignArm.champion,
+            programme_id="prog-champ", metrics={"hits": 10},
+        ))
+        r = await call_tool(zetesis_server, "close_campaign", {
+            "campaign_id": cid,
+        })
+        assert "error" in r
+        assert "unscorable" in r["error"]
+        assert "cres-null" in r["error"]
+        assert "abandon_campaign" in r["error"]
+        assert "TypeError" not in r["error"]
+
+
+class TestOrphanRollback:
+    """rc-6 P13 — a rollback with no prior promote revokes nothing."""
+
+    async def test_rollback_only_candidate_stays_unadopted(
+        self, zetesis_server, adaptors, search_store
+    ):
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-beta": [
+                {"id": "d1", "verdict": "rollback",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert "error" not in r
+        e = search_store.get_roster_entry("cand-beta")
+        assert e is not None
+        # Nothing was ever promoted — the orphan rollback cannot mark
+        # the row rolled_back; it stays an ordinary candidate.
+        assert e.derived_status is DerivedStatus.candidate
+        assert "cand-beta" not in r["reconciled"]["rolled_back"]
+
+    async def test_promote_then_rollback_still_rolls_back(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """Control: promote→rollback still derives rolled_back."""
+        adaptors.evidence = _evidence_adaptor_deriving_incumbent({
+            "cand-beta": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+                {"id": "d2", "verdict": "rollback",
+                 "created_at": "2026-01-02T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        e = search_store.get_roster_entry("cand-beta")
+        assert e.derived_status is DerivedStatus.rolled_back

@@ -276,3 +276,78 @@ class TestCreateLocalAdaptor:
         assert adaptor.executor._shared_caches == [
             str(Path("~/.cache/uv").expanduser()), "/data/models",
         ]
+
+
+# --- rc-6 P2: credential-shaped env never reaches bundle code -------
+
+
+async def test_trial_env_scrubs_server_and_credential_keys(
+    tmp_path, monkeypatch
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    """os.environ inheritance once leaked ML_EPISTEME_INGEST_TOKEN (and
+    every *_TOKEN/*_SECRET) into sandboxed trial code. The scrub is a
+    blacklist, not a whitelist: runtime vars (PATH, CUDA_*, VIRTUAL_ENV,
+    LD_LIBRARY_PATH) must survive — a whitelist would silently strip
+    them and break GPU trials."""
+    monkeypatch.setenv("ML_EPISTEME_INGEST_TOKEN", "supersecret")
+    monkeypatch.setenv("ML_EPISTEME_DB_PATH", "/x/state.db")
+    monkeypatch.setenv("ANTHROPIC_API_TOKEN", "tok-1")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "sec-1")
+    monkeypatch.setenv("HF_PASSWORD", "pw")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    monkeypatch.setenv("VIRTUAL_ENV", "/opt/venvs/lab")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/usr/lib/cuda")
+    monkeypatch.setenv("MY_CREDENTIAL_FILE", "/x")  # CREDENTIAL pattern
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/ssh")  # not credential-shaped
+    code = (
+        "import json, os\n"
+        "print(json.dumps(sorted(os.environ)))"
+    )
+    ex = LocalExecutor(timeout=30, sandbox="none")
+    r = json.loads(await ex.execute_code(code, artifact_dir=artifact_dir))
+    assert r["status"] == "completed", r
+    env_keys = set(json.loads(r["stdout"]))
+    # Server-internal and credential-shaped keys must be gone.
+    assert "ML_EPISTEME_INGEST_TOKEN" not in env_keys
+    assert "ML_EPISTEME_DB_PATH" not in env_keys
+    assert "ANTHROPIC_API_TOKEN" not in env_keys
+    assert "AWS_SECRET_ACCESS_KEY" not in env_keys
+    assert "HF_PASSWORD" not in env_keys
+    assert "MY_CREDENTIAL_FILE" not in env_keys
+    # Runtime vars survive — a whitelist would have stripped these.
+    assert "PATH" in env_keys
+    assert "CUDA_VISIBLE_DEVICES" in env_keys
+    assert "VIRTUAL_ENV" in env_keys
+    assert "LD_LIBRARY_PATH" in env_keys
+    assert "SSH_AUTH_SOCK" in env_keys
+    # Trial-facing ML_SCI_* vars are set on top by the executor.
+    assert "ML_SCI_ARTIFACT_DIR" in env_keys
+
+
+async def test_seal_fields_present_on_every_result_path(tmp_path):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    """rc-6 P7 — seal_enforced/launch_refused/seal_staged are emitted on
+    every result shape, not only refusals. A consumer must never have
+    to guess whether the field's absence means 'not enforced' or 'old
+    build'."""
+    ex = LocalExecutor(timeout=30, sandbox="none")
+    # Happy path.
+    r = json.loads(await ex.execute_code(
+        "print('ok')", artifact_dir=artifact_dir
+    ))
+    assert r["status"] == "completed"
+    for k in ("seal_enforced", "launch_refused", "seal_staged"):
+        assert k in r, k
+    assert r["seal_enforced"] is False
+    assert r["launch_refused"] is False
+    assert r["seal_staged"] == 0
+    # Failed path (nonzero exit).
+    r = json.loads(await ex.execute_code(
+        "import sys; sys.exit(3)", artifact_dir=artifact_dir
+    ))
+    assert r["status"] == "failed"
+    for k in ("seal_enforced", "launch_refused", "seal_staged"):
+        assert k in r, k

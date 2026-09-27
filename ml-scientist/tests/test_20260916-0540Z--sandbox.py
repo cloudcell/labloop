@@ -319,3 +319,4 @@ async def test_overlay_unenforced_without_sandbox(artifact_dir, tmp_path):
     assert r["status"] == "completed", r
     assert r["seal_enforced"] is False
     assert r["stdout"].strip() == "MARKER = 'live'"
+

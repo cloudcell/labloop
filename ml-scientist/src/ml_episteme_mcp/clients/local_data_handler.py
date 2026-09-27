@@ -40,6 +40,26 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _elide_stderr(stderr: str, head: int = 1500, tail: int = 500) -> str:
+    """Keep both ends of a long stderr, line-aligned.
+
+    A tail-only cut discards the 'Traceback (most recent call last):'
+    header and the exception line — exactly the parts that name the
+    fault — so keep the head for the exception and the tail for the
+    final diagnostics, marked and cut on newlines only.
+    """
+    if len(stderr) <= head + tail + 64:
+        return stderr
+    head_s = stderr[:head]
+    if "\n" in head_s:
+        head_s = head_s[: head_s.rindex("\n") + 1]
+    tail_s = stderr[-tail:]
+    if "\n" in tail_s:
+        tail_s = tail_s[tail_s.index("\n") + 1:]
+    elided = len(stderr) - len(head_s) - len(tail_s)
+    return f"{head_s}[…{elided} bytes elided…]\n{tail_s}"
+
+
 def _sha256_file(path: Path) -> str:
     """Compute the SHA-256 hash of a file."""
     h = hashlib.sha256()
@@ -172,7 +192,7 @@ class LocalDataHandler(DataSourceRole):
             err = result.get("error") or "unknown"
             stderr = (result.get("stderr") or "").strip()
             if stderr:
-                err = f"{err}; stderr: {stderr[-500:]}"
+                err = f"{err}; stderr: {_elide_stderr(stderr)}"
             raise RuntimeError(f"Generator failed: {err}")
 
         # Compute hash
