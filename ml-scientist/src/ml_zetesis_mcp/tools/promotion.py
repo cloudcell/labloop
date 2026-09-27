@@ -251,6 +251,76 @@ def register(
                                 notes={"promoted_by": "refresh_roster"},
                             ))
                             champion = incumbent_id
+
+            # Rollback reconciliation: an upstream 'rollback' verdict
+            # revokes a promotion — the roster mirrors the verdict
+            # trail, not just the incumbent pointer. Latest decision
+            # wins: a promote after a rollback un-rolls the entry.
+            rolled_back: list[str] = []
+            unrolled: list[str] = []
+            if dry_run:
+                # Preview the WOULD-BE roster — present ∪ adopted —
+                # so a fresh refresh reports rollback effects too.
+                # The would-be champion (the incumbent, once adopted)
+                # is excluded: incumbent reconciliation owns it.
+                roster_ids = set(present) | set(adopted)
+                eff_champion = (
+                    incumbent_id if incumbent_id in roster_ids else None
+                )
+                recon = []
+                for cid in roster_ids:
+                    if cid == eff_champion:
+                        continue
+                    e = store.get_roster_entry(cid)
+                    recon.append((
+                        cid,
+                        e is not None
+                        and e.derived_status is DerivedStatus.rolled_back,
+                    ))
+            else:
+                recon = [
+                    (e.id, e.derived_status is DerivedStatus.rolled_back)
+                    for e in store.list_roster_entries(limit=10000)[0]
+                    # incumbent reconciliation owns the champion row
+                    if e.derived_status is not DerivedStatus.champion
+                ]
+            for cid, was_rb in recon:
+                data, derr = _parse_upstream(
+                    await adaptors.evidence.pull(
+                        "list_promotion_decisions",
+                        {"candidate_id": cid},
+                    )
+                )
+                if derr or not data:
+                    continue
+                decisions = data.get("decisions") or []
+                if not decisions:
+                    continue
+                latest = max(
+                    decisions, key=lambda d: d.get("created_at") or ""
+                )
+                is_rb = latest.get("verdict") == "rollback"
+                if is_rb == was_rb:
+                    continue
+                new_status = (
+                    DerivedStatus.rolled_back if is_rb
+                    else DerivedStatus.candidate
+                )
+                if not dry_run:
+                    e = store.get_roster_entry(cid)
+                    with store.transaction():
+                        store.upsert_roster_entry(RosterEntry(
+                            id=cid,
+                            parent_id=e.parent_id if e else None,
+                            derived_status=new_status,
+                            notes={
+                                ("rolled_back_by" if is_rb
+                                 else "unrolled_by"): "refresh_roster",
+                                "decision_id": latest.get("id"),
+                            },
+                        ))
+                (rolled_back if is_rb else unrolled).append(cid)
+
             if dry_run:
                 return ok({
                     "dry_run": True,
@@ -259,7 +329,9 @@ def register(
                     "already_tracked": len(present),
                     "incumbent": incumbent_id,
                     "would_reconcile": {
-                        "demoted": demoted, "champion": champion
+                        "demoted": demoted, "champion": champion,
+                        "rolled_back": rolled_back,
+                        "unrolled": unrolled,
                     },
                 })
             return ok({
@@ -268,7 +340,9 @@ def register(
                 "already_tracked": len(present),
                 "incumbent": incumbent_id,
                 "reconciled": {
-                    "demoted": demoted, "champion": champion
+                    "demoted": demoted, "champion": champion,
+                    "rolled_back": rolled_back,
+                    "unrolled": unrolled,
                 },
             })
         except Exception as e:
@@ -802,6 +876,18 @@ def register(
                 store, campaign_id, arm, programme_id
             ):
                 return _err(e)
+            # Write-boundary: the row that enters the insert-only
+            # record must carry the contract's scored metric — a
+            # missing primary_metric is caught at write, not later
+            # at close (where it reads as missing evidence).
+            if campaign.primary_metric not in metrics:
+                return fail(json.dumps({
+                    "error": f"Result must carry the contract's "
+                             f"primary_metric '{campaign.primary_metric}' "
+                             f"— got keys {sorted(metrics)}. A result "
+                             "without the scored metric cannot ground "
+                             "a verdict."
+                }))
 
             result = CampaignResult(
                 id=f"cres-{uuid.uuid4().hex[:8]}",

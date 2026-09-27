@@ -132,6 +132,12 @@ def create_server(
         recurrence.configure_epoch(
             enf.get("improvement_epoch_seconds", 86400)
         )
-        recurrence.install(mcp, store, recurrence.TRACKER)
+        recurrence.install(
+            mcp, store, recurrence.TRACKER,
+            live_connectivity=(
+                adaptors.connectivity_report
+                if hasattr(adaptors, "connectivity_report") else None
+            ),
+        )
 
     return mcp

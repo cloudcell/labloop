@@ -714,3 +714,133 @@ class TestCampaignLifecycle:
             "evidence_ref_ids": [ev["evidence_ref_id"]],
         })
         assert "error" in r and "promotion adaptor" in r["error"]
+
+
+# --- rc-5 B1: the contract's primary metric gates at write ----------
+
+
+def _evidence_adaptor_with_decisions(decisions_by_cand):
+    """Evidence fake that also serves list_promotion_decisions —
+    the verdict trail B2 reconciliation reads."""
+    base = _evidence_adaptor()
+
+    class F(base.__class__):
+        async def pull(self, tool, args):
+            if tool == "list_promotion_decisions":
+                return json.dumps({
+                    "decisions": decisions_by_cand.get(
+                        args.get("candidate_id"), []
+                    )
+                })
+            return await super().pull(tool, args)
+
+    return F()
+
+
+class TestCampaignMetricGate:
+    async def test_missing_primary_metric_refused_at_write(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """rc-5 camp F1: a result without the contract's primary
+        metric must be refused at WRITE — the record is insert-only,
+        so the bad row cannot be repaired later."""
+        cid = await _open_campaign(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall",
+            "metrics": {"wrong_metric": 1},
+        })
+        assert "error" in r
+        assert "primary_metric" in r["error"]
+        assert "hits" in r["error"]  # names the required metric
+        # Nothing persisted — the insert-only record stays clean.
+        assert search_store.list_campaign_results(cid) == []
+
+    async def test_result_with_primary_metric_accepted(
+        self, zetesis_server, adaptors
+    ):
+        cid = await _open_campaign(zetesis_server, adaptors)
+        r = await call_tool(zetesis_server, "record_campaign_result", {
+            "campaign_id": cid, "arm": "challenger",
+            "programme_id": "prog-chall",
+            "metrics": {"hits": 120, "latency_ms": 40},
+        })
+        assert "error" not in r
+
+
+# --- rc-5 B2: the roster derives rolled_back from the verdict trail -
+
+
+class TestRolledBackDerivation:
+    async def test_upstream_rollback_derives_rolled_back(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """A 'rollback' verdict on the upstream trail must derive
+        rolled_back — the roster mirrors the decision trail, not just
+        the incumbent pointer (the promote row stays upstream as
+        history; the derived status is the mirror)."""
+        adaptors.evidence = _evidence_adaptor_with_decisions({
+            "cand-beta": [
+                {"id": "d1", "verdict": "promote",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+                {"id": "d2", "verdict": "rollback",
+                 "created_at": "2026-01-02T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        assert "error" not in r
+        assert "cand-beta" in r["reconciled"]["rolled_back"]
+        e = search_store.get_roster_entry("cand-beta")
+        assert e.derived_status is DerivedStatus.rolled_back
+        assert e.notes["rolled_back_by"] == "refresh_roster"
+        assert e.notes["decision_id"] == "d2"
+
+    async def test_rollback_dry_run_writes_nothing(
+        self, zetesis_server, adaptors, search_store
+    ):
+        adaptors.evidence = _evidence_adaptor_with_decisions({
+            "cand-beta": [
+                {"id": "d1", "verdict": "rollback",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        r = await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": True})
+        assert r["dry_run"] is True
+        assert "cand-beta" in r["would_reconcile"]["rolled_back"]
+        assert search_store.list_roster_entries()[1] == 0
+
+    async def test_late_promote_un_rolls(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """Latest decision wins: a promote AFTER the rollback clears
+        the derived state — the newest verdict governs."""
+        adaptors.evidence = _evidence_adaptor_with_decisions({
+            "cand-beta": [
+                {"id": "d1", "verdict": "rollback",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+                {"id": "d2", "verdict": "promote",
+                 "created_at": "2026-01-03T00:00:00+00:00"},
+            ],
+        })
+        await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        e = search_store.get_roster_entry("cand-beta")
+        assert e.derived_status is not DerivedStatus.rolled_back
+
+    async def test_non_rollback_verdict_not_rolled_back(
+        self, zetesis_server, adaptors, search_store
+    ):
+        """retain/reject/etc. never derive rolled_back — only an
+        actual 'rollback' verdict revokes a promotion."""
+        adaptors.evidence = _evidence_adaptor_with_decisions({
+            "cand-beta": [
+                {"id": "d1", "verdict": "retain",
+                 "created_at": "2026-01-01T00:00:00+00:00"},
+            ],
+        })
+        await call_tool(
+            zetesis_server, "refresh_roster", {"dry_run": False})
+        e = search_store.get_roster_entry("cand-beta")
+        assert e.derived_status is not DerivedStatus.rolled_back

@@ -297,7 +297,8 @@ def test_sealed_access_attempts_check(store, tmp_path):
              "reason": "denied at runtime (EACCES)"},
         ],
     })
-    res = ichecks._check_sealed_access_attempts(store)
+    res = ichecks._check_sealed_access_attempts(
+        store, sealed_patterns=["/x/*"])
     assert res["ok"] is False
     assert res["violations"][0]["trial_id"] == "trial-s1"
 
@@ -311,8 +312,61 @@ def test_sealed_access_attempts_clean(store, tmp_path):
              "sha256": "sha256:" + "a" * 64, "size_bytes": 3},
         ],
     })
-    res = ichecks._check_sealed_access_attempts(store)
+    res = ichecks._check_sealed_access_attempts(
+        store, sealed_patterns=["/x/*"])
     assert res["ok"] is True and res["violations"] == []
+
+
+def test_sealed_access_attempts_unconfigured_is_skipped(store):
+    """No deny-list configured → 'skipped', not a vacuous green: an
+    ok verdict would be indistinguishable from an armed list that
+    held (rc-5 A4)."""
+    res = ichecks._check_sealed_access_attempts(store)
+    assert res["ok"] is True
+    assert res["violations"] == []
+    assert "skipped" in res["detail"]
+    assert "no sealed_path_patterns" in res["detail"]
+
+
+# ---- rc-5 A3: deleted sealed code refuses launch -------------------
+
+
+@pytest.mark.skipif(not HAS_BWRAP, reason="bubblewrap not installed")
+async def test_deleted_overlay_target_refuses_launch(
+    artifact_dir, tmp_path
+):
+    """A sealed code path deleted after capture → a NAMED launch
+    refusal, not an opaque bwrap mount failure deep in the child —
+    'sealed bytes or no run' is the seal's guarantee."""
+    ex = LocalExecutor(sandbox="minimal")
+    staged = tmp_path / "staged.py"
+    staged.write_text("x = 1\n")
+    missing = tmp_path / "gone.py"  # the deleted host path
+    r = json.loads(await ex.execute_code(
+        "print(1)", artifact_dir=artifact_dir,
+        overlay_ro=[(str(staged), str(missing))],
+    ))
+    assert r["status"] == "failed"
+    assert r["launch_refused"] is True
+    assert str(missing) in r["error"]
+    # Truthful fields: nothing ran — the seal was never enforced on
+    # an execution, so seal_enforced must not claim otherwise.
+    assert r["seal_enforced"] is False
+
+
+def test_refused_launch_not_unsealed_execution(store):
+    """A refused launch never ran — flagging it as 'unsealed
+    execution' would be a false violation; the refusal record is its
+    own evidence."""
+    _seed_trial(store, status=TrialStatus.failed)
+    store.update_trial_executor_output("trial-s1", json.dumps({
+        "status": "failed", "sandbox": "minimal",
+        "seal_enforced": False, "launch_refused": True,
+        "error": "sealed code path(s) missing on host",
+    }))
+    res = ichecks._check_unsealed_execution(store)
+    assert res["ok"] is True
+    assert res["violations"] == []
 
 
 # ---- live sandbox battery (needs bwrap) ------------------------------

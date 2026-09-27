@@ -148,6 +148,12 @@ async def test_upstream_connectivity_violation_when_down(search_store):
     assert v["channel"] == "evidence"
     assert v["role"] == "loop0-read"
     assert v["target"] == "http://upstream/mcp"
+    # rc-5 C1: full per-channel state rides the payload — reachable
+    # without resources/read.
+    assert any(
+        c["channel"] == "evidence" and c["state"] == "down"
+        for c in check["channels"]
+    )
 
 
 async def test_upstream_connectivity_ok_when_all_up(search_store):
@@ -162,6 +168,11 @@ async def test_upstream_connectivity_ok_when_all_up(search_store):
     check = _connectivity(payload)
     assert check["ok"] is True
     assert check["violations"] == []
+    # Up channels are visible too — not only the violations.
+    assert any(
+        c["channel"] == "evidence" and c["state"] == "up"
+        for c in check["channels"]
+    )
 
 
 async def test_upstream_connectivity_skipped_without_container(
@@ -323,3 +334,40 @@ url = "http://127.0.0.1:{ev_port}/mcp"
         assert conn["ok"], conn
     finally:
         _reap(procs, logs)
+
+
+# --- rc-5 C2: live connectivity substitutes the stale snapshot ------
+
+
+async def test_open_violations_heals_with_live_state(
+    search_store, monkeypatch
+):
+    """A logged outage that heals stops gating at once — the logged
+    run is audit history; the gate reads live channel state."""
+    from ml_zetesis_mcp.enforcement import recurrence
+    from ml_zetesis_mcp.integrity.checks import run_and_log
+
+    down = [{"channel": "evidence", "role": "loop0-read",
+             "target": "http://x/mcp", "state": "down",
+             "last_error": "ConnectError: refused"}]
+    await run_and_log(search_store, connectivity=down, trigger="test")
+
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY",
+        lambda: [{"channel": "evidence", "role": "loop0-read",
+                  "state": "up", "probe": "ok"}],
+    )
+    assert recurrence.open_violations(search_store) == []
+
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY", lambda: down)
+    openv = recurrence.open_violations(search_store)
+    assert len(openv) == 1
+    assert openv[0]["object_ref"] == "channel:evidence"
+
+    search_store.record_violation_ack(
+        ack_id="a1", check_name="upstream_connectivity",
+        object_ref="channel:evidence", disposition="known outage",
+        decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert recurrence.open_violations(search_store) == []

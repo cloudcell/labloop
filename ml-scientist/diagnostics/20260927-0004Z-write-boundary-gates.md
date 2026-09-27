@@ -123,12 +123,12 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/write-boundary-gates/
+   /srv/lab/exchange/diagnostics-out/write-boundary-gates/
    — report.md (every refusal verbatim; the before/after entity states
    for each refused close; list_decisions payloads; the claims check;
    every gate verdict) plus evidence files (tool result JSON per step).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/write-boundary-gates
+      labloop-export /srv/lab/exchange/diagnostics-out/write-boundary-gates
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

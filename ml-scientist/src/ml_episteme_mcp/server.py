@@ -177,6 +177,12 @@ def create_server(
         recurrence.TRACKER.configure(
             enf.get("status_freshness_seconds", 600)
         )
-        recurrence.install(mcp, store, recurrence.TRACKER)
+        recurrence.install(
+            mcp, store, recurrence.TRACKER,
+            live_connectivity=(
+                adaptor.connectivity_report
+                if hasattr(adaptor, "connectivity_report") else None
+            ),
+        )
 
     return mcp

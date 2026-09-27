@@ -15,9 +15,22 @@ from pydantic import Field
 import json
 
 from ..integrity.checks import run_and_log
-from ..enforcement.recurrence import violation_ack
+from ..enforcement.recurrence import canonical_ref, violation_ack
 from .schemas import ok, AcknowledgeViolationOut, CheckInvariantsOut
 from mcp.types import CallToolResult
+
+
+def _annotate_acks(store, payload: dict) -> None:
+    """Mark already-acknowledged violation rows in the tool payload —
+    post-log only, so the logged run's canonical refs stay stable."""
+    acked = store.violation_ack_keys()
+    for c in payload.get("checks", []):
+        for v in c.get("violations", []):
+            if (
+                isinstance(v, dict)
+                and (c.get("name"), canonical_ref(v)) in acked
+            ):
+                v["acknowledged"] = True
 
 
 def register(
@@ -48,6 +61,7 @@ def register(
             config=integrity_config,
             trigger="tool",
         )
+        _annotate_acks(store, payload)
         return ok(payload)
 
     @mcp.tool()

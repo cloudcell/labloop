@@ -10,18 +10,20 @@ capture_bundle → run_trial → record_observation → conclude_hypothesis.
 Then close the programme.
 
 While you work:
-- Do NOT read any status resource before your first mutating call —
-  I want to see what happens.
+- Report whether you read a status resource before your first
+  mutating call — the point is the refusal pattern, not agent
+  blindness. (If you consult status first, say so; if a write is
+  refused for staleness, that refusal IS the signal.)
 - When a tool call refuses, read the error and do exactly what it says.
 - Report every refusal you hit verbatim, and what resolved it.
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/recurrent-protocol-smoke/ —
+   /srv/lab/exchange/diagnostics-out/recurrent-protocol-smoke/ —
    report.md (narrative: what you did, every refusal verbatim, what
    resolved it) plus any evidence files (JSON snapshots, counts).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/recurrent-protocol-smoke
+      labloop-export /srv/lab/exchange/diagnostics-out/recurrent-protocol-smoke
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

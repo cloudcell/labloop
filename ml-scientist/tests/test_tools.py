@@ -1141,3 +1141,92 @@ class TestCandidateAttributionGate:
             r = await call_tool(gated_client, "create_programme", args)
         assert "error" not in r
         assert "programme_id" in r
+
+
+# --- rc-5 C3: store-terminal state beats a stale executor view ------
+
+
+class _FakeExecutor:
+    """Executor whose async view can disagree with the store — the
+    rc-5 case: mark_retryable finalized the record while the executor
+    still reports the task as running."""
+
+    def __init__(self, async_status=None):
+        self.async_status = async_status or json.dumps(
+            {"status": "running", "elapsed_seconds": 5}
+        )
+        self.cancelled: list[str] = []
+
+    async def execute_code(self, code, **kwargs):
+        return json.dumps({"status": "completed"})
+
+    def get_async_status(self, trial_id):
+        return self.async_status
+
+    async def cancel_async(self, trial_id):
+        self.cancelled.append(trial_id)
+        return json.dumps({"status": "cancelled", "trial_id": trial_id})
+
+
+class TestTerminalStorePrecedence:
+    @pytest.mark.asyncio
+    async def test_mark_retryable_kills_task_and_store_wins(
+        self, store
+    ):
+        """mark_retryable cancels the executor task BEFORE flipping
+        state — a terminal record must not orphan a live subprocess —
+        and get_trial_status then serves the persisted 'retryable',
+        not the stale 'running' the executor still reports."""
+        from mcp.client import Client
+
+        from ml_episteme_mcp.clients.adaptor import create_stub_adaptor
+        from ml_episteme_mcp.state.models import (
+            Hypothesis,
+            Programme,
+            ProgrammeStatus,
+            Trial,
+            TrialStatus,
+        )
+
+        ex = _FakeExecutor()
+        adaptor = create_stub_adaptor()
+        adaptor.set_executor(ex)
+        mcp = create_server(
+            store, adaptor=adaptor,
+            enforcement_config={"recurrent_protocol": False},
+        )
+        client = Client(mcp)
+
+        store.create_programme(Programme(
+            id="prog-c3", goal="g", constraints={},
+            allowed_variables=["x"], budget_max_trials=10,
+            budget_max_wall_time_hours=1.0,
+            status=ProgrammeStatus.active,
+        ))
+        store.create_hypothesis(Hypothesis(
+            id="hyp-c3", programme_id="prog-c3",
+            statement="s", failure_criterion="f",
+            variables_involved=["x"],
+        ))
+        store.create_trial(Trial(
+            id="trial-c3", programme_id="prog-c3",
+            hypothesis_id="hyp-c3", config_json="{}",
+            status=TrialStatus.designed,
+        ))
+        store.update_trial_status("trial-c3", "running")
+
+        async with client:
+            r = await call_tool(client, "mark_retryable", {
+                "programme_id": "prog-c3", "trial_id": "trial-c3",
+                "reason": "executor state lost",
+            })
+            assert r["status"] == "retryable"
+            # Cancellation ran before the state flip.
+            assert ex.cancelled == ["trial-c3"]
+
+            # The executor still says 'running' — the terminal store
+            # record is canonical and must win the read surface.
+            r = await call_tool(client, "get_trial_status", {
+                "programme_id": "prog-c3", "trial_id": "trial-c3",
+            })
+            assert r["status"] == "retryable"

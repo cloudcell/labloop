@@ -925,7 +925,7 @@ def register(
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    async def run_trial(programme_id: Annotated[str, Field(description='ID of the programme owning the trial (orphan check).')], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float | None, Field(description='Per-trial hard deadline override in seconds — the executor kills the process past it. None uses the server default ([executor] timeout_seconds). Bounded by [executor] max_timeout_seconds; the applied value is recorded in executor_output.timeout_seconds.')] = None) -> Annotated[CallToolResult, RunTrialOut]:
+    async def run_trial(programme_id: Annotated[str, Field(description='ID of the programme owning the trial — required; the programme_id returned by design_experiment/list_trials (orphan check).')], trial_id: Annotated[str, Field(description='ID of the target trial.')], timeout_seconds: Annotated[float | None, Field(description='Per-trial hard deadline override in seconds — the executor kills the process past it. None uses the server default ([executor] timeout_seconds). Bounded by [executor] max_timeout_seconds; the applied value is recorded in executor_output.timeout_seconds.')] = None) -> Annotated[CallToolResult, RunTrialOut]:
         """Run a trial by calling the executor role.
 
         Imports run_training from the bundle's code_ref and calls it with
@@ -1186,11 +1186,29 @@ def register(
             async_data = _parse_executor_output(async_output)
 
             if async_data.get("status") in ("completed", "failed", "timeout"):
-                # Trial finished in background — finalize it
+                # Trial finished in background — finalize it (persists
+                # executor_output, captures artifacts)
                 return _finalize_trial(
                     store, trial_id, async_output,
                     sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
                 )
+
+            # The persisted record is canonical once terminal: a stale
+            # executor cache reporting 'running' must not mask a
+            # retryable/failed store row. (Terminal async results are
+            # handled above — finalization still runs for them.)
+            if trial.status.value in (
+                "completed", "failed", "retryable", "abandoned",
+            ):
+                return ok({
+                    "trial_id": trial_id,
+                    "status": trial.status.value,
+                    "started_at": trial.started_at,
+                    "finished_at": trial.finished_at,
+                    "duration_seconds": trial.duration_seconds,
+                    "artifact_path": trial.artifact_path,
+                    "executor_output": trial.executor_output_json,
+                })
 
             if async_data.get("status") == "running":
                 # Live telemetry: elapsed + last progress.json the
@@ -1334,7 +1352,32 @@ def register(
                     ),
                 }))
 
+            # Kill the executor task too — a terminal record must not
+            # leave an orphaned subprocess running (same as
+            # cancel_trial). The cancelled process's last output is
+            # evidence and gets persisted; a "no running task" reply
+            # (e.g. stale row after a restart) is not worth recording
+            # over any existing output.
+            cancel_output = None
+            cancel = getattr(
+                getattr(adaptor, "executor", None), "cancel_async", None
+            )
+            if callable(cancel):
+                cancel_output = await cancel(trial_id)
             store.update_trial_status(trial_id, "retryable")
+            try:
+                out = (
+                    json.loads(cancel_output) if cancel_output else {}
+                )
+            except ValueError:
+                out = {}
+            if out and "No running task" not in (out.get("error") or ""):
+                try:
+                    store.update_trial_executor_output(
+                        trial_id, cancel_output
+                    )
+                except Exception:
+                    pass
             return ok({
                 "trial_id": trial_id,
                 "status": "retryable",

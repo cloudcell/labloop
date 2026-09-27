@@ -173,14 +173,14 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/state-machine-coverage/ —
+   /srv/lab/exchange/diagnostics-out/state-machine-coverage/ —
    report.md (narrative per part, every refusal verbatim) and
    matrix.md (the coverage matrix below — transition, state seen,
    evidence id, PASS/FAIL/SKIP+reason) plus evidence files (JSON
    snapshots of terminal records: the completed programme, the closed
    + voided tournaments, the policy row, the canary, the claims).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/state-machine-coverage
+      labloop-export /srv/lab/exchange/diagnostics-out/state-machine-coverage
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

@@ -415,12 +415,17 @@ def _check_upstream_connectivity(connectivity) -> dict:
         for c in connectivity
         if c.get("state") != "up"
     ]
-    return _res(
+    res = _res(
         "upstream_connectivity",
         violations,
         f"{len(connectivity)} channel(s) configured; "
         + (f"{len(violations)} down" if violations else "all up"),
     )
+    # Full per-channel state (probe, busy, last_op, error attribution)
+    # rides the payload — reachable from check_invariants, /health/deep,
+    # and the check log without a resources/read.
+    res["channels"] = connectivity
+    return res
 
 
 async def run_checks(

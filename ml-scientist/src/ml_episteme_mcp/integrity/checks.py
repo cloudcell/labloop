@@ -126,6 +126,8 @@ def _check_unsealed_execution(store) -> dict:
         if (
             out.get("seal_enforced") is False
             and out.get("sandbox") in ("minimal", "full")
+            and not out.get("launch_refused")
+            and not out.get("sandbox_setup_failed")
         ):
             violations.append(r["id"])
     return _res(
@@ -236,6 +238,11 @@ def _check_input_data_undigested(store) -> dict:
             f.get("path")
             for f in manifest.get("files", [])
             if f.get("role") == "input_data" and not f.get("sha256")
+            # Pre-v3 manifests recorded directory opens as input_data
+            # with an IsADirectoryError reason — a directory has no
+            # file digest to take; new manifests role them
+            # 'directory' instead.
+            and "IsADirectoryError" not in (f.get("reason") or "")
         ]
         if undigested:
             violations.append(
@@ -253,14 +260,22 @@ def _check_input_data_undigested(store) -> dict:
     return _res("input_data_undigested", violations, detail)
 
 
-def _check_sealed_access_attempts(store) -> dict:
+def _check_sealed_access_attempts(store, sealed_patterns=None) -> dict:
     """Trials whose manifest records a role=sealed entry — an attempt
     on a policy-sealed path (sealed_path_patterns deny-list). Under
     sealed_enforcement="deny" the read could not have succeeded — the
     attempt is the finding; under "audit" the read happened and the
     recorded exclusion is the finding. Either way a trial touched
     declared holdout space and that must be acknowledged, not silent.
-    Discharge: acknowledge_violation (the record is insert-only)."""
+    Discharge: acknowledge_violation (the record is insert-only).
+
+    With no patterns configured the check is dormant — reporting ok
+    would be indistinguishable from an armed deny-list that held."""
+    if not sealed_patterns:
+        return _skipped(
+            "sealed_access_attempts",
+            "no sealed_path_patterns configured — deny-list dormant",
+        )
     rows = store._fetchall(
         """SELECT DISTINCT t.id FROM trials t
            JOIN trial_artifacts ta ON ta.trial_id = t.id
@@ -499,12 +514,18 @@ def _check_upstream_connectivity(connectivity) -> dict:
         for c in connectivity
         if c.get("state") != "up"
     ]
-    return _res(
+    res = _res(
         "upstream_connectivity",
         violations,
         f"{len(connectivity)} channel(s) configured; "
         + (f"{len(violations)} down" if violations else "all up"),
     )
+    # Full per-channel state (probe, busy, last_op, error attribution)
+    # rides the payload — reachable from check_invariants, /health/deep,
+    # and the check log, no resources/read required. Violations stay
+    # down-channels only; busy-but-up is informational here.
+    res["channels"] = connectivity
+    return res
 
 
 def run_checks(
@@ -514,6 +535,7 @@ def run_checks(
     connectivity=None,
     stalled_trial_seconds: int = DEFAULT_STALLED_MARGIN_SECONDS,
     observation_grace_seconds: int = DEFAULT_OBSERVATION_GRACE_SECONDS,
+    sealed_patterns: list | None = None,
 ) -> dict:
     """Run the full Loop-0 invariant suite; return the shared payload."""
     started = time.monotonic()
@@ -526,7 +548,7 @@ def run_checks(
         _check_unsealed_execution(store),
         _check_strace_divergence(store),
         _check_input_data_undigested(store),
-        _check_sealed_access_attempts(store),
+        _check_sealed_access_attempts(store, sealed_patterns),
         _check_budget_exceeded(store),
         _check_stuck_hypotheses(store),
         _check_mislabeled_outcome(store),
@@ -558,6 +580,7 @@ def run_and_log(
     connectivity=None,
     config: dict | None = None,
     trigger: str = "tool",
+    sealed_patterns=None,
 ) -> dict:
     """Run the suite, write the audit log, return the payload.
 
@@ -566,10 +589,16 @@ def run_and_log(
     discipline. `trigger` records what invoked the run ("startup",
     "interval", "tool", "route") so the audit trail is
     self-describing.
+
+    sealed_patterns: the executor's configured deny-list; resolved
+    from the executor when not passed, so sealed_access_attempts can
+    distinguish "armed and quiet" from "unconfigured".
     """
     from .log import write_check_log
 
     cfg = config or {}
+    if sealed_patterns is None and executor is not None:
+        sealed_patterns = getattr(executor, "_sealed_patterns", None)
     payload = run_checks(
         store,
         executor=executor,
@@ -581,6 +610,7 @@ def run_and_log(
             "observation_grace_seconds",
             DEFAULT_OBSERVATION_GRACE_SECONDS,
         ),
+        sealed_patterns=sealed_patterns,
     )
     payload["trigger"] = trigger
     log_path = write_check_log(

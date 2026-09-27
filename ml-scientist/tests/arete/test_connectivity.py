@@ -127,6 +127,12 @@ async def test_upstream_connectivity_violation_when_down(improver_store):
     v = check["violations"][0]
     assert v["channel"] == "loop1"
     assert v["role"] == "loop1-read"
+    # rc-5 C1: per-channel state rides the payload — a tools-only
+    # client can attribute faults without resources/read.
+    assert any(
+        c["channel"] == "loop1" and c["state"] == "down"
+        for c in check["channels"]
+    )
 
 
 async def test_upstream_connectivity_ok_when_all_up(improver_store):
@@ -141,6 +147,10 @@ async def test_upstream_connectivity_ok_when_all_up(improver_store):
     check = _connectivity(payload)
     assert check["ok"] is True
     assert check["violations"] == []
+    assert any(
+        c["channel"] == "claims" and c["state"] == "up"
+        for c in check["channels"]
+    )
 
 
 async def test_upstream_connectivity_skipped_without_container(
@@ -281,3 +291,40 @@ url = "http://127.0.0.1:{loop1_port}/mcp"
         assert ok, conn
     finally:
         _reap(procs, logs)
+
+
+# --- rc-5 C2: live connectivity substitutes the stale snapshot ------
+
+
+async def test_open_violations_heals_with_live_state(
+    improver_store, monkeypatch
+):
+    """A logged outage that heals stops gating at once — the logged
+    run is audit history; the gate reads live channel state."""
+    from ml_arete_mcp.enforcement import recurrence
+    from ml_arete_mcp.integrity.checks import run_and_log
+
+    down = [{"channel": "loop1", "role": "loop1-read",
+             "target": "http://x/mcp", "state": "down",
+             "last_error": "ConnectError: refused"}]
+    await run_and_log(improver_store, connectivity=down, trigger="test")
+
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY",
+        lambda: [{"channel": "loop1", "role": "loop1-read",
+                  "state": "up", "probe": "ok"}],
+    )
+    assert recurrence.open_violations(improver_store) == []
+
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY", lambda: down)
+    openv = recurrence.open_violations(improver_store)
+    assert len(openv) == 1
+    assert openv[0]["object_ref"] == "channel:loop1"
+
+    improver_store.record_violation_ack(
+        ack_id="a1", check_name="upstream_connectivity",
+        object_ref="channel:loop1", disposition="known outage",
+        decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert recurrence.open_violations(improver_store) == []

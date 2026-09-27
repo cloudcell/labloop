@@ -117,12 +117,28 @@ def canonical_ref(item: Any) -> str:
         for k in sorted(item):
             if k == "id" or k.endswith("_id"):
                 return str(item[k])
+        # Connectivity violations name a channel — the channel name is
+        # the stable identity; last_failed_at timestamps would churn a
+        # whole-dict ref and make acknowledgement unmatchable.
+        if item.get("channel"):
+            return f"channel:{item['channel']}"
         return json.dumps(item, sort_keys=True)
     return str(item)
 
 
+# Live connectivity provider — install() wires it when the server's
+# adaptor container is in scope. upstream_connectivity is a STATE
+# invariant ("is the channel down NOW"), not an event finding: a
+# logged violation from an outage that has since healed must stop
+# gating writes immediately, not at the next periodic sweep. The
+# logged run remains the audit history; the gate reads the present.
+_LIVE_CONNECTIVITY: Callable[[], list[dict]] | None = None
+
+
 def open_violations(store) -> list[dict]:
-    """Unacknowledged violations from the latest logged check run."""
+    """Unacknowledged violations from the latest logged check run.
+    ``upstream_connectivity`` rows are substituted with live channel
+    state when a provider is wired."""
     log_dir = log_dir_for(store)
     runs = list_check_logs(log_dir, limit=1)
     if not runs:
@@ -131,9 +147,23 @@ def open_violations(store) -> list[dict]:
     if not run:
         return []
     acked = store.violation_ack_keys()
+    live_conn = None
+    if _LIVE_CONNECTIVITY is not None:
+        try:
+            live_conn = _LIVE_CONNECTIVITY()
+        except Exception:
+            live_conn = None  # report failure → keep logged snapshot
     out = []
     for c in run.get("checks", []):
-        for v in c.get("violations", []):
+        violations = c.get("violations", [])
+        if (
+            c.get("name") == "upstream_connectivity"
+            and live_conn is not None
+        ):
+            violations = [
+                ch for ch in live_conn if ch.get("state") != "up"
+            ]
+        for v in violations:
             ref = canonical_ref(v)
             if (c.get("name"), ref) not in acked:
                 out.append({
@@ -331,9 +361,17 @@ def install(
     *,
     extra_exempt: set[str] | frozenset[str] = frozenset(),
     extra_gates: tuple[Callable[[str], str | None], ...] = (),
+    live_connectivity: Callable[[], list[dict]] | None = None,
 ) -> None:
     """Wrap ``mcp.call_tool`` with the freshness + governance-debt
-    gates and post-injection."""
+    gates and post-injection.
+
+    ``live_connectivity``: a callable returning the adaptor's current
+    channel report — consulted by open_violations so healed channels
+    stop gating immediately (logged runs remain the audit trail).
+    """
+    global _LIVE_CONNECTIVITY
+    _LIVE_CONNECTIVITY = live_connectivity
     exempt = set(ALWAYS_EXEMPT) | set(extra_exempt)
 
     def _is_exempt(name: str) -> bool:

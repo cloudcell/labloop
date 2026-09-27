@@ -120,12 +120,12 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/campaign-orchestration/
+   /srv/lab/exchange/diagnostics-out/campaign-orchestration/
    — report.md (the full chain verbatim: link records, spawn rows,
    per-stage get_campaign payloads, every guard refusal, the verdict
    and its claim) plus evidence files (tool result JSON per step).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/campaign-orchestration
+      labloop-export /srv/lab/exchange/diagnostics-out/campaign-orchestration
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

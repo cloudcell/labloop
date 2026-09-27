@@ -14,9 +14,27 @@ from pydantic import Field
 import json
 
 from ..integrity.checks import run_and_log
-from ..enforcement.recurrence import violation_ack
+from ..enforcement.recurrence import canonical_ref, violation_ack
 from .schemas import ok, fail, AcknowledgeViolationOut, CheckInvariantsOut, DescribeBlobOut, GetBlobOut
 from mcp.types import CallToolResult
+
+
+def _annotate_acks(store, payload: dict) -> None:
+    """Mark already-acknowledged violation rows in the tool payload.
+
+    Post-log only: the logged run is the audit record and must keep
+    canonical refs stable — annotate the returned copy so an acked
+    finding doesn't read as "acknowledgement failed" while
+    open_violations (correctly) no longer gates it.
+    """
+    acked = store.violation_ack_keys()
+    for c in payload.get("checks", []):
+        for v in c.get("violations", []):
+            if (
+                isinstance(v, dict)
+                and (c.get("name"), canonical_ref(v)) in acked
+            ):
+                v["acknowledged"] = True
 
 
 def register(mcp, store, adaptor, integrity_config: dict | None = None) -> None:
@@ -44,10 +62,12 @@ def register(mcp, store, adaptor, integrity_config: dict | None = None) -> None:
             adaptor.connectivity_report()
             if hasattr(adaptor, "connectivity_report") else None
         )
-        return ok(run_and_log(
+        payload = run_and_log(
                 store, executor=executor, connectivity=connectivity,
                 config=integrity_config, trigger="tool",
-            ))
+            )
+        _annotate_acks(store, payload)
+        return ok(payload)
 
     @mcp.tool()
     def acknowledge_violation(

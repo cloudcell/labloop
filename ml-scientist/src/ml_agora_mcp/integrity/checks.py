@@ -48,6 +48,9 @@ def _check_upstream_connectivity(connectivity) -> dict:
             "role": e.get("role"),
             "target": e.get("target"),
             "last_error": e.get("last_error"),
+            "last_operation": e.get("last_operation"),
+            "last_failed_operation": e.get("last_failed_operation"),
+            "last_failed_at": e.get("last_failed_at"),
         }
         for e in down
     ]
@@ -61,6 +64,9 @@ def _check_upstream_connectivity(connectivity) -> dict:
             else f"{len(down)} channel(s) down"
         ),
         "violations": violations,
+        # Full per-channel state — same surface as the loop servers,
+        # so tools-only clients can attribute faults on the hub too.
+        "channels": connectivity,
     }
 
 

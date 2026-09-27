@@ -117,13 +117,13 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/connectivity-fault-observability/
+   /srv/lab/exchange/diagnostics-out/connectivity-fault-observability/
    — report.md (baseline probe fields; per-fault channel states
    verbatim; detection latencies; the agora card strings; recovery
    fields; any TaskGroup repr sighting) plus evidence files (the
    status/health JSON snapshots before, during, and after each fault).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/connectivity-fault-observability
+      labloop-export /srv/lab/exchange/diagnostics-out/connectivity-fault-observability
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

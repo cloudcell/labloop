@@ -135,14 +135,14 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/sealed-path-runtime-deny/
+   /srv/lab/exchange/diagnostics-out/sealed-path-runtime-deny/
    — report.md (the precondition verdict; every open() result verbatim
    with its errno; the manifest entries verbatim; executor_output fields
    for every trial; the check_invariants payload; the ack discharge;
    every refusal) plus evidence files (the manifest JSON, the executor
    output JSON).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/sealed-path-runtime-deny
+      labloop-export /srv/lab/exchange/diagnostics-out/sealed-path-runtime-deny
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

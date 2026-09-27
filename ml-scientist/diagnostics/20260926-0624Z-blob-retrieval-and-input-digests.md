@@ -54,13 +54,13 @@ While you work:
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
-   /home/lab/workspace/diagnostics-out/blob-retrieval-and-input-digests/
+   /srv/lab/exchange/diagnostics-out/blob-retrieval-and-input-digests/
    — report.md (every get_blob result verbatim: digest, size_bytes,
    served_from, your independently recomputed digest; the manifest
    entries verbatim; the check_invariants result) plus evidence files
    (the decoded blob bytes, the manifest JSON).
 2. Stage it for host retrieval:
-      labloop-export /home/lab/workspace/diagnostics-out/blob-retrieval-and-input-digests
+      labloop-export /srv/lab/exchange/diagnostics-out/blob-retrieval-and-input-digests
    There is no ./labloop in the VM — that is the host-side repo
    launcher; use labloop-export instead. Only if labloop-export is
    missing: tar.gz your out dir into /srv/lab/exchange/, sha256sum it,

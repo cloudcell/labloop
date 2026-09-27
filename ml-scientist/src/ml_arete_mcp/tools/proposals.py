@@ -128,7 +128,17 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         class_map: {component_name: declared_boundary_class} for every
         component the delta touches — the kernel classifies
         authoritatively from the ADR-0003 table; the declaration is
-        kept for the record.
+        kept for the record. Recognized class-1 (immutable) names:
+        audit_log, event_log, audit_semantics, artifact_hashing,
+        provenance, artifact_provenance, capability_model,
+        permission_model, permissions, budget_enforcement,
+        compute_ceiling(s), budgets, promotion_protocol,
+        holdout_access_control, heldout_access_control,
+        held_out_evaluation_access, rollback_mechanism,
+        enforcement_kernel, safety_kernel. Class-2 (conditional):
+        evaluator_implementation, evaluator, metric_weighting,
+        metric_weights, memory_schema, scheduler. Unrecognized names
+        classify as 'unknown' → conditional, never silently writable.
 
         Admission: any class-1 (immutable/human-governed) component
         touch → status 'rejected' at ingress, stored with the reason.

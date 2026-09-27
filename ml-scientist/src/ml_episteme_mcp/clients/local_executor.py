@@ -449,6 +449,8 @@ class LocalExecutor(ExecutorRole):
                         "python_exe": pyexe,
                         "read_trace": self._trace,
                         "seal_enforced": False,
+                        "seal_staged": len(overlay_ro or []),
+                        "launch_refused": True,
                         "sealed_overlays": len(overlay_ro or []),
                         "timeout_seconds": timeout,
                         "shared_caches": shared_cache_report,
@@ -472,6 +474,51 @@ class LocalExecutor(ExecutorRole):
                     os.write(deny_fd, b"DENIED-BY-POLICY\n")
                     os.lseek(deny_fd, 0, os.SEEK_SET)
 
+            # Seal pre-flight: each overlay bind-mounts staged bytes
+            # over the original path, and bwrap cannot create a missing
+            # mountpoint inside a read-only namespace — a deleted
+            # sealed file would otherwise fail the launch deep in
+            # bwrap with an opaque mount error. Refuse by name: the
+            # seal's guarantee is "sealed bytes or no run", and a
+            # refused launch is not an execution.
+            if overlay_ro and applied_sandbox != "none":
+                missing = [
+                    str(t) for _, t in overlay_ro
+                    if not Path(t).exists()
+                ]
+                if missing:
+                    if deny_fd is not None:
+                        os.close(deny_fd)
+                    result = {
+                        "status": "failed",
+                        "error": (
+                            "sealed code path(s) missing on host — "
+                            "refusing to run unsealed: "
+                            + ", ".join(missing)
+                        ),
+                        "stdout": "",
+                        "stderr": "",
+                        "exit_code": -1,
+                        "duration_seconds": 0.0,
+                        "sandbox": applied_sandbox,
+                        "python_exe": pyexe,
+                        "read_trace": self._trace,
+                        "seal_enforced": False,
+                        "seal_staged": len(overlay_ro),
+                        "launch_refused": True,
+                        "sealed_overlays": len(overlay_ro),
+                        "timeout_seconds": timeout,
+                        "shared_caches": shared_cache_report,
+                        **self._sealed_fields(deny_paths, sealed_unmatched),
+                    }
+                    if artifact_dir is not None:
+                        self._write_artifacts(
+                            artifact_dir, trial_id, programme_id,
+                            bundle_id, ts, created_at, script_path,
+                            result,
+                        )
+                    return json.dumps(result)
+
             argv = self._sandbox_argv(
                 inner,
                 artifact_dir,
@@ -482,10 +529,12 @@ class LocalExecutor(ExecutorRole):
                 deny_paths=deny_paths,
                 deny_fd=deny_fd,
             )
-            # The seal is enforced only when a mount namespace applies
-            # the overlays; without bwrap the live file runs — recorded
-            # honestly in the result.
-            seal_enforced = bool(overlay_ro) and applied_sandbox != "none"
+            # The seal is armed only when a mount namespace applies the
+            # overlays; without bwrap the live file runs — recorded
+            # honestly in the result. Enforcement additionally requires
+            # the child to actually run (a bwrap setup failure below
+            # never executed a line).
+            seal_armed = bool(overlay_ro) and applied_sandbox != "none"
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *argv,
@@ -520,7 +569,7 @@ class LocalExecutor(ExecutorRole):
                     "sandbox": applied_sandbox,
                     "python_exe": pyexe,
                     "read_trace": self._trace,
-                    "seal_enforced": seal_enforced,
+                    "seal_enforced": seal_armed,
                     "sealed_overlays": len(overlay_ro or []),
                     "shared_caches": shared_cache_report,
                     **self._sealed_fields(deny_paths, sealed_unmatched),
@@ -542,6 +591,17 @@ class LocalExecutor(ExecutorRole):
             stdout_str = stdout.decode("utf-8", errors="replace")
             stderr_str = stderr.decode("utf-8", errors="replace")
 
+            # A bwrap namespace-setup failure means the child never ran
+            # — seal_enforced must not claim the overlays served code
+            # that never executed. (Pre-flight above catches the common
+            # case, a missing mountpoint, before launch; this is the
+            # residual.)
+            sandbox_setup_failed = (
+                applied_sandbox != "none"
+                and proc.returncode != 0
+                and stderr_str.lstrip().startswith("bwrap:")
+            )
+
             # Store output for read_cell_output
             cell_id = str(script_path)
             self._cell_outputs[cell_id] = stdout_str
@@ -555,7 +615,7 @@ class LocalExecutor(ExecutorRole):
                 "sandbox": applied_sandbox,
                 "python_exe": pyexe,
                 "read_trace": self._trace,
-                "seal_enforced": seal_enforced,
+                "seal_enforced": seal_armed and not sandbox_setup_failed,
                 "sealed_overlays": len(overlay_ro or []),
                 "shared_caches": shared_cache_report,
                 "timeout_seconds": timeout,
@@ -564,6 +624,10 @@ class LocalExecutor(ExecutorRole):
 
             if proc.returncode != 0:
                 result["error"] = f"Process exited with code {proc.returncode}"
+            if sandbox_setup_failed:
+                result["sandbox_setup_failed"] = True
+                first_err = stderr_str.strip().splitlines()[0]
+                result["error"] = f"Sandbox setup failed: {first_err}"
 
             if artifact_dir is not None:
                 self._write_artifacts(

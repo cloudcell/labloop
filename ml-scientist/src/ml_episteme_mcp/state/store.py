@@ -2467,6 +2467,41 @@ class StateStore:
 
         return {"captured": captured, "oversized": oversized, "lost": lost}
 
+    def _sealed_overlay_map(self, trial_id: str) -> dict:
+        """{resolved original_path: CodeSnippet} for the trial's
+        sealed bundle — the byte source a seal overlay serves.
+
+        The executor bind-mounts staged snippet bytes over each
+        snippet's original path (tools/trial.py:_stage_sealed_code),
+        so the process reads exactly what capture_bundle hashed.
+        Finalization must therefore record the *bundle's* content
+        hash for overlayed paths — re-hashing the live host file
+        would record code that never ran.
+        """
+        trial = self.get_trial(trial_id)
+        if trial is None or not trial.bundle_id:
+            return {}
+        bundle = self.get_bundle(trial.bundle_id)
+        if bundle is None:
+            return {}
+        hashes = [bundle.code_hash] if bundle.code_hash else []
+        if bundle.code_hash_extra_json:
+            try:
+                hashes += json.loads(bundle.code_hash_extra_json)
+            except (ValueError, TypeError):
+                pass
+        out: dict = {}
+        for h in hashes:
+            cs = self.get_code_snippet(h)
+            if cs is None or not cs.original_path:
+                continue
+            try:
+                key = str(Path(cs.original_path).resolve())
+            except OSError:
+                key = cs.original_path
+            out[key] = cs
+        return out
+
     def capture_executed_code(
         self,
         trial_id: str,
@@ -2490,6 +2525,8 @@ class StateStore:
                        a file rewritten or removed mid-run records
                        sha256: null + reason (and trips the
                        input_data_undigested invariant).
+          directory  — an opened directory (stdlib/cwd probing):
+                       provenance of what was touched, never digested.
           sealed     — path matched a sealed_path_patterns deny rule.
                        NEVER opened for hashing, never enumerated —
                        the refusal itself is recorded as
@@ -2522,6 +2559,25 @@ class StateStore:
         if not logs:
             return {"traced": False, "captured": []}
         patterns = list(sealed_patterns or [])
+
+        # Overlay-served code: when the seal armed AND the child ran
+        # under it (executor_output.seal_enforced), the process read
+        # the staged bundle bytes, not the live file — so the sealed
+        # hash is what must land in the manifest. With sandbox="none"
+        # (or a refused/failed launch) the live file genuinely ran or
+        # nothing did; in both cases the host hash is truthful.
+        seal_enforced = False
+        overlay_map: dict = {}
+        trial = self.get_trial(trial_id)
+        if trial is not None and trial.executor_output_json:
+            try:
+                seal_enforced = json.loads(
+                    trial.executor_output_json
+                ).get("seal_enforced") is True
+            except (ValueError, TypeError):
+                pass
+        if seal_enforced:
+            overlay_map = self._sealed_overlay_map(trial_id)
 
         stdlib = Path(sysconfig.get_path("stdlib")).resolve()
         artifact_resolved = path.resolve()
@@ -2646,6 +2702,29 @@ class StateStore:
                 continue
 
             if rp.suffix == ".py":
+                cs = overlay_map.get(str(rp))
+                if cs is not None:
+                    # The seal overlay served the bundle's bytes —
+                    # record the sealed hash, not whatever the host
+                    # file holds at finalize. A divergent (or deleted)
+                    # host file is evidence of tampering, kept as
+                    # host_sha256, not silently substituted.
+                    entry = {
+                        "path": str(rp),
+                        "original_path": str(rp),
+                        "code_hash": cs.code_hash,
+                        "role": "code",
+                        "sha256": cs.code_hash,
+                        "size_bytes": cs.size_bytes,
+                    }
+                    try:
+                        host_hash = _digest_file(rp)
+                    except OSError:
+                        host_hash = None
+                    if host_hash is not None and host_hash != cs.code_hash:
+                        entry["host_sha256"] = host_hash
+                    captured.append(entry)
+                    continue
                 if not rp.is_file():
                     continue
                 try:
@@ -2662,20 +2741,30 @@ class StateStore:
                 })
                 continue
 
-            # Non-code file — an input or an output. Digest it only if
-            # it still exists at finalize; a vanished file is recorded
-            # honestly, not reconstructed.
-            role = "other" if flags["write"] else "input_data"
+            # Non-code path — an input, an output, or a directory the
+            # process probed. A directory open is provenance of what
+            # was touched, not consumed data: recorded, never digested
+            # (a directory has no file digest).
+            if rp.is_dir():
+                role = "directory"
+            else:
+                role = "other" if flags["write"] else "input_data"
             entry = {"path": str(rp), "role": role}
-            try:
-                entry["sha256"] = _digest_file(rp)
-                entry["size_bytes"] = rp.stat().st_size
-            except OSError as e:
+            if role == "directory":
                 entry["sha256"] = None
                 entry["size_bytes"] = None
-                entry["reason"] = (
-                    f"not readable at finalize: {e.__class__.__name__}"
-                )
+                entry["reason"] = "directory — not digested"
+            else:
+                try:
+                    entry["sha256"] = _digest_file(rp)
+                    entry["size_bytes"] = rp.stat().st_size
+                except OSError as e:
+                    entry["sha256"] = None
+                    entry["size_bytes"] = None
+                    entry["reason"] = (
+                        f"not readable at finalize: "
+                        f"{e.__class__.__name__}"
+                    )
             captured.append(entry)
 
         manifest = {

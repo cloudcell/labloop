@@ -581,3 +581,108 @@ url = "http://127.0.0.1:{claims_port}/mcp"
         assert ok, conn
     finally:
         _reap(procs, logs)
+
+
+# --- rc-5 C1: per-channel state rides the check payload -------------
+
+
+def test_channels_payload_carries_per_channel_state(store):
+    """rc-5 C1: the check payload exposes every channel's state — a
+    tools-only agent can attribute faults without resources/read."""
+    adaptor = MCPAdaptor({})
+    fake = FakeClaimsRole()
+    fake.last_operation = "recall"
+    fake.last_failed_operation = "assert_claim"
+    fake.last_failed_at = "2026-09-27T00:00:00+00:00"
+    fake.last_error = "OSError: pipe broke"
+    adaptor.register_claims(fake, {"url": "http://anamnesis/mcp"})
+
+    check = _connectivity(
+        run_checks(store, connectivity=adaptor.connectivity_report())
+    )
+    channels = {c["channel"]: c for c in check["channels"]}
+    assert {"optimizer", "executor", "data_source", "claims"} <= set(
+        channels
+    )
+    claims = channels["claims"]
+    assert claims["state"] == "down"
+    assert claims["last_failed_operation"] == "assert_claim"
+    assert claims["last_failed_at"] == "2026-09-27T00:00:00+00:00"
+
+
+def test_busy_channel_visible_not_a_violation(store):
+    """probe=busy on a live channel is informational — 'slow' is not
+    'down'; it must not count as a connectivity violation."""
+    conn = [
+        {"channel": "claims", "role": "claims",
+         "target": "http://x/mcp", "state": "up",
+         "probe": "busy", "last_probe_ms": 5000,
+         "last_error": "alive but not answering (ping timeout)"},
+        {"channel": "executor", "role": "executor",
+         "target": "local", "state": "up"},
+    ]
+    check = _connectivity(run_checks(store, connectivity=conn))
+    assert check["ok"] is True
+    assert check["violations"] == []
+    busy = next(
+        c for c in check["channels"] if c["channel"] == "claims"
+    )
+    assert busy["probe"] == "busy"
+
+
+# --- rc-5 C2: live connectivity substitutes the stale snapshot ------
+
+
+def _down_claims():
+    return [
+        {"channel": "claims", "role": "claims",
+         "target": "http://x/mcp", "state": "down",
+         "last_error": "ConnectError: refused",
+         "last_failed_at": "2026-09-27T00:00:00+00:00"},
+    ]
+
+
+def test_open_violations_heals_with_live_state(store, monkeypatch):
+    """A logged outage that has healed stops gating immediately —
+    the logged run stays as audit history; the gate reads the
+    present."""
+    from ml_episteme_mcp.enforcement import recurrence
+    from ml_episteme_mcp.integrity.checks import run_and_log
+
+    # The logged run saw the channel down — honest audit history.
+    run_and_log(store, connectivity=_down_claims(), trigger="test")
+
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY",
+        lambda: [{"channel": "claims", "role": "claims",
+                  "target": "http://x/mcp", "state": "up",
+                  "probe": "ok"}],
+    )
+    assert recurrence.open_violations(store) == []
+
+
+def test_open_violations_still_down_gates_with_stable_ref(
+    store, monkeypatch
+):
+    """A still-down channel stays open — keyed by the stable
+    channel:<name> ref so an acknowledgement can match it (a
+    whole-dict ref would churn on every last_failed_at update)."""
+    from ml_episteme_mcp.enforcement import recurrence
+    from ml_episteme_mcp.integrity.checks import run_and_log
+
+    run_and_log(store, connectivity=_down_claims(), trigger="test")
+    monkeypatch.setattr(
+        recurrence, "_LIVE_CONNECTIVITY", _down_claims)
+
+    openv = recurrence.open_violations(store)
+    assert len(openv) == 1
+    assert openv[0]["check"] == "upstream_connectivity"
+    assert openv[0]["object_ref"] == "channel:claims"
+
+    # Acknowledged → suppressed (the discharge path is preserved).
+    store.record_violation_ack(
+        ack_id="a1", check_name="upstream_connectivity",
+        object_ref="channel:claims", disposition="known outage",
+        decided_by="human:op", created_at="2026-01-01T00:00:00+00:00",
+    )
+    assert recurrence.open_violations(store) == []

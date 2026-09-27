@@ -169,7 +169,11 @@ class LocalDataHandler(DataSourceRole):
         result = json.loads(result_str)
 
         if result.get("status") != "completed":
-            raise RuntimeError(f"Generator failed: {result.get('error', result.get('stderr', 'unknown'))}")
+            err = result.get("error") or "unknown"
+            stderr = (result.get("stderr") or "").strip()
+            if stderr:
+                err = f"{err}; stderr: {stderr[-500:]}"
+            raise RuntimeError(f"Generator failed: {err}")
 
         # Compute hash
         content_hash = _sha256_file(output_path)

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from ml_episteme_mcp.state.models import (
-    Hypothesis, Programme, ProgrammeStatus, Trial, TrialStatus,
+    Bundle, Hypothesis, Programme, ProgrammeStatus, Trial, TrialStatus,
 )
 from ml_episteme_mcp.state.store import StateStore
 
@@ -479,3 +479,215 @@ def test_executed_code_view_renders_v2_rows(store):
     assert "sha256:" + "b" * 64 in html
     assert "IsADirectoryError" in html
     assert "excluded by policy" in html
+
+
+# ---- rc-5 A1: overlay-served code records the SEALED hash ---------
+
+
+def _seal_trial(store, code: Path, trial_id: str) -> str:
+    """Capture code into a linked bundle and mark the trial's executor
+    record seal_enforced — the state a real overlay run leaves."""
+    sealed_hash = store.capture_code_from_path(str(code))
+    store.create_bundle(Bundle(
+        id=f"b-{trial_id}", trial_id=trial_id, code_ref=str(code),
+        code_hash=sealed_hash, env_ref="python3.12",
+        seeds_json="[1]", splits_json="{}",
+    ))
+    store.link_bundle(trial_id, f"b-{trial_id}")
+    store.update_trial_executor_output(trial_id, json.dumps({
+        "status": "completed", "exit_code": 0,
+        "sandbox": "minimal", "seal_enforced": True,
+    }))
+    return sealed_hash
+
+
+def test_overlay_served_code_records_sealed_hash(store, tmp_path):
+    """A post-capture host edit must NOT change what the manifest
+    claims ran — the overlay served the bundle's bytes, so the
+    manifest records the sealed hash and keeps the drifted host
+    digest as host_sha256 evidence (rc-5 sealed F1)."""
+    tid = _seed_trial(store)
+    code = tmp_path / "train.py"
+    code.write_text("print('v1')\n")
+    sealed_hash = _seal_trial(store, code, tid)
+
+    code.write_text("print('TAMPERED — this never ran')\n")
+
+    art = tmp_path / "art"
+    art.mkdir()
+    _fake_trace(art, [
+        f'10 openat(AT_FDCWD, "{code}", O_RDONLY|O_CLOEXEC) = 3',
+    ])
+    result = store.capture_executed_code(tid, art)
+    entry = next(
+        f for f in result["captured"]
+        if f["path"] == str(code.resolve())
+    )
+    assert entry["sha256"] == sealed_hash
+    assert entry["code_hash"] == sealed_hash
+    assert entry["host_sha256"] == _sha(code.read_bytes())
+
+    manifest = json.loads((art / "executed_code.json").read_text())
+    mentry = next(
+        f for f in manifest["files"]
+        if f["path"] == str(code.resolve())
+    )
+    assert mentry["sha256"] == sealed_hash
+    assert mentry["host_sha256"] == _sha(code.read_bytes())
+
+
+def test_overlay_sealed_host_deleted_keeps_hash(store, tmp_path):
+    """Deleting the host file after the run must not erase the
+    provenance — the sealed hash still lands, with no host digest."""
+    tid = _seed_trial(store)
+    code = tmp_path / "train.py"
+    code.write_text("print('v1')\n")
+    sealed_hash = _seal_trial(store, code, tid)
+    code.unlink()
+
+    art = tmp_path / "art"
+    art.mkdir()
+    _fake_trace(art, [
+        f'10 openat(AT_FDCWD, "{code}", O_RDONLY|O_CLOEXEC) = 3',
+    ])
+    result = store.capture_executed_code(tid, art)
+    entry = next(
+        f for f in result["captured"]
+        if f["path"] == str(code.resolve())
+    )
+    assert entry["sha256"] == sealed_hash
+    assert "host_sha256" not in entry
+
+
+def test_unsealed_run_hashes_host_file(store, tmp_path):
+    """seal_enforced is the gate: sandbox=none really ran the live
+    file — substituting the sealed hash would falsify the record in
+    the opposite direction."""
+    tid = _seed_trial(store)
+    code = tmp_path / "train.py"
+    code.write_text("print('v1')\n")
+    sealed_hash = store.capture_code_from_path(str(code))
+    store.create_bundle(Bundle(
+        id="b-u", trial_id=tid, code_ref=str(code),
+        code_hash=sealed_hash, env_ref="python3.12",
+        seeds_json="[1]", splits_json="{}"))
+    store.link_bundle(tid, "b-u")
+    # _seed_trial's executor record carries no seal_enforced → falsy.
+    code.write_text("print('edited — this ran')\n")
+
+    art = tmp_path / "art"
+    art.mkdir()
+    _fake_trace(art, [
+        f'10 openat(AT_FDCWD, "{code}", O_RDONLY|O_CLOEXEC) = 3',
+    ])
+    result = store.capture_executed_code(tid, art)
+    entry = next(
+        f for f in result["captured"]
+        if f["path"] == str(code.resolve())
+    )
+    assert entry["sha256"] == _sha(code.read_bytes())
+    assert entry["sha256"] != sealed_hash
+    assert "host_sha256" not in entry
+
+
+def test_sealed_manifest_passes_strace_divergence(store, tmp_path):
+    """A correctly recorded sealed run is not 'divergence': the
+    manifest's hash matches the bundle even though the host file
+    drifted — drift is host_sha256 evidence, not escaped code."""
+    from ml_episteme_mcp.integrity.checks import run_checks
+
+    tid = _seed_trial(store)
+    code = tmp_path / "m.py"
+    code.write_text("x = 1\n")
+    _seal_trial(store, code, tid)
+    code.write_text("x = 2\n")
+
+    art = tmp_path / "art"
+    art.mkdir()
+    _fake_trace(art, [
+        f'10 openat(AT_FDCWD, "{code}", O_RDONLY|O_CLOEXEC) = 3',
+    ])
+    store.capture_executed_code(tid, art)
+    manifest = json.loads((art / "executed_code.json").read_text())
+    _attach_manifest_blob(store, tid, manifest)
+    chk = next(
+        c for c in run_checks(store)["checks"]
+        if c["name"] == "strace_divergence"
+    )
+    assert chk["ok"] is True, chk["violations"]
+
+
+# ---- rc-5 A2: directories are provenance, not undigested data -----
+
+
+def test_directory_open_records_directory_role(store, tmp_path):
+    """An opened directory (cwd/stdlib probing) is recorded as
+    role='directory', never digested — a dir has no file digest."""
+    art = tmp_path / "art"
+    art.mkdir()
+    d = tmp_path / "pkgdir"
+    d.mkdir()
+    _fake_trace(art, [
+        f'10 openat(AT_FDCWD, "{d}", O_RDONLY|O_CLOEXEC) = 3',
+    ])
+    result = store.capture_executed_code("t1", art)
+    entry = next(
+        f for f in result["captured"]
+        if f["path"] == str(d.resolve())
+    )
+    assert entry["role"] == "directory"
+    assert entry["sha256"] is None
+    assert entry["reason"]
+
+
+def test_directory_rows_do_not_trip_undigested(store):
+    """Both shapes are exempt: new manifests role them 'directory';
+    pre-role manifests recorded input_data + IsADirectoryError."""
+    from ml_episteme_mcp.integrity.checks import run_checks
+
+    tid = _seed_trial(store)
+    _attach_manifest_blob(store, tid, {
+        "schema_version": 2,
+        "files": [
+            {"path": "/usr/lib/python3.12", "role": "directory",
+             "sha256": None, "reason": "directory — not digested"},
+            {"path": "/work/cwd", "role": "input_data",
+             "sha256": None,
+             "reason": "not readable at finalize: IsADirectoryError"},
+        ],
+    })
+    chk = next(
+        c for c in run_checks(store)["checks"]
+        if c["name"] == "input_data_undigested"
+    )
+    assert chk["ok"] is True, chk["violations"]
+
+
+async def test_acked_violation_annotated_in_payload(store):
+    """An acknowledged row stays visible in the check payload but is
+    marked acknowledged — the logged record is untouched (canonical
+    refs stay stable for future acks)."""
+    from ml_episteme_mcp.server import create_server
+
+    mcp = create_server(
+        store, enforcement_config={"recurrent_protocol": False})
+    tid = _seed_trial(store)
+    _attach_manifest_blob(store, tid, {
+        "schema_version": 2,
+        "files": [
+            {"path": "/d.json", "role": "input_data",
+             "sha256": None, "reason": "not readable"},
+        ],
+    })
+    store.record_violation_ack(
+        ack_id="ack-1", check_name="input_data_undigested",
+        object_ref=tid, disposition="test", decided_by="agent:t",
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    r = await mcp.call_tool("check_invariants", {})
+    payload = json.loads(r.content[0].text)
+    chk = next(
+        c for c in payload["checks"]
+        if c["name"] == "input_data_undigested"
+    )
+    assert chk["violations"][0]["acknowledged"] is True

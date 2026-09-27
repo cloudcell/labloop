@@ -9,14 +9,19 @@ lab. Filenames: `<UTC-timestamp>-<slug>.md` (same convention as docs/).
 Every diagnostic prompt ends with a DELIVERABLE section requiring the
 agent to:
 
-1. Write its findings into `/home/lab/workspace/diagnostics-out/<slug>/`
+1. Write its findings into `/srv/lab/exchange/diagnostics-out/<slug>/`
    — `report.md` plus evidence files (verbatim tool results, JSON
    snapshots, computed counts). The slug is the filename minus
-   timestamp and `.md`.
+   timestamp and `.md`. **`labloop-export` only accepts paths under
+   `/srv/lab/exchange/`** (path mode is pinned there) — stage the out
+   dir directly under the exchange root, not the workspace — rc-5
+   found every prompt staging under the agent's home workspace, which
+   the export refuses; the path is pinned for that reason, not by
+   convention.
 2. Stage the deliverable for host retrieval:
 
    ```bash
-   labloop-export /home/lab/workspace/diagnostics-out/<slug>
+   labloop-export /srv/lab/exchange/diagnostics-out/<slug>
    ```
 
 3. Report the staged export path, byte count and sha256 verbatim.
@@ -50,3 +55,25 @@ From the host:
 ```
 
 `diagnostics-out/` is a run artifact — gitignored.
+
+## Inventory
+
+| Prompt | Verifies |
+| --- | --- |
+| `20260926-0552Z-recurrent-protocol-smoke` | End-to-end Loop-0/Loop-1 cycle smoke test |
+| `20260926-0624Z-blob-retrieval-and-input-digests` | Blob retrieval, input-data digesting |
+| `20260926-0713Z-state-machine-coverage` | Lifecycle state-machine coverage across servers |
+| `20260926-2056Z-sealed-path-runtime-deny` | Sealed-path runtime deny-list semantics |
+| `20260927-0004Z-write-boundary-gates` | Write-boundary gates (rc-4 fixes) |
+| `20260927-0005Z-connectivity-fault-observability` | Connectivity fault observability (rc-4) |
+| `20260927-0006Z-campaign-orchestration` | Orchestrated campaign/spawn lifecycle (rc-4) |
+| `20260927-0305Z-sealed-provenance-honesty` | rc-5: sealed-manifest hash honesty, `host_sha256`, deleted-target launch refusal, directory role, `input_data_undigested` exemption + ack annotation, vacuous-check `skipped` |
+| `20260927-0310Z-campaign-metric-write-gate` | rc-5: `record_campaign_result` primary-metric write gate |
+| `20260927-0315Z-roster-rollback-derivation` | rc-5: `rolled_back` derivation, dry-run preview, latest-verdict-wins un-roll |
+| `20260927-0320Z-connectivity-live-gating` | rc-5: `channels` observability array ×5, live-over-logged gating, `channel:` ack refs |
+| `20260927-0325Z-trial-terminal-precedence` | rc-5: persisted-terminal status precedence, `mark_retryable` cancellation, `prepare_data` stderr surfacing |
+| `20260927-0330Z-boundary-class-registry` | rc-5: boundary-class registry discoverability, kernel authoritative classification, `rejected` reachability |
+
+The `20260927-03xxZ` set is the rc-5 verification battery — each
+targets one rc-5 fix and exercises both the valid path and the
+negative/refused path the fix introduces.
