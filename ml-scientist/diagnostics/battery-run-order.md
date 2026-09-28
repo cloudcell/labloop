@@ -16,7 +16,7 @@ run:
 | anamnesis | 4 | — |
 | arete | 12 | — |
 | episteme | **12** | 11 = pre-rc-7b |
-| zetesis | **14** | 13 = pre-rc-8 |
+| zetesis | **15** | 14 = pre-rc-9; 13 = pre-rc-8 |
 
 Plus: `read_resource` must appear in every server's tool list, and
 `assert_claim` must accept `valid_until`. Any miss → wrong build;
@@ -34,8 +34,15 @@ stop, redeploy, restart.
    re-measuring rc-6 — do not interpret downstream failures as new
    regressions.
 
-## Phase 2 — rc-7b regression prompts
+## Phase 2 — regression prompts
 
+1. **`20260928-1608Z-rc9-findings`** — verifies all six rc-9 fixes:
+   the new `incomplete_campaigns` check (15th zetesis check —
+   `camp-4f94d190` residue from the rc-9 run is the fixture),
+   `rollback` claim minting, Loop-0 `RefType` members, episteme
+   `source_id` provenance, dedup `valid_until` echo, and the
+   `open_arm_campaign` docstring mechanism. ~15–20 min, no sleeps.
+   Runs its own 15-check fingerprint first.
 2. **`20260927-1910Z-claim-valid-until-expiry`** — pure anamnesis
    reads/writes, no other server involved, ~1 min of wall time
    (one 5 s expiry wait). Cheapest prompt; good smoke test that the

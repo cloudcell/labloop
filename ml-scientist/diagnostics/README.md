@@ -85,7 +85,8 @@ From the host:
 | `20260927-1900Z-cancel-spawn-window-kill` | rc-7b: shielded spawn — cancel inside `create_subprocess_exec` kills the child (R1), late finalize keeps the full terminal row (R2), `terminal_with_live_executor` residue check (R3) |
 | `20260927-1905Z-channel-lasterror-heals` | rc-7b: `last_error` clears on connect/call/ping success across all four upstream clients; `last_failed_*` stay sticky (R4) |
 | `20260927-1910Z-claim-valid-until-expiry` | rc-7b: `assert_claim(valid_until=…)` — live→expired write path, normalization, naive/garbage refusals, row never deleted (R6) |
-| `20260927-1915Z-rc7-surface-verification` | rc-7 deferred verification — the last VM run predated the deploy: `read_resource` ×5 + agora routing, 13-check zetesis incl. `unrunnable_campaigns`, `abandoned_at`, `list_trials.retry_reason`, generator stdout error, artifact typing |
+| `20260927-1915Z-rc7-surface-verification` | rc-7 deferred verification — the last VM run predated the deploy: `read_resource` ×5 + agora routing, 15-check zetesis incl. `unrunnable_campaigns`, `abandoned_at`, `list_trials.retry_reason`, generator stdout error, artifact typing |
+| `20260928-1608Z-rc9-findings` | rc-9: `incomplete_campaigns` check (15th; `camp-4f94d190` residue is the fixture), `rollback` claim minting, Loop-0 `RefType` members (`candidate`/`contract`/`decision`), episteme `source_id`=conclusion, dedup `valid_until` echo, `open_arm_campaign` docstring mechanism |
 
 The `20260927-03xxZ` set is the rc-5 verification battery — each
 targets one rc-5 fix and exercises both the valid path and the

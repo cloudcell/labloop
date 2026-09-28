@@ -6,9 +6,9 @@ on what it tells you.
 This session verifies the rc-7 surface — the prior extraction ran a
 PRE-rc-7 build (zetesis reported 12 checks, `read_resource` absent),
 so none of rc-7's fixes have ever been exercised on this lab. If the
-tool surface still lacks `read_resource` or zetesis still runs 12
-checks, say so loudly at the top of the report — the build is stale
-and everything below is N/A, not failed.
+tool surface still lacks `read_resource` or zetesis runs fewer than
+15 checks, say so loudly at the top of the report — the build is
+stale and everything below is N/A, not failed.
 
 Marker tag: `diag-rc7`. Report every refusal verbatim — errors are
 data.
@@ -32,7 +32,8 @@ PART A — read_resource (rc-7 Q6): the missing verb
 PART B — unrunnable_campaigns (rc-7 Q3) + abandoned_at (Q5)
 
 4. zetesis check_invariants → report the FULL checks array: expect
-   13 checks including `unrunnable_campaigns` by name.
+   15 checks including `unrunnable_campaigns`,
+   `campaigns_awaiting_verdict`, and `incomplete_campaigns` by name.
 5. Construct the wedge it detects: open_campaign with a budget that
    cannot carry a spawn (read the open_campaign schema and craft the
    minimal non-carryable budget — e.g. zero trials/seeds capacity).
@@ -86,7 +87,7 @@ PART D — honest bookkeeping
     checks say rather than clearing your way out.
 15. If any step could not be reached — say which and why; a skipped
     step must be louder than a passing one. A stale build (missing
-    read_resource, 12 checks) voids the whole battery — say so.
+    read_resource, <15 checks) voids the whole battery — say so.
 
 While you work:
 - When a tool call refuses, read the error and do exactly what it says.
