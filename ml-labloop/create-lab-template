@@ -302,11 +302,28 @@ fix_esp_offline() {
     # up. Write the fallback loader while the domain is offline (the
     # provisioning-time grub-install further down re-asserts it). Domain
     # MUST be shut off when this runs — virt-customize refuses a live one.
-    command -v virt-customize >/dev/null || return 0
-    sudo virt-customize --no-network -d "$VM" \
-        --run-command 'grub-install --target=x86_64-efi \
-            --efi-directory=/boot/efi --removable --no-nvram || true' \
-        >/dev/null 2>&1 || true
+    if ! command -v virt-customize >/dev/null; then
+        echo "    WARN: virt-customize (libguestfs-tools) missing — cannot" >&2
+        echo "          write the UEFI fallback. If the guest lands at a" >&2
+        echo "          'Shell>' prompt: FS0: then \\EFI\\ubuntu\\grubx64.efi" >&2
+        return 0
+    fi
+    note "ESP fallback loader (offline, virt-customize)"
+    if ! sudo virt-customize --no-network -d "$VM" --run-command '
+            grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+                --removable --no-nvram \
+            || { mkdir -p /boot/efi/EFI/BOOT
+                 cp /boot/efi/EFI/ubuntu/shimx64.efi \
+                    /boot/efi/EFI/BOOT/BOOTX64.EFI 2>/dev/null \
+                 || cp /boot/efi/EFI/ubuntu/grubx64.efi \
+                    /boot/efi/EFI/BOOT/BOOTX64.EFI
+                 cp /boot/efi/EFI/ubuntu/grubx64.efi \
+                    /boot/efi/EFI/BOOT/grubx64.efi
+                 cp /boot/efi/EFI/ubuntu/grub.cfg \
+                    /boot/efi/EFI/BOOT/grub.cfg; }'; then
+        echo "    WARN: ESP fallback write failed — if the guest lands at" >&2
+        echo "          a 'Shell>' prompt: FS0: then \\EFI\\ubuntu\\grubx64.efi" >&2
+    fi
 }
 
 note "waiting for qemu-guest-agent in $VM"

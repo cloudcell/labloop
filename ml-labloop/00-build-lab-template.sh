@@ -31,6 +31,7 @@ declare -A PKG=(
     [xorriso]=xorriso
     [virt-viewer]=virt-viewer
     [virt-manager]=virt-manager
+    [virt-customize]=libguestfs-tools   # offline ESP fallback fix
 )
 missing=()
 for cmd in "${!PKG[@]}"; do
