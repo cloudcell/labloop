@@ -238,6 +238,25 @@ else
         --video virtio \
         --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0 \
         --boot uefi --noautoconsole
+    # virt-install's emitted boot order is version-dependent: some builds
+    # write only <boot dev='hd'/> under firmware='efi', which drops a fresh
+    # domain into the UEFI shell (blank disk). Pin cdrom-first ordering;
+    # <os> can't change on a live domain, so a define alone isn't enough —
+    # destroy+start re-runs OVMF on the fixed XML (seconds into boot, safe).
+    $VIRSH dumpxml "$VM" > "$WORK/dom-boot.xml"
+    if ! grep -q "<boot dev='cdrom'/>" "$WORK/dom-boot.xml"; then
+        if grep -q "<boot dev='hd'/>" "$WORK/dom-boot.xml"; then
+            sed -i "s|<boot dev='hd'/>|<boot dev='cdrom'/>\n    <boot dev='hd'/>|" \
+                "$WORK/dom-boot.xml"
+        else  # no <boot dev> at all — OVMF-managed order; pin both
+            sed -i "s|</os>|    <boot dev='cdrom'/>\n    <boot dev='hd'/>\n  </os>|" \
+                "$WORK/dom-boot.xml"
+        fi
+        $VIRSH define "$WORK/dom-boot.xml" >/dev/null
+        note "boot order lacked cdrom — restarting domain on fixed XML"
+        $VIRSH destroy "$VM" 2>/dev/null || true
+        $VIRSH start "$VM" >/dev/null
+    fi
     if [[ "$ISO" == *auto* ]]; then
     cat <<EOF
 
