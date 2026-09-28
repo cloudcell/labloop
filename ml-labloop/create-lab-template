@@ -201,16 +201,31 @@ else
         done
     }
     if ! iso_readable "$ISO"; then
-        die "ISO not readable by '$qemu_user' (qemu:///system backend).
+        # Stage a second dentry under libvirt's storage: a hardlink shares
+        # the inode (no copy) and QEMU only traverses the NEW path — a
+        # symlink would not help, the target's ancestors still gate access.
+        # install(1) fallback covers cross-filesystem homes (EXDEV).
+        staged="/var/lib/libvirt/images/labloop-iso/$(basename "$ISO")"
+        note "ISO not readable by '$qemu_user' — staging into libvirt storage"
+        if sudo mkdir -p "${staged%/*}" \
+            && { sudo ln -f "$ISO" "$staged" 2>/dev/null \
+                 || sudo install -m 0644 "$ISO" "$staged"; } \
+            && iso_readable "$staged"; then
+            ISO="$staged"
+            note "staged: $ISO"
+        else
+            die "ISO not readable by '$qemu_user' and auto-stage failed.
 
-  fix — either move it into libvirt's storage:
-      sudo cp \"$ISO\" /var/lib/libvirt/images/
-      LABLOOP_ISO=/var/lib/libvirt/images/$(basename "$ISO") $0 $VM
+  stage it yourself (no ACLs on your home needed):
+      sudo mkdir -p /var/lib/libvirt/images/labloop-iso
+      sudo cp \"$ISO\" /var/lib/libvirt/images/labloop-iso/
+      LABLOOP_ISO=/var/lib/libvirt/images/labloop-iso/$(basename "$ISO") $0 $VM
   or grant search + read via ACL:
       p=\"$ISO\"; while [ \"\$p\" != / ]; do
           sudo setfacl -m u:$qemu_user:x \"\$p\"; p=\$(dirname \"\$p\")
       done
       sudo setfacl -m u:$qemu_user:r \"$ISO\""
+        fi
     fi
     note "virt-install: $VM (${MEM_MIB}MiB / ${VCPUS}vcpu / 80G qcow2 / UEFI / SPICE)"
     virt-install --connect qemu:///system --name "$VM" \

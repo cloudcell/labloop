@@ -107,7 +107,11 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "A trial that ran with <code>seal_enforced=false</code> under "
         "an enforcing sandbox mode — the code that ran was not "
         "content-sealed, so 'what executed' is not pinned to the "
-        "recorded bundle.",
+        "recorded bundle. <code>code://</code> bundles are exempt: "
+        "they seal via content address (the executed bytes come from "
+        "the content store), with filesystem overlays armed "
+        "additionally whenever the snippet's original path exists on "
+        "the host.",
     ),
     (
         "strace_divergence",

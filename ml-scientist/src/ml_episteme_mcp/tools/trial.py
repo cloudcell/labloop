@@ -1075,7 +1075,39 @@ def register(
             # live file and is flagged by the executed_code.json
             # divergence check — surfaced, not silent.
             overlay_ro: list[tuple[str, str]] = []
-            if not bundle.code_ref.startswith("code://"):
+            if bundle.code_ref.startswith("code://"):
+                # Content-addressed bundles: code delivery is the
+                # inlined/materialized bytes — the overlay only shadows
+                # live original paths (direct open() and imports deeper
+                # than _deps' 3-component reconstruction would otherwise
+                # read drifted host content). Filter to targets that are
+                # files on this host: a missing original path has
+                # nothing to shadow, and bwrap cannot create a
+                # mountpoint inside a read-only namespace (the rerun
+                # host legitimately may not have the file). is_file(),
+                # not exists() — binding a file over a directory fails
+                # at launch.
+                try:
+                    overlay_ro = [
+                        (src, target)
+                        for src, target in _stage_sealed_code(
+                            store, bundle, artifact_dir
+                        )
+                        if Path(target).is_file()
+                    ]
+                except Exception as e:
+                    store.update_trial_status(trial_id, "failed")
+                    return fail(json.dumps({
+                        "error": f"Failed to stage sealed bundle code: {e}",
+                    }))
+            else:
+                # File-path bundles take the UNFILTERED list: the
+                # wrapper imports run_training *from the original path*,
+                # so the overlay is the delivery channel, not just
+                # shadowing. A deleted live file must get sealed bytes
+                # from the mount (minimal) or fail closed (full) —
+                # skipping it would let a post-seal deletion defeat the
+                # seal.
                 try:
                     overlay_ro = _stage_sealed_code(store, bundle, artifact_dir)
                 except Exception as e:

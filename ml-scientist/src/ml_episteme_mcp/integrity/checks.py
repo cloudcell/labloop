@@ -209,10 +209,20 @@ def _iso_age_seconds(ts: str) -> float:
 
 def _check_unsealed_execution(store) -> dict:
     """Trials that executed with seal_enforced=false under a sandbox
-    mode that should have applied the seal — a bypassed boundary."""
+    mode that should have applied the seal — a bypassed boundary.
+
+    code:// bundles seal via content address, not via filesystem
+    overlay: the executed bytes come from the content store, and a
+    host without the snippet's original_path has nothing to shadow.
+    Those rows are exempt — sealed via content address. (With overlay
+    staging, code:// runs whose original paths DO exist on the host
+    arm overlays like file-path bundles; if the stage itself failed,
+    sandbox_setup_failed/launch_refused cover it.)"""
     rows = store._fetchall(
-        """SELECT id, executor_output_json FROM trials
-           WHERE executor_output_json IS NOT NULL"""
+        """SELECT t.id, t.executor_output_json, b.code_ref
+           FROM trials t
+           LEFT JOIN bundles b ON b.id = t.bundle_id
+           WHERE t.executor_output_json IS NOT NULL"""
     )
     violations = []
     for r in rows:
@@ -225,6 +235,7 @@ def _check_unsealed_execution(store) -> dict:
             and out.get("sandbox") in ("minimal", "full")
             and not out.get("launch_refused")
             and not out.get("sandbox_setup_failed")
+            and not (r["code_ref"] or "").startswith("code://")
         ):
             violations.append(r["id"])
     return _res(

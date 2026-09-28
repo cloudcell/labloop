@@ -25,11 +25,10 @@ newest dated template automatically (override with an argument or
 
 > **ISO location matters.** `qemu:///system` runs guests as the
 > `libvirt-qemu` account, which must *traverse* every directory above
-> the ISO — a checkout under `$HOME` (mode 0700/0750) fails at boot
-> with `Permission denied` on the blockdev. Keep the ISO in
-> `/var/lib/libvirt/images/`, or `setfacl -m u:libvirt-qemu:x` each
-> parent dir plus `u:libvirt-qemu:r` on the ISO. `create-lab-template`
-> preflights this and prints the fix before virt-install runs.
+> the ISO — a checkout under `$HOME` (mode 0700/0750) can't be read.
+> `create-lab-template` detects this and hardlinks the ISO into
+> `/var/lib/libvirt/images/labloop-iso/` automatically (copy fallback
+> across filesystems) — no permissions on your home are ever changed.
 
 Day to day:
 

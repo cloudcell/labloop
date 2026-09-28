@@ -43,9 +43,10 @@ Requires KVM/libvirt on a Linux host. From `ml-labloop/`:
 ```
 
 The Mint ISO must be readable by `libvirt-qemu` (the `qemu:///system`
-backend account) — keep it in `/var/lib/libvirt/images/` rather than
-under `$HOME`, or `create-lab-template` will refuse with the fix
-spelled out.
+backend account). A checkout under `$HOME` is normally unreadable to
+it — `create-lab-template` detects that and hardlinks the ISO into
+`/var/lib/libvirt/images/labloop-iso/` automatically (sudo prompt,
+no ACLs on your home; copy fallback across filesystems).
 
 A locally built VM boots with login `lab` / password `lab` — change it
 after first login.
