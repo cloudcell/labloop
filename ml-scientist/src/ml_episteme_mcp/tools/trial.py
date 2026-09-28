@@ -1101,69 +1101,89 @@ def register(
                 if timeout_seconds else None
             )
 
-            # Try synchronous execution with a short initial wait.
-            # If the executor doesn't finish in time, fall back to async dispatch.
-            try:
-                output = await asyncio.wait_for(
-                    adaptor.executor.execute_code(
-                        execution_code,
-                        artifact_dir=artifact_dir,
-                        trial_id=trial_id,
-                        programme_id=programme_id,
-                        bundle_id=bundle.id,
-                        extra_ro_paths=extra_ro_paths,
-                        python_exe=python_exe,
-                        overlay_ro=overlay_ro,
-                        timeout_seconds=trial_timeout,
-                    ),
-                    timeout=_submit_wait,
-                )
-                # Synchronous path — job finished within the wait window
-                return _finalize_trial(
-                    store, trial_id, output,
-                    sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
-                )
-            except asyncio.TimeoutError:
-                # The job didn't finish in the wait window — dispatch async
-                output = await adaptor.executor.execute_code_async(
-                    trial_id, execution_code,
-                    artifact_dir=artifact_dir,
-                    programme_id=programme_id,
-                    bundle_id=bundle.id,
-                    extra_ro_paths=extra_ro_paths,
-                    python_exe=python_exe,
-                    overlay_ro=overlay_ro,
-                    timeout_seconds=trial_timeout,
+            # Re-check the row immediately before dispatch: wrapper
+            # generation, data-ref resolution and seal staging are all
+            # await points where a concurrent mark_retryable/
+            # cancel_trial could already have terminalized the row —
+            # spawning under a terminal record is the R1 leak.
+            fresh = store.get_trial(trial_id)
+            if fresh is not None and fresh.status.value in (
+                "completed", "failed", "retryable", "abandoned",
+            ):
+                return ok({
+                    "trial_id": trial_id,
+                    "status": fresh.status.value,
+                    "message": "Trial went terminal before dispatch — "
+                               "no execution was spawned.",
+                })
+
+            # Dispatch-first, then wait: execute_code_async registers
+            # the task in _running_tasks immediately, so the whole
+            # submit window is killable — a cancel at any point below
+            # has a task to reach. The old probe-then-redispatch pair
+            # ran an anonymous synchronous execute_code for
+            # _submit_wait (invisible to cancel_async) and then spawned
+            # a SECOND child on timeout: two subprocesses per long
+            # trial, and a consumed cancel resurrected as a leaked
+            # run-to-completion. await_async waits shielded — the
+            # timeout below reports 'running' without cancelling.
+            output = await adaptor.executor.execute_code_async(
+                trial_id, execution_code,
+                artifact_dir=artifact_dir,
+                programme_id=programme_id,
+                bundle_id=bundle.id,
+                extra_ro_paths=extra_ro_paths,
+                python_exe=python_exe,
+                overlay_ro=overlay_ro,
+                timeout_seconds=trial_timeout,
+            )
+            output_data = _parse_executor_output(output)
+            if output_data.get("status") == "running":
+                output = await adaptor.executor.await_async(
+                    trial_id, timeout_seconds=_submit_wait,
                 )
                 output_data = _parse_executor_output(output)
-                if output_data.get("status") == "running":
-                    # Spawn a background task to auto-finalize the trial
-                    # when the executor finishes. This means the client
-                    # doesn't need to poll — the trial is marked
-                    # completed/failed automatically.
-                    asyncio.create_task(
-                        _auto_finalize(
-                            trial_id, store, adaptor,
-                            poll_seconds=_finalize_poll,
-                            sealed_patterns=_exec_cfg.get(
-                                "sealed_path_patterns"
-                            ),
-                        )
+
+            if output_data.get("status") == "running":
+                # Spawn a background task to auto-finalize the trial
+                # when the executor finishes. This means the client
+                # doesn't need to poll — the trial is marked
+                # completed/failed automatically.
+                asyncio.create_task(
+                    _auto_finalize(
+                        trial_id, store, adaptor,
+                        poll_seconds=_finalize_poll,
+                        sealed_patterns=_exec_cfg.get(
+                            "sealed_path_patterns"
+                        ),
                     )
-                    return ok({
-                        "trial_id": trial_id,
-                        "status": "running",
-                        "message": "Trial is running in the background. "
-                        "It will be auto-finalized when the executor "
-                        "completes. Use get_trial_status to poll for the "
-                        "result, or call record_observation once the trial "
-                        "reaches 'completed'.",
-                    })
-                # If async dispatch returned a result immediately, finalize
-                return _finalize_trial(
-                    store, trial_id, output,
-                    sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
                 )
+                return ok({
+                    "trial_id": trial_id,
+                    "status": "running",
+                    "message": "Trial is running in the background. "
+                    "It will be auto-finalized when the executor "
+                    "completes. Use get_trial_status to poll for the "
+                    "result, or call record_observation once the trial "
+                    "reaches 'completed'.",
+                })
+            # The wait produced a terminal result — including
+            # 'cancelled' (a tombstoned pre-dispatch cancel, or a
+            # task killed mid-wait). If the row already went
+            # terminal, report its state rather than finalizing
+            # over it.
+            fresh = store.get_trial(trial_id)
+            if fresh is not None and fresh.status.value in (
+                "completed", "failed", "retryable", "abandoned",
+            ):
+                return ok({
+                    "trial_id": trial_id,
+                    "status": fresh.status.value,
+                })
+            return _finalize_trial(
+                store, trial_id, output,
+                sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
+            )
         except Exception as e:
             # Only mark failed if the trial is not already terminal
             # (completed/failed/retryable are terminal — can't transition out)
@@ -1297,8 +1317,10 @@ def register(
         running → failed: kills the subprocess, marks failed. The
         record's `failed` here reflects the cancellation act, not an
         observed execution failure — `cancelled: true` in the payload
-        marks the distinction, and a `"No running task"` executor
-        error means the executor had already finished first.
+        marks the distinction, and an `already finished` executor
+        reply means the executor completed first. A cancel landing
+        before the task registers tombstones the id so no child can
+        spawn under the terminal row.
         designed → abandoned: no executor to kill, no evidence lost —
         the honest terminal for a design that will never run (e.g. a
         bundle locked to code that no longer exists). The FSM has

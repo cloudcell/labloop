@@ -1100,11 +1100,29 @@ def register(
                     ) is not None
                     and not store.list_campaign_spawns(campaign_id)
                 )
-                hint = (
-                    " Its budget cannot spawn programmes — "
-                    "abandon_campaign is the exit."
-                    if spawn_blocked else ""
-                )
+                if spawn_blocked:
+                    hint = (
+                        " Its budget cannot spawn programmes — "
+                        "abandon_campaign is the exit."
+                    )
+                elif store.list_campaign_spawns(campaign_id):
+                    # Spawn-linked (opened via arete's
+                    # open_arm_campaign): each arm campaign is a
+                    # complete two-arm campaign — both sides must be
+                    # populated. campaign_arm defaults to 'challenger'
+                    # on spawn_arm_programme, so a single-sided fill
+                    # means the caller never spawned a champion-side
+                    # programme — say so, don't just say 'run more'.
+                    hint = (
+                        " This campaign is spawn-linked — both sides "
+                        "must be populated on the same campaign: spawn "
+                        "the missing side via arete's "
+                        "spawn_arm_programme(campaign_arm="
+                        f"'{'|'.join(missing)}') and record its "
+                        "result."
+                    )
+                else:
+                    hint = ""
                 return fail(json.dumps({
                     "error": f"Campaign has no {campaign.primary_metric} "
                     f"results for arm(s) {'|'.join(missing)} — both "

@@ -191,7 +191,11 @@ class LocalDataHandler(DataSourceRole):
             f"    print(json.dumps({{'error': 'generator does not expose generate_data(config, output_path)'}}))\n"
             f"    sys.exit(1)\n"
             f"\n"
-            f"config = {config_json}\n"
+            # Inject the config as a JSON *string literal* parsed at
+            # runtime — json.dumps emits null/true/false which are not
+            # valid Python, so splicing the object verbatim dies with
+            # NameError on any None/bool value.
+            f"config = json.loads({config_json!r})\n"
             f"output_path = {repr(str(output_path))}\n"
             f"module.generate_data(config, output_path)\n"
         )

@@ -145,6 +145,33 @@ class ExecutorRole(ABC):
         """
         return '{"status": "unknown"}'
 
+    async def await_async(
+        self, trial_id: str, timeout_seconds: float
+    ) -> str:
+        """Await an already-dispatched async execution for up to
+        ``timeout_seconds``, then return its status.
+
+        The wait MUST NOT cancel the underlying execution — a timeout
+        here means 'still running', and the caller reports that state
+        rather than aborting the work. Default polls
+        ``get_async_status``; executors holding a live task object
+        (LocalExecutor) override with a shielded task wait.
+        """
+        import asyncio
+
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        while True:
+            status = self.get_async_status(trial_id)
+            try:
+                data = json.loads(status)
+            except ValueError:
+                data = {"status": "unknown"}
+            if data.get("status") not in ("running",):
+                return status
+            if asyncio.get_event_loop().time() >= deadline:
+                return status
+            await asyncio.sleep(0.1)
+
     async def cancel_async(self, trial_id: str) -> str:
         """Cancel a running async execution.
 

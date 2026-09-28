@@ -23,6 +23,14 @@ Defaults: `00` creates `lab-template-<UTC-ts>`; `01`/`02`/`10` pick the
 newest dated template automatically (override with an argument or
 `LABLOOP_TEMPLATE=`).
 
+> **ISO location matters.** `qemu:///system` runs guests as the
+> `libvirt-qemu` account, which must *traverse* every directory above
+> the ISO — a checkout under `$HOME` (mode 0700/0750) fails at boot
+> with `Permission denied` on the blockdev. Keep the ISO in
+> `/var/lib/libvirt/images/`, or `setfacl -m u:libvirt-qemu:x` each
+> parent dir plus `u:libvirt-qemu:r` on the ISO. `create-lab-template`
+> preflights this and prints the fix before virt-install runs.
+
 Day to day:
 
 ```bash

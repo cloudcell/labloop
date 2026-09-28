@@ -208,10 +208,19 @@ class TestAsyncExecution:
 
     @pytest.mark.asyncio
     async def test_cancel_async_not_running(self, executor):
-        """cancel_async returns error for non-existent task."""
+        """cancel_async on an unregistered id tombstones it — a
+        pre-dispatch cancel must not be silently consumed (a later
+        execute_code_async for the same id refuses to spawn)."""
         result = await executor.cancel_async("nonexistent")
         data = json.loads(result)
-        assert data["status"] == "failed"
+        assert data["status"] == "cancelled"
+        assert data["tombstoned"] is True
+        # The tombstone refuses the late dispatch.
+        out = json.loads(await executor.execute_code_async(
+            "nonexistent", "print(1)"
+        ))
+        assert out["status"] == "cancelled"
+        assert out["cancelled_before_dispatch"] is True
 
     @pytest.mark.asyncio
     async def test_cancel_async_already_done(self, executor):

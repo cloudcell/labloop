@@ -104,6 +104,17 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "close path was bypassed.",
     ),
     (
+        "campaigns_awaiting_verdict",
+        "A closed campaign carrying a frozen "
+        "<code>promotion_score</code> but no verdict — "
+        "<code>record_promotion_verdict</code> needs a "
+        "campaign-scoped eref, and "
+        "<code>pull_campaign_evidence</code> refuses a closed "
+        "campaign, so a campaign closed before any pull can never "
+        "acquire one. Flagged as verdict debt — arete's "
+        "<code>decision_debt</code> is the Loop-2 analogue.",
+    ),
+    (
         "campaign_results_have_campaign",
         "A <code>campaign_results</code> row pointing at a campaign "
         "that doesn't exist — a dangling result.",

@@ -42,6 +42,11 @@ Requires KVM/libvirt on a Linux host. From `ml-labloop/`:
 ./02-create-vm-from-template.sh <user>  # clone -> lab-vm-<user>
 ```
 
+The Mint ISO must be readable by `libvirt-qemu` (the `qemu:///system`
+backend account) — keep it in `/var/lib/libvirt/images/` rather than
+under `$HOME`, or `create-lab-template` will refuse with the fix
+spelled out.
+
 A locally built VM boots with login `lab` / password `lab` — change it
 after first login.
 

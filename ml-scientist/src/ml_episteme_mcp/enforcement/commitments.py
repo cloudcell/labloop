@@ -622,6 +622,8 @@ def check_decision_valid(
     # with a Loop-0 prefix naming nothing here is fabricated.
     # Other-loop prefixes (eref-, mdec-, claim-, camp-, ...) are
     # opaque references per the protocol convention and pass through.
+    # A ref matching NO ecosystem minter (e.g. evr-…) is refused —
+    # the prefix itself must name a real minting surface.
     if evidence_refs:
         _LOOP0_GETTERS = (
             ("bundle-", store.get_bundle),
@@ -636,18 +638,51 @@ def check_decision_valid(
             ("belief-", store.get_belief_by_id),
             ("data-ref-", store.get_data_ref),
         )
+        # Prefixes minted by the other loops (or by this loop for
+        # non-evidence surfaces like artifacts and acks) — recognised
+        # shape, opaque identity. Not exhaustively enumerable by
+        # design, but every minted prefix is listed so that a
+        # fabricated prefix like "evr-" cannot masquerade as a
+        # foreign ref.
+        _FOREIGN_PREFIXES = frozenset({
+            # zetesis (Loop 1)
+            "eref-", "inv-", "find-", "camp-", "cres-", "spawn-",
+            "spol-",
+            # arete (Loop 2)
+            "mcp-", "imp-", "mdec-", "pol-", "tourn-", "tcamp-",
+            "tres-", "canary-", "mcontract-",
+            # anamnesis (memory)
+            "claim-", "edge-",
+            # this loop's non-evidence mints — recognised, but not
+            # resolvable through an evidence getter
+            "ta-", "art-", "archive-", "ae-", "vack-",
+        })
         missing = []
+        unknown = []
         for ref in evidence_refs:
             for prefix, getter in _LOOP0_GETTERS:
                 if ref.startswith(prefix):
                     if getter(ref) is None:
                         missing.append(ref)
                     break
+            else:
+                if not any(
+                    ref.startswith(p) for p in _FOREIGN_PREFIXES
+                ):
+                    unknown.append(ref)
         if missing:
             return (
                 f"evidence_refs reference nonexistent Loop-0 entities: "
                 f"{', '.join(sorted(missing))} — ids minted by this "
                 "server must resolve before a verdict can cite them."
+            )
+        if unknown:
+            return (
+                f"evidence_refs carry unrecognised prefixes: "
+                f"{', '.join(sorted(unknown))} — a ref must carry the "
+                "prefix of a real minting surface (trial-, obs-, "
+                "eref-, claim-, mdec-, …); 'evr-' and other invented "
+                "prefixes are not evidence."
             )
     if store.get_candidate_version(candidate_id) is None:
         return f"Candidate not found: {candidate_id}."

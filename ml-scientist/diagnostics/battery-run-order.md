@@ -16,7 +16,7 @@ run:
 | anamnesis | 4 | — |
 | arete | 12 | — |
 | episteme | **12** | 11 = pre-rc-7b |
-| zetesis | **13** | 12 = pre-rc-7 |
+| zetesis | **14** | 13 = pre-rc-8 |
 
 Plus: `read_resource` must appear in every server's tool list, and
 `assert_claim` must accept `valid_until`. Any miss → wrong build;

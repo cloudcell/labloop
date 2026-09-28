@@ -357,6 +357,13 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         spend against the carried budget before freezing; an
         overspent campaign rejects the close. Returns the upstream
         promotion_score for the arm.
+
+        The linked campaign is a complete two-arm (champion vs
+        challenger) campaign — Loop 1 refuses to close until BOTH
+        sides carry a result. Populate each side with
+        spawn_arm_programme(campaign_arm='champion'|'challenger')
+        against this arm's campaign: campaign_arm defaults to
+        'challenger', so a single spawn only ever fills one side.
         """
         try:
             if e := check_arm_valid(arm):

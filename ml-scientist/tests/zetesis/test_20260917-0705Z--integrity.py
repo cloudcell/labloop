@@ -56,7 +56,7 @@ def _finding(iid, fid="find-t1", **kw):
 async def test_clean_store_is_ok(search_store, adaptors):
     payload = await run_checks(search_store, claims=adaptors.claims)
     assert payload["status"] == "ok"
-    assert len(payload["checks"]) == 13
+    assert len(payload["checks"]) == 14
 
 
 async def test_stale_open_investigation(search_store):
@@ -238,7 +238,7 @@ async def test_health_deep_route(search_store, adaptors):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert len(body["checks"]) == 13
+        assert len(body["checks"]) == 14
 
 
 def test_integrity_gui(search_store):

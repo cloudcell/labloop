@@ -89,8 +89,13 @@ def _check_terminal_with_live_executor(store, executor) -> dict:
         terminal row — the signature prong (a) cannot see once the
         task entry is gone.
     """
-    live_violations: list[str] = []
-    residue_violations: list[str] = []
+    # Dict violations, not rendered strings — canonical_ref() keys
+    # acknowledgements on the trial_id, so an ack survives the
+    # live→residue re-render when the task is reaped (string payloads
+    # made the whole sentence the ack identity, which expired on
+    # every re-render), and _annotate_acks() only marks dicts.
+    live_violations: list[dict] = []
+    residue_violations: list[dict] = []
     task_map = getattr(executor, "_running_tasks", {}) or {}
     rows = store._fetchall(
         """SELECT id, status, started_at, finished_at,
@@ -103,7 +108,13 @@ def _check_terminal_with_live_executor(store, executor) -> dict:
         tid = r["id"]
         task = task_map.get(tid)
         if task is not None and not task.done():
-            live_violations.append(f"{tid} ({r['status']} + live task)")
+            live_violations.append({
+                "trial_id": tid,
+                "status": r["status"],
+                "kind": "live_task",
+                "detail": "executor task is still live under a "
+                          "terminal row",
+            })
             continue
         if r["finished_at"] is None or not r["executor_output_json"]:
             continue
@@ -124,10 +135,17 @@ def _check_terminal_with_live_executor(store, executor) -> dict:
         # A 1s margin absorbs timestamp rounding and normal finalize
         # lag — only a process that ran *well past* the mark flags.
         if exec_duration > window + 1.0:
-            residue_violations.append(
-                f"{tid} ({r['status']}; executor ran "
-                f"{exec_duration}s over a {window:.3f}s window)"
-            )
+            residue_violations.append({
+                "trial_id": tid,
+                "status": r["status"],
+                "kind": "residue",
+                "executor_duration_seconds": exec_duration,
+                "row_window_seconds": round(window, 3),
+                "detail": (
+                    f"executor ran {exec_duration}s over a "
+                    f"{window:.3f}s window"
+                ),
+            })
     violations = live_violations + residue_violations
     return _res(
         "terminal_with_live_executor", violations,

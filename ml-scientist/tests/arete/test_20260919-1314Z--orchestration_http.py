@@ -236,14 +236,16 @@ class TestOrchestrationGate:
     async def test_03_pull_arm_evidence(self, battery):
         arete = battery["arete"]
         tourn = battery["tournament_id"]
-        r = await call_tool_http(arete, "pull_arm_evidence", {
-            "tournament_id": tourn, "arm": "candidate",
-            "source": "loop0", "tool": "get_incumbent", "args": {},
-        })
-        assert "error" not in r, r
-        assert r["evidence_ref_id"]
-        assert r["upstream_evidence_ref_id"]
-        battery["eref"] = r["upstream_evidence_ref_id"]
+        for arm in ("parent", "candidate"):
+            r = await call_tool_http(arete, "pull_arm_evidence", {
+                "tournament_id": tourn, "arm": arm,
+                "source": "loop0", "tool": "get_incumbent", "args": {},
+            })
+            assert "error" not in r, r
+            assert r["evidence_ref_id"]
+            assert r["upstream_evidence_ref_id"]
+            battery[f"eref_{arm}"] = r["upstream_evidence_ref_id"]
+        battery["eref"] = battery["eref_candidate"]
 
     async def test_04_results_spawn_scoped(self, battery):
         arete, loop0 = battery["arete"], battery["loop0"]
@@ -296,15 +298,19 @@ class TestOrchestrationGate:
             expected = 0.8 if arm == "parent" else 0.4
             assert abs(score - expected) < 1e-6
 
-        # Verdict on the candidate arm — needs a campaign-scoped eref
-        r = await call_tool_http(arete, "record_arm_verdict", {
-            "tournament_id": tourn, "arm": "candidate",
-            "verdict": "retain", "decided_by": "arete:tournament",
-            "evidence_ref_ids": [battery["eref"]],
-            "rationale": "descendant did not beat the incumbent",
-        })
-        assert "error" not in r, r
-        assert r["result"]["decision_id"]
+        # Verdict on both arms — each closed campaign needs a verdict
+        # (campaigns_awaiting_verdict flags closed-but-unverdicted rows
+        # as debt). Each verdict needs a campaign-scoped eref pulled
+        # pre-close.
+        for arm, verdict in (("parent", "retain"), ("candidate", "retain")):
+            r = await call_tool_http(arete, "record_arm_verdict", {
+                "tournament_id": tourn, "arm": arm,
+                "verdict": verdict, "decided_by": "arete:tournament",
+                "evidence_ref_ids": [battery[f"eref_{arm}"]],
+                "rationale": "descendant did not beat the incumbent",
+            })
+            assert "error" not in r, r
+            assert r["result"]["decision_id"]
 
     async def test_06_tournament_result_and_close(self, battery):
         arete = battery["arete"]

@@ -274,7 +274,9 @@ def check_campaign_budget_carryable(
     """Orchestrated campaigns must carry the tournament's budget so
     spawn caps and close-time audits have something to enforce. A
     campaign opened without programmes_per_arm/trials_per_programme
-    can't be audited — reject rather than default."""
+    can't be audited — reject rather than default. Present-but-zero
+    (or negative) is the same wedge wearing a different shape: a cap
+    of 0 can never spawn, so the campaign is structurally dead."""
     budget = campaign_budget or {}
     missing = sorted(k for k in CAMPAIGN_BUDGET_KEYS if k not in budget)
     if missing:
@@ -282,6 +284,19 @@ def check_campaign_budget_carryable(
             f"campaign budget lacks required orchestration keys "
             f"({', '.join(missing)}). Orchestrated campaigns carry the "
             "tournament budget — open_arm_campaign refuses to invent one."
+        )
+    degenerate = sorted(
+        k for k in CAMPAIGN_BUDGET_KEYS
+        if not isinstance(budget.get(k), (int, float))
+        or isinstance(budget.get(k), bool)
+        or budget[k] <= 0
+    )
+    if degenerate:
+        return (
+            f"campaign budget is degenerate — "
+            f"{', '.join(f'{k}={budget[k]!r}' for k in degenerate)} "
+            "cannot spawn or spend anything. A zero/negative cap is "
+            "a wedged campaign, not a runnable one."
         )
     return None
 

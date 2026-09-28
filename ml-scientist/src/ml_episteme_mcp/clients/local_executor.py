@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .roles import ExecutorRole
+from .local_data_handler import _elide_stderr
 from ..sealed_paths import resolve_sealed_denies
 
 
@@ -194,6 +195,14 @@ class LocalExecutor(ExecutorRole):
         # elapsed/ETA reporting (in-memory; the DB carries durable state)
         self._started_monotonic: dict[str, float] = {}
         self._artifact_dirs: dict[str, Path] = {}
+        # Cancel tombstones: a cancel_async landing before the task is
+        # registered (submit window, post-restart orphan) records intent
+        # here so a later execute_code_async refuses to spawn instead of
+        # dispatching under an already-terminal row. Bounded FIFO —
+        # consumed on use; 4096 pending cancels is already pathological.
+        from collections import OrderedDict
+        self._cancelled_ids: OrderedDict[str, None] = OrderedDict()
+        self._CANCELLED_CAP = 4096
 
     def _sealed_fields(
         self,
@@ -683,10 +692,16 @@ class LocalExecutor(ExecutorRole):
                 result["error"] = f"Sandbox setup failed: {first_err}"
 
             if artifact_dir is not None:
+                # Artifacts keep the complete streams — only the
+                # payload fields below are elided. An unmarked 42 KB
+                # blob is indistinguishable from a complete short
+                # stderr; the marker names how much was cut.
                 self._write_artifacts(
                     artifact_dir, trial_id, programme_id, bundle_id,
                     ts, created_at, script_path, result,
                 )
+            result["stdout"] = _elide_stderr(result["stdout"])
+            result["stderr"] = _elide_stderr(result["stderr"])
 
             return json.dumps(result)
 
@@ -892,6 +907,18 @@ class LocalExecutor(ExecutorRole):
         When ``artifact_dir`` is provided, artifacts are written to that
         directory (same as execute_code).
         """
+        # Cancel tombstone: a cancel that landed before this dispatch
+        # (submit-window or orphaned row) is sticky — refuse to spawn.
+        if trial_id in self._cancelled_ids:
+            del self._cancelled_ids[trial_id]
+            result = json.dumps({
+                "status": "cancelled",
+                "trial_id": trial_id,
+                "cancelled_before_dispatch": True,
+            })
+            self._completed_results[trial_id] = result
+            return result
+
         async def _run():
             try:
                 result = await self.execute_code(
@@ -1002,12 +1029,52 @@ class LocalExecutor(ExecutorRole):
             return self._running_status(trial_id)
         return json.dumps({"status": "unknown", "trial_id": trial_id})
 
+    async def await_async(
+        self, trial_id: str, timeout_seconds: float
+    ) -> str:
+        """Wait on the registered task for up to timeout_seconds.
+
+        The task is awaited under asyncio.shield — a timeout returns
+        the live 'running' status and leaves the task running, never
+        cancels it. This is what makes the submit window killable:
+        the task is registered (and thus reachable by cancel_async)
+        for the entire wait.
+        """
+        task = self._running_tasks.get(trial_id)
+        if task is None:
+            return self.get_async_status(trial_id)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(task), timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            return self.get_async_status(trial_id)
+        except asyncio.CancelledError:
+            if task.done():
+                # cancel_async killed the inner task — the shield did
+                # its job. Surface as a cancelled result; run_trial's
+                # answer is the row's terminal status, not a
+                # propagated cancellation.
+                return json.dumps({
+                    "status": "cancelled",
+                    "trial_id": trial_id,
+                })
+            raise  # OUR coroutine was cancelled — propagate.
+
     async def cancel_async(self, trial_id: str) -> str:
         """Cancel a running async execution. Kills the entire process group."""
         if trial_id not in self._running_tasks:
+            # Tombstone the intent — a cancel landing before the task
+            # registers (the submit window) must not be consumed
+            # silently: execute_code_async consults the tombstone and
+            # refuses to spawn under an already-terminal row.
+            self._cancelled_ids[trial_id] = None
+            if len(self._cancelled_ids) > self._CANCELLED_CAP:
+                self._cancelled_ids.popitem(last=False)
             return json.dumps({
-                "status": "failed",
-                "error": f"No running task for trial {trial_id}",
+                "status": "cancelled",
+                "trial_id": trial_id,
+                "tombstoned": True,
             })
         task = self._running_tasks[trial_id]
         if task.done():
@@ -1053,6 +1120,12 @@ class LocalExecutor(ExecutorRole):
         except Exception:
             pass  # best-effort cleanup
         del self._running_tasks[trial_id]
+        # Tombstone the id: a cancelled trial is terminal, and a later
+        # execute_code_async under the same id must refuse to spawn —
+        # the submit-window race consumed cancels before this existed.
+        self._cancelled_ids[trial_id] = None
+        if len(self._cancelled_ids) > self._CANCELLED_CAP:
+            self._cancelled_ids.popitem(last=False)
         return json.dumps({"status": "cancelled", "trial_id": trial_id})
 
     def clear_async(self, trial_id: str) -> None:

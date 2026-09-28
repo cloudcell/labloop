@@ -217,7 +217,9 @@ class TestTerminalWithLiveExecutor:
             "terminal_with_live_executor",
         )
         assert not c["ok"]
-        assert any(tid in v for v in c["violations"])
+        assert any(
+            v.get("trial_id") == tid for v in c["violations"]
+        )
 
     def test_done_task_entry_not_a_violation(self, store):
         """_running_tasks entries persist after task completion —
@@ -268,7 +270,9 @@ class TestTerminalWithLiveExecutor:
         store.conn.commit()
         c = _check(run_checks(store), "terminal_with_live_executor")
         assert not c["ok"]
-        assert any(tid in v for v in c["violations"])
+        assert any(
+            v.get("trial_id") == tid for v in c["violations"]
+        )
 
     def test_executor_within_window_clean(self, store):
         """A normal fast-fail: executor duration inside the row's

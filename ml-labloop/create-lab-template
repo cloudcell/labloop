@@ -166,6 +166,52 @@ if $VIRSH dominfo "$VM" >/dev/null 2>&1; then
     note "domain $VM exists — skipping virt-install"
 else
     [ -n "$ISO" ] || die "LABLOOP_ISO=<mint.iso> required to create $VM"
+    # qemu:///system runs guests as libvirt-qemu — the ISO must be
+    # readable by THAT account: read on the file plus search on every
+    # ancestor dir. A $HOME ISO (home is typically 0700/0750) fails at
+    # monitor-connect with a cryptic blockdev EACCES; check traversal
+    # up front and spell out the fix.
+    qemu_user="$(getent passwd libvirt-qemu | cut -d: -f1)"
+    qemu_user="${qemu_user:-qemu}"
+    _perm_for() {  # $1=path $2=r|x — does qemu_user have it?
+        local mode owner group obit gbit otbit
+        read -r mode owner group < <(stat -c '%a %U %G' "$1") \
+            || return 1
+        if [ "$2" = x ]; then obit=64; gbit=8; otbit=1
+        else                 obit=256; gbit=32; otbit=4; fi
+        [ "$owner" = "$qemu_user" ] && \
+            [ $((8#$mode & obit)) -ne 0 ] && return 0
+        id "$qemu_user" 2>/dev/null | grep -qw "$group" && \
+            [ $((8#$mode & gbit)) -ne 0 ] && return 0
+        [ $((8#$mode & otbit)) -ne 0 ] && return 0
+        getfacl -p "$1" 2>/dev/null | \
+            grep -q "user:${qemu_user}:.*$2" && return 0
+        return 1
+    }
+    iso_readable() {
+        if sudo -n -u "$qemu_user" true 2>/dev/null; then
+            sudo -n -u "$qemu_user" test -r "$1"; return
+        fi
+        local p
+        p="$(readlink -f "$1")" || return 1
+        while [ "$p" != "/" ]; do
+            if [ -d "$p" ]; then _perm_for "$p" x || return 1
+            else                 _perm_for "$p" r || return 1; fi
+            p="$(dirname "$p")"
+        done
+    }
+    if ! iso_readable "$ISO"; then
+        die "ISO not readable by '$qemu_user' (qemu:///system backend).
+
+  fix — either move it into libvirt's storage:
+      sudo cp \"$ISO\" /var/lib/libvirt/images/
+      LABLOOP_ISO=/var/lib/libvirt/images/$(basename "$ISO") $0 $VM
+  or grant search + read via ACL:
+      p=\"$ISO\"; while [ \"\$p\" != / ]; do
+          sudo setfacl -m u:$qemu_user:x \"\$p\"; p=\$(dirname \"\$p\")
+      done
+      sudo setfacl -m u:$qemu_user:r \"$ISO\""
+    fi
     note "virt-install: $VM (${MEM_MIB}MiB / ${VCPUS}vcpu / 80G qcow2 / UEFI / SPICE)"
     virt-install --connect qemu:///system --name "$VM" \
         --memory "$MEM_MIB" --vcpus "$VCPUS" \
