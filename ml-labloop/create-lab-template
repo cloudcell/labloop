@@ -295,12 +295,27 @@ eject_cdrom() {
         || true
 }
 
+fix_esp_offline() {
+    # ubiquity under automatic mode can leave no usable boot entry — no
+    # nvram 'ubuntu' AND no \EFI\BOOT\BOOTX64.EFI fallback — so the
+    # installed system lands in the UEFI shell and the agent never comes
+    # up. Write the fallback loader while the domain is offline (the
+    # provisioning-time grub-install further down re-asserts it). Domain
+    # MUST be shut off when this runs — virt-customize refuses a live one.
+    command -v virt-customize >/dev/null || return 0
+    sudo virt-customize --no-network -d "$VM" \
+        --run-command 'grub-install --target=x86_64-efi \
+            --efi-directory=/boot/efi --removable --no-nvram || true' \
+        >/dev/null 2>&1 || true
+}
+
 note "waiting for qemu-guest-agent in $VM"
 echo "    (finish the Mint install, reboot, then install qemu-guest-agent)"
 w=0
 until agent_ready; do
     if [ "$($VIRSH domstate "$VM" 2>/dev/null)" = "shut off" ]; then
         eject_cdrom
+        fix_esp_offline
         echo "    guest powered off — starting installed system (cdrom ejected)"
         $VIRSH start "$VM" >/dev/null
     fi
@@ -749,6 +764,19 @@ if [ "${LABLOOP_PUBLISH:-0}" = "1" ]; then
     qga "passwd -l lab && passwd -l exp && passwd -l mcp 2>/dev/null; \
          passwd -S lab | grep -q ' L ' && passwd -S exp | grep -q ' L '"
 fi
+
+# ubiquity under automatic mode can leave no nvram 'ubuntu' entry and no
+# \EFI\BOOT\BOOTX64.EFI fallback — OVMF then drops to the UEFI shell on
+# every boot, INCLUDING the first boot of this build (agent never comes
+# up). --removable installs the fallback loader (covers this VM and any
+# clone, whose nvram may differ), efibootmgr -c restores the named entry.
+note "UEFI boot: ESP fallback loader + nvram entry"
+qga "grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+     --removable --no-nvram"
+qga "efibootmgr -c -d /dev/vda -p 1 -L ubuntu \
+     -l '\EFI\ubuntu\shimx64.efi' 2>/dev/null \
+     || efibootmgr -c -d /dev/vda -p 1 -L ubuntu \
+        -l '\EFI\ubuntu\grubx64.efi' || true"
 
 note "shutdown"
 # the agent channel dies mid-poll when the guest powers off — expected
