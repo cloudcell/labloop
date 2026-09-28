@@ -59,6 +59,19 @@ if [ "$VCPUS" -gt "$vcpu_cap" ]; then
     note "vcpus clamped: $VCPUS -> $vcpu_cap (75% of $host_cores host cores)"
     VCPUS=$vcpu_cap
 fi
+# guest RAM vs host MemAvailable: QEMU is the kernel's favourite OOM
+# victim — a guest whose nominal size doesn't fit available host memory
+# gets killed mid-install and leaves a partitioned-but-empty disk that
+# boots to the UEFI shell. Refuse early; LABLOOP_MEM_OVERCOMMIT=1
+# overrides for hosts with serious swap.
+mem_avail_mib=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
+if [ "${LABLOOP_MEM_OVERCOMMIT:-0}" != "1" ] \
+    && [ "$mem_avail_mib" -lt "$MEM_MIB" ]; then
+    die "guest needs ${MEM_MIB}MiB but host MemAvailable is ${mem_avail_mib}MiB —
+  the OOM killer will eat qemu mid-install.
+  Free memory, add swap, or rerun with a smaller LABLOOP_MEMORY_MIB
+  (or LABLOOP_MEM_OVERCOMMIT=1 if you really mean it)."
+fi
 # hostile-zone ceiling — derived: ~5/8 of guest vcpus, ~3/4 of guest
 # RAM. The driver zone + desktop always keep headroom under a
 # hostile-zone CPU/memory storm (observed: 8vcpu VM, exp at --cpus 6

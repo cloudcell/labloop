@@ -67,8 +67,8 @@ sudo labloop-export --all
 
 Both write `manifest.json` + `export.tar.gz` into their staging dir.
 `--all` covers `/srv/lab/{exchange,experiments,mcp-state}`, podman
-volumes, journald + logs, workspace, and agent state — lab work, not
-the OS image.
+volumes, journald + logs, workspace, `~/Desktop`, and agent state —
+lab work, not the OS image.
 
 ### Host side — pull
 

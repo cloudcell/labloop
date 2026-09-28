@@ -132,6 +132,7 @@ else
     copy_in /srv/lab/experiments experiments
     copy_in /srv/lab/mcp-state   mcp-state
     copy_in /home/lab/workspace  workspace
+    copy_in /home/lab/Desktop    desktop    # agent drops results/READMEs here
     copy_in /srv/lab/opt-local   opt-local   # legacy path; named volume below is canonical
 
     # --- podman named volumes (each owner reads its own store) -----
