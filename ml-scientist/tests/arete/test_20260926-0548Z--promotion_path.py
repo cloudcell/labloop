@@ -177,6 +177,6 @@ def test_anamnesis_relate_accepts_loop2_types():
         "investigation", "finding", "archive", "improver",
         "tournament", "tournament_result", "proposal",
         "meta_contract", "meta_decision", "policy_version",
-        "canary_deployment",
+        "canary_deployment", "candidate", "contract", "decision",
     ):
         assert RefType(rt).value == rt

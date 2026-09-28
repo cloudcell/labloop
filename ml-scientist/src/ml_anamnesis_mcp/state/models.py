@@ -52,6 +52,9 @@ class RefType(str, Enum):
     meta_decision = "meta_decision"
     policy_version = "policy_version"
     canary_deployment = "canary_deployment"
+    candidate = "candidate"
+    contract = "contract"
+    decision = "decision"
     external = "external"
 
 

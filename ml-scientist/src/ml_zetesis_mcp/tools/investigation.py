@@ -54,6 +54,9 @@ _REF_TYPE_BY_PREFIX = {
     "conc-": "conclusion",
     "prog-": "programme",
     "claim-": "claim",
+    "cand-": "candidate",
+    "contract-": "contract",
+    "decision-": "decision",
 }
 
 

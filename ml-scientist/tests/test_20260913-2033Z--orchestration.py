@@ -657,26 +657,27 @@ class TestClaimMinting:
             } in evidence
 
     @pytest.mark.asyncio
-    async def test_source_id_falls_back_to_programme_id(
+    async def test_source_id_is_the_conclusion(
         self, claims_client, store
     ):
-        """Without a candidate_version_id, source_id is the programme id."""
+        """source_id is the producing conclusion, not the candidate."""
         client, claims = claims_client
         async with client:
             result, pid, hid, tid = await _drive_to_conclusion(client, store)
-        assert claims.asserts[0]["source_id"] == pid
+        assert claims.asserts[0]["source_id"] == result["conclusion_id"]
 
     @pytest.mark.asyncio
-    async def test_source_id_prefers_candidate_version(
+    async def test_source_id_stable_with_candidate(
         self, claims_client, store
     ):
-        """When the programme names a candidate, source_id is that id."""
+        """A candidate_version_id on the programme does not redirect
+        source_id away from the conclusion."""
         client, claims = claims_client
         async with client:
             result, pid, hid, tid = await _drive_to_conclusion(
                 client, store, with_candidate=True
             )
-        assert claims.asserts[0]["source_id"].startswith("cand-")
+        assert claims.asserts[0]["source_id"] == result["conclusion_id"]
 
     @pytest.mark.asyncio
     async def test_claims_failure_does_not_block_conclusion(

@@ -115,9 +115,54 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "<code>decision_debt</code> is the Loop-2 analogue.",
     ),
     (
+        "unscoreable_campaigns",
+        "An open campaign whose results carry an unscorable "
+        "<code>primary_metric</code> (null, non-numeric, or "
+        "non-finite — rows predating the write gate). It can never "
+        "score at close and results are insert-only — "
+        "<code>abandon_campaign</code> is the exit.",
+    ),
+    (
+        "unrunnable_campaigns",
+        "An open campaign carrying an orchestration budget that "
+        "fails carryability (missing or non-positive "
+        "<code>programmes_per_arm</code>/<code>trials_per_programme</code>) "
+        "with no spawns and no results — structurally wedged, "
+        "nothing can ever run. Budget-free campaigns are "
+        "caller-driven and don't flag; "
+        "<code>abandon_campaign</code> is the exit.",
+    ),
+    (
+        "incomplete_campaigns",
+        "An open campaign that has <em>started</em> (≥1 spawn or "
+        "result) but whose results cover only one arm, idle past "
+        "<code>stale_campaign_seconds</code> (default 3600). Close "
+        "needs results on both arms — populate the missing side "
+        "(<code>spawn_arm_programme</code> campaign_arm=… / "
+        "<code>spawn_campaign_programme</code> arm=…) or "
+        "<code>abandon_campaign</code>.",
+    ),
+    (
         "campaign_results_have_campaign",
         "A <code>campaign_results</code> row pointing at a campaign "
         "that doesn't exist — a dangling result.",
+    ),
+    (
+        "campaign_spawns_have_campaign",
+        "A <code>campaign_spawns</code> row pointing at a campaign "
+        "that doesn't exist — a dangling spawn record.",
+    ),
+    (
+        "spawn_budget_violations",
+        "A campaign arm whose spawn count exceeds the carried "
+        "<code>programmes_per_arm</code>. The cap is enforced at "
+        "spawn time, so a violation means it was bypassed.",
+    ),
+    (
+        "results_spawn_scoped",
+        "On an orchestrated campaign, a result naming a programme "
+        "that wasn't spawned under that campaign and arm — the "
+        "attribution is wrong or the spawn record is missing.",
     ),
     (
         "single_roster_champion",

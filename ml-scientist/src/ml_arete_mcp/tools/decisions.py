@@ -59,6 +59,9 @@ _REF_TYPE_BY_PREFIX = {
     "mdec-": "meta_decision",
     "pol-": "policy_version",
     "canary-": "canary_deployment",
+    "cand-": "candidate",
+    "contract-": "contract",
+    "decision-": "decision",
 }
 
 # Anamnesis's RefType vocabulary, mirrored locally (ADR-0001/0002: no
@@ -69,7 +72,8 @@ _CLAIM_REF_TYPES = frozenset({
     "claim", "trial", "observation", "conclusion", "programme",
     "investigation", "finding", "archive", "improver", "tournament",
     "tournament_result", "proposal", "meta_contract", "meta_decision",
-    "policy_version", "canary_deployment", "external",
+    "policy_version", "canary_deployment", "candidate", "contract",
+    "decision", "external",
 })
 
 
@@ -82,6 +86,59 @@ def _ref_type_for(ref_id: str) -> str:
                 else "external"
             )
     return "external"
+
+
+async def _mint_decision_claim(store, adaptors, decision) -> tuple:
+    """Mint the methodological claim for a meta-decision row.
+
+    Shared by record_meta_decision and rollback — every insert-only
+    mdec- row carries the same grounding contract. Returns
+    (claim_id, claim_status, claim_error, edges_created); failures are
+    reported, never raised — a claims outage must not block a decision.
+    """
+    claim_status = "skipped"
+    claim_id = None
+    claim_error = None
+    edges_created = 0
+    if adaptors.claims is None:
+        return None, "disabled", None, 0
+    try:
+        upstream_ids: set[str] = set()
+        for eref_id in decision.evidence_refs:
+            eref = store.get_evidence_ref(eref_id)
+            if eref is not None:
+                upstream_ids.update(eref.ref_ids)
+        consulted = sorted(upstream_ids)
+        # Evidence edges mint inline — anamnesis caps
+        # unevidenced claims at the prior ceiling, and
+        # post-hoc relate hits the chicken-and-egg.
+        minted = await adaptors.claims.assert_claim(
+            content=(
+                f"Loop-2 meta-decision '{decision.verdict.value}' on "
+                f"improver {decision.candidate_improver_id}: "
+                f"{decision.rationale}"
+            ),
+            type="methodological",
+            confidence=0.6,
+            evidence=[
+                {
+                    "to_ref": ref_id,
+                    "ref_type": _ref_type_for(ref_id),
+                    "relation": "derived_from",
+                }
+                for ref_id in consulted
+            ],
+            source_id=decision.id,
+        )
+        claim_id = minted["claim_id"]
+        edges_created += len(consulted)
+        claim_status = "minted"
+    except Exception as exc:
+        # The mint reason must survive — a bare "failed"
+        # is undiagnosable (rc-7 Q2).
+        claim_status = "failed"
+        claim_error = str(exc)
+    return claim_id, claim_status, claim_error, edges_created
 
 
 def _decision_json(d: MetaDecision) -> dict:
@@ -194,51 +251,14 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 decided_by=decided_by,
             )
 
-            # Mint the methodological claim — after the decision row
-            # exists so the claim's source_id names a durable record.
-            claim_status = "skipped"
-            claim_id = None
-            claim_error = None
-            edges_created = 0
-            if adaptors.claims is None:
-                claim_status = "disabled"
-            else:
-                try:
-                    upstream_ids: set[str] = set()
-                    for eref_id in evidence_refs:
-                        eref = store.get_evidence_ref(eref_id)
-                        if eref is not None:
-                            upstream_ids.update(eref.ref_ids)
-                    consulted = sorted(upstream_ids)
-                    # Evidence edges mint inline — anamnesis caps
-                    # unevidenced claims at the prior ceiling, and
-                    # post-hoc relate hits the chicken-and-egg.
-                    minted = await adaptors.claims.assert_claim(
-                        content=(
-                            f"Loop-2 meta-decision '{verdict}' on "
-                            f"improver {candidate_improver_id}: "
-                            f"{rationale}"
-                        ),
-                        type="methodological",
-                        confidence=0.6,
-                        evidence=[
-                            {
-                                "to_ref": ref_id,
-                                "ref_type": _ref_type_for(ref_id),
-                                "relation": "derived_from",
-                            }
-                            for ref_id in consulted
-                        ],
-                        source_id=decision.id,
-                    )
-                    claim_id = minted["claim_id"]
-                    edges_created += len(consulted)
-                    claim_status = "minted"
-                except Exception as exc:
-                    # The mint reason must survive — a bare "failed"
-                    # is undiagnosable (rc-7 Q2).
-                    claim_status = "failed"
-                    claim_error = str(exc)
+            # Mint the methodological claim — the claim's source_id
+            # names the decision record being inserted next.
+            (
+                claim_id,
+                claim_status,
+                claim_error,
+                edges_created,
+            ) = await _mint_decision_claim(store, adaptors, decision)
 
             decision.claim_id = claim_id
             decision.claim_error = claim_error
@@ -331,7 +351,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    def rollback(
+    async def rollback(
         candidate_improver_id: Annotated[str, Field(description='ID of the candidate improver version this call targets.')],
         rationale: Annotated[str, Field(description='Non-empty justification — accountability is first-class.')],
         decided_by: Annotated[str, Field(description="Attributable decider (e.g. 'human:<name>' or a protocol/improver id).")],
@@ -341,7 +361,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
 
         Always records a 'rollback' meta_decision (attribution and
         evidence rules apply — cite the canary/tournament evidence
-        that motivates it). If the candidate is the current champion,
+        that motivates it) and mints the methodological claim to
+        anamnesis, exactly as record_meta_decision does — claim_status
+        is reported, never blocks the rollback. If the candidate is
+        the current champion,
         the pointer restores to the champion it displaced (recorded
         on its policy_version; falling back to its parent) and the
         policy is marked rolled_back. Reversal is an event, not an
@@ -375,6 +398,18 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 decided_by=decided_by,
             )
 
+            # Same grounding contract as record_meta_decision — every
+            # mdec- row gets its claim, so the insert-only record is
+            # uniformly attributable.
+            (
+                claim_id,
+                claim_status,
+                claim_error,
+                edges_created,
+            ) = await _mint_decision_claim(store, adaptors, decision)
+            decision.claim_id = claim_id
+            decision.claim_error = claim_error
+
             restored = None
             if candidate.is_champion:
                 active = store.get_active_policy(candidate_improver_id)
@@ -399,6 +434,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "verdict": "rollback",
                 "was_champion": candidate.is_champion,
                 "restored_champion": restored,
+                "claim_id": claim_id,
+                "claim_status": claim_status,
+                "claim_error": claim_error,
+                "edges_created": edges_created,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

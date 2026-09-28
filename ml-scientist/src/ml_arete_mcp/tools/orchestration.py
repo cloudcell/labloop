@@ -117,8 +117,12 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         tournament arm — but the campaign itself is a complete
         two-arm (champion vs challenger) campaign scoped to this arm's
         context: both of its arms must be spawned before it can close.
-        A retry on an already-linked arm returns the existing link
-        rather than multiplying campaigns upstream.
+        Populate the two sides on THIS campaign via
+        spawn_arm_programme — its campaign_arm parameter
+        ('champion' | 'challenger') selects the side, so call it
+        twice on the same arm's link. A retry on an already-linked
+        arm returns the existing link rather than multiplying
+        campaigns upstream.
         """
         try:
             if e := check_arm_valid(arm):

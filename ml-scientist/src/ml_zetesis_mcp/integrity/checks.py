@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_STALE_INVESTIGATION_SECONDS = 3600
+DEFAULT_STALE_CAMPAIGN_SECONDS = 3600
 DEFAULT_LOG_MAX_FILES = 100
 
 
@@ -277,6 +278,72 @@ def _check_unrunnable_campaigns(store) -> dict:
     )
 
 
+def _check_incomplete_campaigns(store, stale_seconds: int) -> dict:
+    """Open campaigns that have started but cannot close as they
+    stand: ≥1 spawn or result row, campaign_results covering fewer
+    than both arms, idle past stale_campaign_seconds. close_campaign
+    needs results for BOTH arms — a one-armed campaign left mid-
+    orchestration is invisible to campaigns_awaiting_verdict (closed
+    only), unrunnable_campaigns (no spawns AND no results), and
+    unscoreable_campaigns (bad metrics on existing rows). Reported,
+    not auto-gating: a campaign waiting on a running programme is
+    legitimately one-armed — the idle gate is what makes it debt."""
+    rows = store._fetchall(
+        """SELECT c.id, c.created_at
+           FROM promotion_campaigns c
+           WHERE c.status = 'open'
+             AND (EXISTS (SELECT 1 FROM campaign_spawns s
+                          WHERE s.campaign_id = c.id)
+                  OR EXISTS (SELECT 1 FROM campaign_results r
+                             WHERE r.campaign_id = c.id))"""
+    )
+    now = datetime.now(timezone.utc)
+    violations = []
+    for r in rows:
+        cid = r["id"]
+        res_rows = store._fetchall(
+            "SELECT arm, created_at FROM campaign_results "
+            "WHERE campaign_id = ?", (cid,)
+        )
+        covered = {row["arm"] for row in res_rows}
+        if covered >= {"champion", "challenger"}:
+            continue
+        spawn_rows = store._fetchall(
+            "SELECT arm, status, created_at FROM campaign_spawns "
+            "WHERE campaign_id = ?", (cid,)
+        )
+        last = max(
+            [r["created_at"], *(x["created_at"] for x in res_rows),
+             *(x["created_at"] for x in spawn_rows)]
+        )
+        try:
+            idle = (now - datetime.fromisoformat(last)).total_seconds()
+        except ValueError:
+            continue
+        if idle <= stale_seconds:
+            continue
+        violations.append({
+            "campaign_id": cid,
+            "arms_with_results": sorted(covered),
+            "missing_arms": sorted({"champion", "challenger"} - covered),
+            "pending_spawns": sum(
+                1 for x in spawn_rows if x["status"] == "spawned"
+            ),
+            "idle_seconds": int(idle),
+            "last_activity": last,
+            "exit": "populate the missing arm "
+                    "(spawn_arm_programme campaign_arm=… / "
+                    "spawn_campaign_programme arm=…) or "
+                    "abandon_campaign",
+        })
+    return _res(
+        "incomplete_campaigns", violations,
+        f"{len(violations)} open campaign(s) started but one-armed "
+        f"and idle >{stale_seconds}s — close needs results on both "
+        "arms",
+    )
+
+
 def _check_campaign_results_have_campaign(store) -> dict:
     """Campaign results referencing a nonexistent campaign — an
     orphaned result is provenance pointing nowhere."""
@@ -443,6 +510,7 @@ async def run_checks(
     claims=None,
     connectivity=None,
     stale_investigation_seconds: int = DEFAULT_STALE_INVESTIGATION_SECONDS,
+    stale_campaign_seconds: int = DEFAULT_STALE_CAMPAIGN_SECONDS,
 ) -> dict:
     """Run the full zetesis invariant suite; return the payload."""
     started = time.monotonic()
@@ -457,6 +525,7 @@ async def run_checks(
         _check_campaigns_awaiting_verdict(store),
         _check_unscoreable_campaigns(store),
         _check_unrunnable_campaigns(store),
+        _check_incomplete_campaigns(store, stale_campaign_seconds),
         _check_campaign_results_have_campaign(store),
         _check_spawns_have_campaign(store),
         _check_spawn_budget(store),
@@ -502,6 +571,10 @@ async def run_and_log(
         stale_investigation_seconds=cfg.get(
             "stale_investigation_seconds",
             DEFAULT_STALE_INVESTIGATION_SECONDS,
+        ),
+        stale_campaign_seconds=cfg.get(
+            "stale_campaign_seconds",
+            DEFAULT_STALE_CAMPAIGN_SECONDS,
         ),
     )
     payload["trigger"] = trigger

@@ -240,6 +240,10 @@ class RollbackOut(TypedDict, total=False):
     verdict: str | None
     was_champion: bool | None
     restored_champion: str | None
+    claim_id: str | None
+    claim_status: str | None
+    claim_error: str | None
+    edges_created: int | None
 
 
 class SpawnArmProgrammeOut(TypedDict, total=False):

@@ -49,6 +49,9 @@ url = "http://localhost:38090/mcp"
 # log_max_files — how many check logs to retain (0 disables logging).
 # stale_investigation_seconds — an open investigation idle longer than
 # this is flagged by the stale_open_investigations check.
+# stale_campaign_seconds — an open campaign that has started (≥1 spawn
+# or result) but covers only one arm is flagged by incomplete_campaigns
+# once idle past this.
 # check_interval_seconds — startup sweep + periodic sweeps
 # (0 disables periodic; startup still logs). On by default.
 # prior_confidence_max — the prior ceiling: findings recorded without
@@ -57,6 +60,7 @@ url = "http://localhost:38090/mcp"
 # [integrity]
 # log_max_files = 100
 # stale_investigation_seconds = 3600
+# stale_campaign_seconds = 3600
 # check_interval_seconds = 300
 # prior_confidence_max = 0.3
 

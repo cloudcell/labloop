@@ -342,7 +342,6 @@ def register(
                 else:
                     try:
                         hypothesis = store.get_hypothesis(hypothesis_id)
-                        programme = store.get_programme(programme_id)
                         completed = [
                             t for t in store.list_trials(programme_id)
                             if t.hypothesis_id == hypothesis_id
@@ -391,11 +390,11 @@ def register(
                                     for o in observation_ids
                                 ],
                             ],
-                            source_id=(
-                                programme.candidate_version_id
-                                if programme and programme.candidate_version_id
-                                else programme_id
-                            ),
+                            # source_id names the producing record
+                            # (arete's source_id=decision.id is the
+                            # convention) — the conclusion is the
+                            # epistemic record this claim summarizes.
+                            source_id=conclusion.id,
                             ),
                             timeout=_claims_call_timeout,
                         )

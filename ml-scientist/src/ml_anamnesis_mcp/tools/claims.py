@@ -98,6 +98,7 @@ def register(
                 return ok({
                     "claim_id": existing.id,
                     "deduplicated": True,
+                    "valid_until": existing.valid_until,
                     "status": "exists",
                 })
 
@@ -181,7 +182,7 @@ def register(
     def relate(
         from_claim: Annotated[str, Field(description='ID of the claim the edge starts from.')],
         to_ref: Annotated[str, Field(description='Edge target — claim-typed IDs are verified; other ref types are trusted opaque IDs.')],
-        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | external.")],
+        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | external.")],
         relation: Annotated[Literal['supports', 'contradicts', 'derived_from', 'tested_by', 'valid_under', 'supersedes', 'generalizes', 'specializes', 'similar_to', 'failed_because'], Field(description='Edge type: supports | contradicts | derived_from | tested_by | valid_under | supersedes | generalizes | specializes | similar_to | failed_because.')],
         weight: Annotated[float, Field(description='Edge strength (default 1.0).')] = 1.0,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity that recorded this edge.')] = None,
@@ -195,7 +196,8 @@ def register(
         observation | conclusion | programme | investigation | finding |
         archive | improver | tournament | tournament_result | proposal |
         meta_contract | meta_decision | policy_version |
-        canary_deployment | external. claim-typed to_ref values are
+        canary_deployment | candidate | contract | decision |
+        external. claim-typed to_ref values are
         verified; other ref types are trusted opaque IDs across the
         protocol boundary.
         Exact duplicate edges return the existing edge_id.
