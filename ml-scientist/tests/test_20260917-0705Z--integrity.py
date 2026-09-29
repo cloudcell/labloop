@@ -323,14 +323,28 @@ def test_mislabeled_outcome(store):
     }))
     assert _check(run_checks(store), "mislabeled_outcome")["ok"]
 
-    # A corrected record is not re-flagged — the correction is recorded
+    # A corrections trail is provenance, not absolution: a row still
+    # labelled completed whose own record documents an inner crash is
+    # flagged — the exemption here is what let a corrected-to-completed
+    # label launder a non-completion record (R35).
     store.update_trial_executor_output("trial-t1", json.dumps({
         "status": "completed", "exit_code": 0,
         "stdout": json.dumps({"status": "error"}),
         "corrections": [{"from": "completed", "to": "failed",
                          "reason": "mislabeled", "corrected_at": "t"}],
     }))
-    # (status stays completed here; corrections mark it already handled)
+    c = _check(run_checks(store), "mislabeled_outcome")
+    assert not c["ok"]
+    assert c["violations"][0]["trial_id"] == "trial-t1"
+
+    # …while a clean record carrying a corrections trail stays clean —
+    # honest repairs are not re-flagged.
+    store.update_trial_executor_output("trial-t1", json.dumps({
+        "status": "completed", "exit_code": 0,
+        "stdout": json.dumps({"metrics": {"m": 1.0}}),
+        "corrections": [{"from": "failed", "to": "completed",
+                         "reason": "re-read", "corrected_at": "t"}],
+    }))
     assert _check(run_checks(store), "mislabeled_outcome")["ok"]
 
 

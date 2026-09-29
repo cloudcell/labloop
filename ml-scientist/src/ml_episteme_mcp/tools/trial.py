@@ -1493,8 +1493,10 @@ def register(
         a retryable source is a correction made in error or evidence
         re-read after the fact); target must be
         completed|failed|retryable. `reason` is mandatory.
-        Correcting TO completed still requires an executor record —
-        retryable trials have none, so that direction stays refused.
+        Correcting TO completed requires the record to evidence a
+        completed run — a cancellation receipt, reaper note, or
+        failure output does not qualify, so that direction is refused
+        unless the executor record documents an actual completion.
 
         The correction is appended to the trial's executor_output_json
         under 'corrections' — the record shows both what was claimed

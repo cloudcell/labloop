@@ -4,8 +4,13 @@ Fetches each loop's ``X://graph`` resource through the read-only
 channels and merges into one node/edge set. Rendered as a vertical
 timeline — earliest records at the top — with one swim lane per
 loop (claims | loop0 | loop1 | loop2), drawn by the vendored
-PixiJS WebGL build. Double-click a node to open the owning server's
-GUI page in the detail panel.
+PixiJS WebGL build. Double-click a node to open the detail panel:
+claimed entities load the owning server's GUI page; stubs and
+page-less kinds render an inline metadata card (with a link to the
+upstream page when one is registered — a stub's id is dangling by
+definition, so its page may not exist). Edges carry no id upstream
+({src, dst, kind} only), so a double-clicked edge opens a small
+relation card instead of an entity page.
 
 This plugin is intentionally self-contained: retiring it removes the
 two routes, the menu entry, and nothing else. No state, no writes —
@@ -129,7 +134,8 @@ _PAGE = """
 <h1>Entity timeline</h1>
 <p class="muted">Swim lanes per loop — claims | loop0 | loop1 |
 loop2 — earliest records at the top. Scroll to zoom, drag to pan;
-double-click a node to open it in the detail panel.
+double-click a node or edge for details. Small dots are stubs — ids
+an edge references but no server's graph claimed.
 <span id="graph-sources"></span></p>
 <div id="graph-layout">
     <div id="graph-side">
@@ -161,7 +167,11 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
     // ---- layout: lanes across x, time down y ------------------
     var LANES = ['claims', 'loop0', 'loop1', 'loop2'];
     var LANE_W = 300, NODE_SEP = 26, TOP = 60;
-    var dated = data.nodes.filter(function(n) { return n.ts; });
+    // A ts that fails Date.parse would NaN the whole lane's y-scale —
+    // treat it as undated.
+    var hasDate = function(n) {
+        return n.ts && !isNaN(Date.parse(n.ts)); };
+    var dated = data.nodes.filter(hasDate);
     var t0 = Math.min.apply(null, dated.map(function(n) {
         return Date.parse(n.ts); }));
     var t1 = Math.max.apply(null, dated.map(function(n) {
@@ -175,7 +185,7 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
         var row = data.nodes.filter(function(n) {
             return n.level === li; });
         var prev = TOP;
-        row.filter(function(n) { return n.ts; })
+        row.filter(hasDate)
            .sort(function(a, b) {
                return Date.parse(a.ts) - Date.parse(b.ts); })
            .forEach(function(n) {
@@ -186,7 +196,7 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
                pos[n.id] = { x: cx, y: y };
            });
         // Undated stubs park in a small grid at the lane's top.
-        row.filter(function(n) { return !n.ts; })
+        row.filter(function(n) { return !hasDate(n); })
            .forEach(function(n, i) {
                pos[n.id] = {
                    x: cx - 90 + (i % 6) * 36,
@@ -259,7 +269,6 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
 
     // Nodes — rounded boxes, colored per loop, dimmed when closed.
     var tip = document.getElementById('graph-tip');
-    var hitNodes = {};
     data.nodes.forEach(function(n) {
         var p = pos[n.id];
         if (!p) { return; }
@@ -278,7 +287,12 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
         box.x = p.x; box.y = p.y;
         box.alpha = dim ? 0.45 : 1;
         box.eventMode = 'static';
-        box.cursor = n.gui_url ? 'pointer' : 'default';
+        // Every node is interactive — stub dots get a widened hit
+        // area since the drawn circle is only 8px across.
+        box.cursor = 'pointer';
+        if (n.stub) {
+            box.hitArea = new PIXI.Circle(0, 0, 10);
+        }
         var meta = n;
         box.on('pointerover', function() {
             tip.textContent = n.kind + ' · ' + (n.status || '—')
@@ -290,15 +304,13 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
             tip.textContent = '';
             box.alpha = dim ? 0.45 : 1;
         });
-        if (n.gui_url) {
-            box.on('click', function() {
-                var now = Date.now();
-                if (meta._lastClick && now - meta._lastClick < 350) {
-                    openDetail(meta);
-                }
-                meta._lastClick = now;
-            });
-        }
+        box.on('click', function() {
+            var now = Date.now();
+            if (meta._lastClick && now - meta._lastClick < 350) {
+                openDetail(meta);
+            }
+            meta._lastClick = now;
+        });
         world.addChild(box);
         if (!n.stub) {
             var lbl = new PIXI.Text(
@@ -311,16 +323,72 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
             lbl.alpha = dim ? 0.45 : 1;
             world.addChild(lbl);
         }
-        hitNodes[n.id] = box;
     });
 
     // ---- detail panel (double-click = hyperlink) ---------------
     var panel = document.getElementById('detail-panel');
     var frame = document.getElementById('detail-frame');
     var dtitle = document.getElementById('detail-title');
+    function esc(s) {
+        return String(s).replace(/[<>&"']/g, function(c) {
+            return {'<': '&lt;', '>': '&gt;', '&': '&amp;',
+                    '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
     function openDetail(n) {
-        dtitle.textContent = n.id;
-        frame.src = n.gui_url;
+        dtitle.textContent = n.id + (n.stub ? ' (stub)' : '');
+        if (n.gui_url && !n.stub) {
+            frame.removeAttribute('srcdoc');
+            frame.src = n.gui_url;
+        } else {
+            // Stub or page-less kind — render the metadata inline.
+            var rows = [
+                ['kind', n.kind], ['status', n.status],
+                ['loop', n.loop], ['timestamp', n.ts],
+                ['label', n.label], ['stub', n.stub]
+            ].filter(function(r) { return r[1] != null; })
+             .map(function(r) {
+                 return '<tr><th>' + esc(r[0]) + '</th><td>'
+                     + esc(r[1]) + '</td></tr>';
+             });
+            var linked = data.edges.filter(function(e) {
+                return e.src === n.id || e.dst === n.id; });
+            var rels = linked.map(function(e) {
+                var other = e.src === n.id ? e.dst : e.src;
+                var dir = e.src === n.id ? '→' : '←';
+                return '<li>' + dir + ' ' + esc(e.kind || 'edge')
+                    + ' ' + esc(other) + '</li>';
+            });
+            frame.src = 'about:blank';
+            frame.srcdoc = '<body style="background:#0b0f14;'
+                + 'color:#e2e8f0;font-family:ui-monospace;'
+                + 'font-size:12px;padding:12px">'
+                + '<h3>' + esc(n.id) + '</h3>'
+                + '<table>' + rows.join('') + '</table>'
+                + (rels.length
+                    ? '<h4>Edges</h4><ul>' + rels.join('') + '</ul>'
+                    : '')
+                + (n.gui_url
+                    ? '<p><a style="color:#60a5fa" href="'
+                        + esc(n.gui_url) + '">open upstream page</a></p>'
+                    : '<p style="color:#94a3b8">No detail page is '
+                        + 'registered for this entity kind.</p>')
+                + '</body>';
+        }
+        panel.classList.add('open');
+    }
+    function openEdgeDetail(e) {
+        dtitle.textContent = (e.kind || 'edge');
+        frame.src = 'about:blank';
+        frame.srcdoc = '<body style="background:#0b0f14;'
+            + 'color:#e2e8f0;font-family:ui-monospace;'
+            + 'font-size:12px;padding:12px">'
+            + '<h3>' + esc(e.kind || 'edge') + '</h3>'
+            + '<table><tr><th>src</th><td>' + esc(e.src)
+            + '</td></tr><tr><th>dst</th><td>' + esc(e.dst)
+            + '</td></tr></table>'
+            + '<p style="color:#94a3b8">A relation between entities —'
+            + ' edges carry no id of their own upstream.</p></body>';
         panel.classList.add('open');
     }
     document.getElementById('detail-close').onclick = function(ev) {
@@ -331,6 +399,14 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
     // Native dblclick on the canvas — hit-test in world space.
     // More reliable than synthesizing a double-click from Pixi
     // 'click' events, which the stage's drag handlers can swallow.
+    function segDist2(px, py, a, b) {
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var l2 = dx * dx + dy * dy;
+        var t = l2 ? ((px - a.x) * dx + (py - a.y) * dy) / l2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        var ex = a.x + t * dx - px, ey = a.y + t * dy - py;
+        return ex * ex + ey * ey;
+    }
     holder.addEventListener('dblclick', function(e) {
         var r = holder.getBoundingClientRect();
         var wx = (e.clientX - r.left - world.x) / world.scale.x;
@@ -338,7 +414,7 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
         var best = null, bd = Infinity;
         data.nodes.forEach(function(n) {
             var p = pos[n.id];
-            if (!p || !n.gui_url) { return; }
+            if (!p) { return; }
             var hw = n.stub ? 10 : 62, hh = n.stub ? 10 : 14;
             var dx = Math.abs(p.x - wx), dy = Math.abs(p.y - wy);
             if (dx < hw && dy < hh) {
@@ -346,7 +422,16 @@ fetch('/graph/data').then(r => r.json()).then(function(data) {
                 if (d < bd) { bd = d; best = n; }
             }
         });
-        if (best) { openDetail(best); }
+        if (best) { openDetail(best); return; }
+        // No node hit — edges next: nearest segment within 4px.
+        var bestE = null, bde = 16;
+        data.edges.forEach(function(e) {
+            var a = pos[e.src], b = pos[e.dst];
+            if (!a || !b) { return; }
+            var d = segDist2(wx, wy, a, b);
+            if (d < bde) { bde = d; bestE = e; }
+        });
+        if (bestE) { openEdgeDetail(bestE); }
     });
 
     // ---- pan + zoom ---------------------------------------------

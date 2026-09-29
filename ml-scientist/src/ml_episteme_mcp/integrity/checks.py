@@ -480,24 +480,6 @@ def _check_stuck_hypotheses(store) -> dict:
     )
 
 
-def _last_json_line(text: str) -> dict | None:
-    """Last JSON dict in possibly multi-line stdout — the result is
-    printed last; noise may precede it."""
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else None
-    except ValueError:
-        pass
-    for line in reversed(text.splitlines()):
-        try:
-            data = json.loads(line)
-            if isinstance(data, dict):
-                return data
-        except ValueError:
-            continue
-    return None
-
-
 def _check_mislabeled_outcome(store) -> dict:
     """'completed' trials whose record cannot support the label: either
     nothing evidences the run at all (no executor record AND no
@@ -506,8 +488,13 @@ def _check_mislabeled_outcome(store) -> dict:
     completed trial that has an observation but no executor record is
     corroborated by its result, not mislabeled — that provenance gap is
     reported in detail, not flagged. Correct via the
-    correct_trial_status tool, never by hand-editing the DB."""
-    from ..state.store import _has_executor_record
+    correct_trial_status tool, never by hand-editing the DB.
+
+    A 'corrections' trail on the record is provenance, not absolution:
+    the row's own record must still support the label — a correction
+    TO 'completed' over a cancellation receipt or failure record is
+    exactly the mislabel this check exists to catch."""
+    from ..state.store import _has_executor_record, _last_json_line
 
     rows = store._fetchall(
         """SELECT t.id, t.executor_output_json,
@@ -531,9 +518,6 @@ def _check_mislabeled_outcome(store) -> dict:
             )
             continue
         out = json.loads(r["executor_output_json"])
-        # Skip records already corrected — the correction is recorded.
-        if out.get("corrections"):
-            continue
         failed_signals = []
         if out.get("status") not in (None, "completed"):
             failed_signals.append(f"outer status={out.get('status')!r}")

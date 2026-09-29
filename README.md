@@ -1,5 +1,7 @@
 # LabLoop™: a research automation environment for empirical work
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
+
 Hypotheses, designed experiments, evidence and conclusions as
 durable state — built for researchers, applications and AI agents
 across any empirical domain.

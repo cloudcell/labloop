@@ -338,9 +338,11 @@ _EXECUTOR_RECORD_KEYS = frozenset({
 
 
 def _has_executor_record(raw: str | None) -> bool:
-    """Whether executor_output_json evidences an actual execution —
-    a parseable non-empty object carrying a verdict key. An absent,
-    empty, or corrections-only record does not."""
+    """Whether executor_output_json carries a verdict key — a parseable
+    non-empty object with at least one executor-emitted field. An
+    absent, empty, or corrections-only record does not. Presence of a
+    verdict is not proof of completion: cancellation receipts, restart
+    reaper notes, and failure outputs all qualify here."""
     if not raw:
         return False
     try:
@@ -350,6 +352,55 @@ def _has_executor_record(raw: str | None) -> bool:
     return isinstance(out, dict) and any(
         k in out for k in _EXECUTOR_RECORD_KEYS
     )
+
+
+def _last_json_line(text: str) -> dict | None:
+    """Last JSON dict in possibly multi-line stdout — the result is
+    printed last; noise may precede it."""
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except ValueError:
+        pass
+    for line in reversed(text.splitlines()):
+        try:
+            data = json.loads(line)
+            if isinstance(data, dict):
+                return data
+        except ValueError:
+            continue
+    return None
+
+
+def _record_evidences_completion(raw: str | None) -> bool:
+    """Whether the executor record supports a 'completed' label —
+    stricter than _has_executor_record: a verdict key must be present
+    AND the record must document a completed run, not a non-completion.
+    The signal set mirrors mislabeled_outcome: outer status absent or
+    'completed', exit_code absent or 0, no 'error' key, no timed_out
+    flag, and no inner error payload in the last JSON line of stdout.
+    A cancellation receipt, reaper note, timeout, or failure output
+    therefore refuses 'completed' — a row the gate accepts cannot later
+    be flagged for the same signals."""
+    if not _has_executor_record(raw):
+        return False
+    out = json.loads(raw)
+    if out.get("status") not in (None, "completed"):
+        return False
+    if out.get("exit_code"):
+        return False
+    if "error" in out or out.get("timed_out"):
+        return False
+    stdout = out.get("stdout")
+    if isinstance(stdout, str):
+        inner = _last_json_line(stdout)
+        if isinstance(inner, dict):
+            if inner.get("status") == "error" or inner.get("error"):
+                return False
+            inner_rc = inner.get("_exit_code") or inner.get("exit_code")
+            if inner_rc:
+                return False
+    return True
 
 _HYPOTHESIS_TRANSITIONS: dict[str, set[str]] = {
     "proposed": {"under_test", "abandoned"},
@@ -1118,16 +1169,19 @@ class StateStore:
                 "trial", trial.status.value, status, _TRIAL_TRANSITIONS
             )
             # 'completed' is a claim that the trial ran and produced a
-            # recorded result — it requires an executor record. Refuse
-            # to write an unevidenced completion.
-            if status == "completed" and not _has_executor_record(
+            # recorded result — the record must evidence a completed
+            # run, not merely carry a verdict key. A cancellation
+            # receipt or failure record is evidence of non-completion.
+            if status == "completed" and not _record_evidences_completion(
                 trial.executor_output_json
             ):
                 raise ValueError(
-                    f"Cannot mark {trial_id} 'completed': no executor "
-                    "record. Persist executor_output_json first via "
-                    "update_trial_executor_output, or mark 'failed' — "
-                    "an unevidenced completion is a mislabeled record."
+                    f"Cannot mark {trial_id} 'completed': the executor "
+                    "record does not evidence a completed run. Persist "
+                    "executor_output_json from a successful execution "
+                    "first via update_trial_executor_output, or mark "
+                    "'failed' — an unevidenced completion is a "
+                    "mislabeled record."
                 )
             # Stamp the execution window: started_at on →running,
             # finished_at on any terminal transition. First-write-wins —
@@ -1197,17 +1251,18 @@ class StateStore:
                     f"retryable, got {status!r}"
                 )
             # Same invariant as update_trial_status: a correction TO
-            # 'completed' must be backed by an executor record — the
-            # record must already carry a verdict (corrections alone
-            # are bookkeeping, not evidence of execution).
-            if status == "completed" and not _has_executor_record(
+            # 'completed' must be backed by a record evidencing a
+            # completed run — a cancellation receipt or failure record
+            # does not qualify (corrections alone are bookkeeping, not
+            # evidence of execution).
+            if status == "completed" and not _record_evidences_completion(
                 trial.executor_output_json
             ):
                 raise ValueError(
                     f"Cannot correct {trial_id} to 'completed': the "
-                    "record carries no executor output. Nothing "
-                    "evidences the run — 'failed' is the honest "
-                    "disposition for an unevidenced record."
+                    "executor output does not evidence a completed "
+                    "run — 'failed' is the honest disposition for a "
+                    "record that documents non-completion."
                 )
             from .models import _utc_now
             now = _utc_now()

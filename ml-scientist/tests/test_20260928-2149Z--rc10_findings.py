@@ -18,6 +18,9 @@ R32 open_campaign accepted uncarryable budgets that wedge at spawn.
 R33 the injected 'next' hint replayed pre-mutation advice.
 R34 create responses claimed status "created" while the stored row
     read active/proposed.
+R35 cancellation/reaper receipts satisfied the completed-correction
+    gate (a verdict key is not evidence of a completed run) and the
+    mislabeled_outcome corrections-exemption masked the laundered row.
 """
 
 import ast
@@ -718,6 +721,181 @@ class TestCorrectTrialStatus:
                 store.correct_trial_status("trial-1", "completed", "no record")
         finally:
             store.close()
+
+
+# --- R35: a verdict-key record is not evidence of completion ---------
+
+
+def _trial(store, tid="trial-1", status="failed", record=None):
+    """Create a trial row; prog-1/hyp-1 must already exist."""
+    from ml_episteme_mcp.state.models import Trial, TrialStatus
+
+    store.create_trial(Trial(
+        id=tid, programme_id="prog-1",
+        hypothesis_id="hyp-1", config_json="{}",
+        status=TrialStatus(status),
+        executor_output_json=record,
+    ))
+
+
+class TestCompletionEvidenceGate:
+    """R35: 'completed' requires a record evidencing a completed run.
+    Cancellation receipts, reaper notes, and failure outputs all carry
+    verdict keys — presence is not proof."""
+
+    @pytest.mark.parametrize("record", [
+        '{"status": "cancelled", "trial_id": "trial-1"}',
+        '{"status": "cancelled", "trial_id": "trial-1", "tombstoned": true}',
+        '{"status": "failed", "error": "Trial trial-1 already finished"}',
+        '{"status": "failed", "interrupted": true, '
+        '"error": "server restarted while trial was running"}',
+        '{"status": "timeout", "exit_code": -1, "error": "exceeded"}',
+        '{"status": "completed", "exit_code": 0, '
+        '"stdout": "{\\"status\\": \\"error\\", \\"error\\": \\"boom\\"}"}',
+    ])
+    def test_noncompletion_records_refuse_completed(self, tmp_path, record):
+        from ml_episteme_mcp.state.store import StateStore
+
+        store = StateStore(str(tmp_path / "s.db"))
+        store.connect()
+        try:
+            _episteme_prog_hyp(store)
+            for source in ("failed", "retryable"):
+                _trial(store, f"trial-{source}", status=source,
+                       record=record)
+                with pytest.raises(ValueError, match="evidence"):
+                    store.correct_trial_status(
+                        f"trial-{source}", "completed", "launder"
+                    )
+        finally:
+            store.close()
+
+    def test_running_transition_also_gated(self, tmp_path):
+        """update_trial_status holds the same invariant — a running
+        trial whose record documents non-completion cannot finalize
+        'completed'."""
+        from ml_episteme_mcp.state.store import StateStore
+
+        store = StateStore(str(tmp_path / "s.db"))
+        store.connect()
+        try:
+            _episteme_prog_hyp(store)
+            _trial(store, status="designed")
+            store.update_trial_status("trial-1", "running")
+            store.update_trial_executor_output(
+                "trial-1", '{"status": "cancelled"}'
+            )
+            with pytest.raises(ValueError, match="evidence"):
+                store.update_trial_status("trial-1", "completed")
+        finally:
+            store.close()
+
+    def test_clean_record_still_correctable(self, tmp_path):
+        """A genuine completed record remains correctable — evidence
+        re-read after the fact is the legitimate use of the tool."""
+        from ml_episteme_mcp.state.store import StateStore
+
+        store = StateStore(str(tmp_path / "s.db"))
+        store.connect()
+        try:
+            _episteme_prog_hyp(store)
+            _trial(store, status="failed",
+                   record='{"status": "completed", "exit_code": 0}')
+            store.correct_trial_status(
+                "trial-1", "completed", "re-read: executor succeeded"
+            )
+            assert store.get_trial("trial-1").status.value == "completed"
+        finally:
+            store.close()
+
+    @pytest.mark.asyncio
+    async def test_tool_path_mark_retryable_then_correct(self, tmp_path):
+        """End to end: mark_retryable persists the cancel receipt; the
+        subsequent completed-correction is refused at the tool."""
+        import json as _json
+
+        from mcp.client import Client
+        from ml_episteme_mcp.clients.adaptor import create_stub_adaptor
+        from ml_episteme_mcp.state.store import StateStore
+
+        store = StateStore(str(tmp_path / "s.db"))
+        store.connect()
+        try:
+            _episteme_prog_hyp(store)
+            _trial(store, status="designed")
+            store.update_trial_status("trial-1", "running")
+            adaptor = create_stub_adaptor()
+
+            async def _cancel(tid):
+                return _json.dumps(
+                    {"status": "cancelled", "trial_id": tid}
+                )
+
+            adaptor.executor.cancel_async = _cancel
+            client = Client(_episteme_server(store, adaptor))
+            async with client:
+                r = await _call(client, "mark_retryable", {
+                    "programme_id": "prog-1", "trial_id": "trial-1",
+                    "reason": "stuck",
+                })
+                assert "error" not in r, r
+                # The receipt landed on the row — this is what used to
+                # unlock the completed-correction.
+                out = _json.loads(
+                    store.get_trial("trial-1").executor_output_json
+                )
+                assert out["status"] == "cancelled"
+                r = await _call(client, "correct_trial_status", {
+                    "programme_id": "prog-1", "trial_id": "trial-1",
+                    "to_status": "completed",
+                    "reason": "it actually ran",
+                })
+                assert "error" in r
+                assert store.get_trial(
+                    "trial-1"
+                ).status.value == "retryable"
+        finally:
+            store.close()
+
+    def test_laundered_row_is_flagged(self, tmp_path):
+        """A completed row whose record is a cancellation receipt plus
+        a corrections trail is flagged by mislabeled_outcome — the
+        exemption that masked this shape is gone."""
+        from ml_episteme_mcp.integrity.checks import run_checks
+        from ml_episteme_mcp.state.store import StateStore
+
+        store = StateStore(str(tmp_path / "s.db"))
+        store.connect()
+        try:
+            _episteme_prog_hyp(store)
+            _trial(store, status="designed")
+            store.update_trial_status("trial-1", "running")
+            store.update_trial_executor_output(
+                "trial-1", _json_receipt()
+            )
+            # Bypass the gate the way a pre-fix launder did.
+            store.conn.execute(
+                "UPDATE trials SET status='completed' WHERE id='trial-1'"
+            )
+            store.conn.commit()
+            checks = {
+                c["name"]: c for c in run_checks(store)["checks"]
+            }
+            c = checks["mislabeled_outcome"]
+            assert not c["ok"]
+            assert c["violations"][0]["trial_id"] == "trial-1"
+        finally:
+            store.close()
+
+
+def _json_receipt():
+    import json as _json
+
+    return _json.dumps({
+        "status": "cancelled", "trial_id": "trial-1",
+        "corrections": [{"from": "retryable", "to": "completed",
+                         "reason": "x", "corrected_at": "t"}],
+    })
 
 
 # --- R30: abandon_hypothesis ------------------------------------------

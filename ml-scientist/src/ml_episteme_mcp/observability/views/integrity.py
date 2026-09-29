@@ -140,9 +140,11 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "whose executor record documents a failure (inner "
         "<code>status: \"error\"</code>, nonzero inner exit code). "
         "Correct via <code>correct_trial_status → failed</code>; the "
-        "correction is appended to the record, not rewritten. A "
-        "completed trial <em>with</em> an observation but no executor "
-        "record is corroborated, not mislabeled — reported in "
+        "correction is appended to the record, not rewritten — and a "
+        "record carrying <code>corrections</code> is not exempt: the "
+        "row's record must still support the <code>completed</code> "
+        "label. A completed trial <em>with</em> an observation but no "
+        "executor record is corroborated, not mislabeled — reported in "
         "<code>detail</code> as a bounded historical provenance gap.",
     ),
     (
