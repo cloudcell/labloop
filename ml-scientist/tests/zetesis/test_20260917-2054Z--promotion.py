@@ -57,7 +57,14 @@ CONTRACT = json.dumps({
     "contract": {
         "id": "contract-c1",
         "metrics": {"hits": "maximize"},
-        "budget": {}, "promotion_policy": {},
+        "budget": {},
+        # sesoi_d=4.0 keeps required_n=1 — fixture convenience, not a
+        # design point. "not_worth" rung means any claimed rung passes
+        # ordering; promote still must claim one.
+        "promotion_policy": {
+            "sesoi_d": 4.0, "target_power": 0.8,
+            "min_evidence_rung": "not_worth",
+        },
     }
 })
 
@@ -315,6 +322,7 @@ async def _open_campaign(mcp, adaptors, challenger="cand-beta"):
         "contract_id": "contract-c1",
         "challenger_id": challenger,
         "budget": {},
+        "seeds": [1],
     })
     assert "error" not in r, r
     return r["campaign_id"]
@@ -471,6 +479,7 @@ class TestCampaignLifecycle:
             "contract_id": "contract-c1",
             "challenger_id": "cand-beta",
             "budget": {},
+            "seeds": [1],
         })
         assert "error" in r and "incumbent" in r["error"]
 
@@ -576,6 +585,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
+            "claimed_rung": "positive",
         })
         assert r["decision_id"].startswith("decision-")
         assert r["claim_status"] == "minted"
@@ -635,6 +645,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
+            "claimed_rung": "positive",
         })
         assert "error" not in r
         champions = [
@@ -712,6 +723,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
+            "claimed_rung": "positive",
         })
         assert "error" in r and "promotion adaptor" in r["error"]
 

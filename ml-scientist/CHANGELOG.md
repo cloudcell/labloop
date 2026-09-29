@@ -6,7 +6,73 @@ entry timestamps are commit times in **UTC**.
 
 ## [Unreleased]
 
+### Removed
+
+- **`claims.importance` and `claim_edges.weight`** (e-plan
+  20260929-1643Z) — **breaking MCP change**: `assert_claim` no
+  longer takes `importance`; `relate` no longer takes `weight`;
+  evidence-dict `weight` keys are ignored; both columns are dropped
+  from `memory.db` by a guarded `DROP COLUMN` migration (the
+  store's first destructive migration — non-default row counts are
+  logged before each drop). Both fields were written-never-read —
+  defaults that carried no information and invited a false reading
+  (a weighted-looking graph that never ranked evidence). The
+  registry entries `CLAIM_IMPORTANCE_DEFAULT` and
+  `EDGE_WEIGHT_DEFAULT` are deleted with them; the registry now
+  holds zero `UNGROUNDED` and zero `transitional` entries, pinned
+  by new sentinel tests. If evidence ranking is ever wanted it
+  returns grounded — computed, with a citation.
+  *(2026-09-29 18:58Z)*
+
 ### Added
+
+- **Verdict confidence → computed posterior** (e-plan 20260929-1642Z)
+  — the indicted confidence literals are deleted:
+  `VERDICT_CONFIDENCE_{ACCEPTED,REJECTED}` (0.85 — unreachable per
+  NAP Table D-1), `METADECISION_CONFIDENCE` (0.6 — fixture-derived),
+  and `min(1.0, abs(promotion_score))` — a mean ratio re-labelled as
+  a probability (the Morey et al. error). Grounded procedures landed:
+  `arm_evidence` (two-sample normal-theory z, directional
+  `bf_2ln = max(z,0)²` — a losing challenger gets LR = 1, never
+  BF > 1), `verdict_posterior`/`posterior_from_2lnbf` (the NAP D-1
+  oracle bound, honestly labelled an upper bound), `rung_for_2lnbf`
+  (the inverse ladder). Contracts may declare `prior` (P[H₁] ∈
+  (0, 0.5]), snapshotted on campaign/tournament rows at open like
+  `sesoi_d`. `close_campaign`/`close_tournament` compute and persist
+  `p_value`/`bf_2ln` (null when the arms can't support it). The rung
+  gate graduated to declared ≤ claimed ≤ computed — a promote may not
+  assert past the evidence's own bound; `computed_rung`/`bf_2ln`
+  forward upstream onto decision rows. Every minted claim carries
+  `confidence_basis` (`ungrounded`/`weakly_grounded`/`grounded`), a
+  new nullable claims column — a posterior bound mints `grounded`,
+  ceiling mints under consulted evidence mint `weakly_grounded`, and
+  `conclude_investigation` findings with no refs mint `ungrounded`.
+  GUI renders the statistic on campaign/tournament pages and the
+  basis on claims; diagnostic prompt
+  `20260929-1830Z-verdict-posterior` covers the bounds end-to-end.
+  *(2026-09-29 18:30Z)*
+
+- **Contract-declared power** (e-plan 20260929-1641Z) —
+  `promotion_policy` is no longer inert: `sesoi_d`, `target_power`,
+  and `min_evidence_rung` (Kass–Raftery 2 ln BF ladder) are required
+  at `create_evaluation_contract`/`create_meta_contract`, with
+  optional `alpha` (0.05). Grounded procedures landed in
+  `_grounded_constants`: `required_n` (closed-form two-sample, pilot
+  SESOI refused per Albers & Lakens), `min_evidence_rung`/
+  `rung_at_least`, `type_s_m` (Gelman & Carlin retrodesign).
+  `open_tournament`/`open_campaign` require a declared n (seeds, else
+  `budget.programmes_per_arm`), refuse underpowered opens unless
+  `allow_underpowered` (recorded `power_acknowledged`), and refuse
+  legacy contracts outright — mint a new version. Closed rows freeze
+  `n_achieved`, `underpowered` (achieved < required), and Type S/M
+  (null when not computable). `record_meta_decision`,
+  `record_promotion_decision`, and `record_promotion_verdict` record
+  `declared_rung`/`claimed_rung` and refuse a `promote` claiming a
+  rung below the contract minimum — declared-vs-claimed; the
+  BF-producing statistic is the posterior plan's. GUI renders the
+  power design on contract/campaign/tournament pages; diagnostic
+  prompt `20260929-1740Z-contract-declared-power` covers the gates
+  end-to-end. *(2026-09-29 17:40Z)*
 
 - **Sealed-path runtime deny** — `[executor] sealed_path_patterns` is
   now a physical boundary, not an audit tag: under `minimal`/`full`
@@ -51,8 +117,31 @@ entry timestamps are commit times in **UTC**.
   recurrent-protocol smoke, blob-retrieval + input digests,
   state-machine coverage (all five servers, embedded matrix), and
   sealed-path runtime deny. *(2026-09-26 17:53Z – 2026-09-27 09:58Z)*
+- **Grounded-constants registry** — every decision constant now
+  lives in `constants/grounded_constants.py` (byte-identical
+  `_grounded_constants.py` mirrors per package, pinned by test),
+  each carrying a grounding status, full citation into
+  `docs-pub/r-references/val-grounding/`, corpus sha256, and a
+  `decision_load` flag enforced by `for_decision()`. All audited
+  literals (`PRIOR_CONFIDENCE_MAX` 0.3, verdict `0.85`, arete `0.6`,
+  `importance`/`weight` defaults, `status_freshness_seconds` 600,
+  `stale_*` 3600, `check_interval`/`stalled_margin` 300,
+  `observation_grace`/`improvement_epoch` 86400, `stale_programme`
+  24 h, `archive_seal_warn` 72 h, residue `1.0`, `log_max_files`
+  100/30) now import from the registry — agora's divergent
+  `log_max_files=30` unified at 100. A generated
+  `constants/disclosure.md` (drift-pinned by test) and a
+  `constants` block in every `X://status` digest expose the state.
+  *(2026-09-29)*
 
 ### Fixed
+
+- **`close_campaign` zero-divisor** — a zero champion-arm mean now
+  refuses with the observed means and names `abandon_campaign`,
+  instead of writing `promotion_score=0.0` (the camp-532d7b60 bug;
+  Gleser–Hwang 1987 — no always-bounded ratio score covers a
+  zero denominator). Mirrors `close_tournament`'s refusal.
+  *(2026-09-29)*
 
 - **rc-11 extraction findings** — the rc-11 VM battery surfaced three
   code defects, all fixed: `assert_claim` deduplication silently

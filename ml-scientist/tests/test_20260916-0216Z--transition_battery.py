@@ -429,7 +429,13 @@ class TestHypothesisTransitions:
                     async with ClientSession(r2, w2) as m:
                         await m.initialize()
                         c = await ok(m, "get_claim", {"claim_id": r["claim_id"]})
-                        assert c["claim"]["confidence"] == 0.85
+                        # prior-ceiling mint — no comparative
+                        # likelihood on a single-arm verdict
+                        assert c["claim"]["confidence"] == 0.3
+                        assert (
+                            c["claim"]["confidence_basis"]
+                            == "weakly_grounded"
+                        )
                         assert "holds under" in c["claim"]["content"]
                         rels = {(e["ref_type"], e["relation"])
                                 for e in c["outgoing_edges"]}
@@ -453,8 +459,14 @@ class TestHypothesisTransitions:
                     async with ClientSession(r2, w2) as m:
                         await m.initialize()
                         c = await ok(m, "get_claim", {"claim_id": r["claim_id"]})
-                        # falsification is knowledge: high confidence, negated content
-                        assert c["claim"]["confidence"] == 0.85
+                        # falsification is positive knowledge, but a
+                        # single-arm verdict has no comparative
+                        # likelihood — the prior ceiling, labelled
+                        assert c["claim"]["confidence"] == 0.3
+                        assert (
+                            c["claim"]["confidence_basis"]
+                            == "weakly_grounded"
+                        )
                         assert "does not hold" in c["claim"]["content"]
 
     async def test_conclude_inconclusive_mints_nothing(self, pair):
@@ -836,7 +848,11 @@ class TestLineage:
                 ct = await ok(s, "create_evaluation_contract", {
                     "programme_id": pid,
                     "metrics": {"primary": "accuracy"},
-                    "promotion_policy": {"rule": "beat champion"},
+                    "promotion_policy": {
+                        "rule": "beat champion",
+                        "sesoi_d": 0.5, "target_power": 0.8,
+                        "min_evidence_rung": "not_worth",
+                    },
                 })
                 # rc-7 Q4 — fabricated Loop-0 refs are refused; cite a
                 # real trial.
@@ -848,6 +864,7 @@ class TestLineage:
                     "verdict": "promote", "rationale": "won",
                     "decided_by": "battery",
                     "evidence_refs": [tid],
+                    "claimed_rung": "positive",
                 }
                 # invalid verdict
                 bad = dict(args, verdict="crown")

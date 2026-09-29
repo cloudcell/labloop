@@ -6,7 +6,8 @@ import json
 
 from starlette.responses import HTMLResponse
 
-from ...state.models import TournamentArm
+from ... import _grounded_constants as _gc
+from ...state.models import Tournament, TournamentArm
 from ...state.store import ImproverStore
 from ..links import entity_url
 from ..templates import (
@@ -40,6 +41,52 @@ def _result_rows(results) -> str:
     ) or (
         '<tr><td colspan="4" class="muted">No results recorded on '
         "this arm — the substrate has produced nothing.</td></tr>"
+    )
+
+
+def _power_block(t: Tournament) -> str:
+    """Contract-declared power design — NULLs mark pre-gate rows."""
+    bits = []
+    if t.sesoi_d is not None:
+        bits.append(
+            f"sesoi_d <b>{t.sesoi_d}</b> · target_power "
+            f"<b>{t.target_power}</b> · alpha <b>{t.alpha}</b> · "
+            f"min rung <b>{escape(t.min_evidence_rung or '?')}</b>"
+            + (f" · prior <b>{t.prior}</b>"
+               if t.prior is not None else "")
+        )
+    if t.n_required is not None:
+        bits.append(
+            f"n required <b>{t.n_required}</b> / requested "
+            f"<b>{t.n_requested}</b>"
+            + (f" / achieved <b>{t.n_achieved}</b>"
+               if t.n_achieved is not None else "")
+        )
+    if t.power_acknowledged:
+        bits.append(
+            '<span class="status status-abandoned">underpowered — '
+            'acknowledged at open</span>'
+        )
+    if t.underpowered:
+        bits.append(
+            '<span class="status status-abandoned">underpowered — '
+            'delivered below requested</span>'
+        )
+    if t.type_s_risk is not None:
+        bits.append(
+            f"type S risk <b>{t.type_s_risk:.3f}</b> · "
+            f"type M ratio <b>{t.type_m_ratio:.2f}</b>"
+        )
+    if t.bf_2ln is not None:
+        bits.append(
+            f"p <b>{t.p_value:.4f}</b> · 2 ln BF "
+            f"<b>{t.bf_2ln:.2f}</b> (oracle bound) · reaches "
+            f"<b>{_gc.rung_for_2lnbf(t.bf_2ln)}</b>"
+        )
+    return (
+        '<p class="muted">power design:</p><p>'
+        + " &nbsp;·&nbsp; ".join(bits) + "</p>"
+        if bits else ""
     )
 
 
@@ -142,6 +189,7 @@ def render_tournament_detail(
         <p class="muted">opened {format_timestamp(t.created_at)}
           {(f'&nbsp;·&nbsp; closed {format_timestamp(t.closed_at)}')
            if t.closed_at else ""}</p>
+        {_power_block(t)}
         {(f'<p class="muted">contract metrics:</p><pre>'
           f'{escape(json.dumps(contract.metrics, indent=2))}</pre>')
          if contract else ""}

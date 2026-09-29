@@ -492,11 +492,19 @@ async def test_contract_metric_lint(tmp_path):
         mcp = create_server(store)
         await call_tool(mcp, "create_meta_contract", {
             "metrics": {"primary_metric": "min_accuracy", "direction": "max"},
-            "promotion_policy": {"min_gain": 1.0},
+            "promotion_policy": {
+                "min_gain": 1.0,
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         })
         r = await call_tool(mcp, "create_meta_contract", {
             "metrics": {"primary_metric": "min_accuracy_v2"},
-            "promotion_policy": {"min_gain": 1.0},
+            "promotion_policy": {
+                "min_gain": 1.0,
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         })
         assert "error" not in r
         assert r.get("lint"), "expected a drift lint on near-spelling"
@@ -504,7 +512,11 @@ async def test_contract_metric_lint(tmp_path):
         # A genuinely new metric produces no lint.
         r2 = await call_tool(mcp, "create_meta_contract", {
             "metrics": {"primary_metric": "totally_different_xyz"},
-            "promotion_policy": {"min_gain": 1.0},
+            "promotion_policy": {
+                "min_gain": 1.0,
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         })
         assert not r2.get("lint")
     finally:
@@ -554,7 +566,7 @@ async def test_by_relation_resource(anamnesis):
     b = await _mint_claim(mcp, "claim y", [])
     await call_tool(mcp, "relate", {
         "from_claim": a, "to_ref": b, "ref_type": "claim",
-        "relation": "contradicts", "weight": 0.9,
+        "relation": "contradicts",
     })
     res = await mcp.read_resource("claims://by-relation/contradicts")
     payload = json.loads(list(res)[0].content)

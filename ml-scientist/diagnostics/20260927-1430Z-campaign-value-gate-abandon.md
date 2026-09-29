@@ -27,11 +27,13 @@ contract and candidates live upstream on episteme.
 
 PART A — setup (same shape as the rc-5 metric diagnostic)
 
-1. Episteme: create_evaluation_contract (primary metric "rec_gain") +
+1. Episteme: create_evaluation_contract (primary metric "rec_gain",
+   powered promotion_policy — README §Contract recipe: {"sesoi_d":
+   4.0, "target_power": 0.8, "min_evidence_rung": "not_worth"}) +
    register two candidates; promote one to incumbent via
    record_promotion_decision (evidence_refs ≥1 — P3's gate is live).
 2. Zetesis: refresh_roster → open_campaign naming the contract +
-   challenger.
+   challenger, seeds=[1] (the declared-n gate).
 
 PART B — NEGATIVE: bad metric VALUES refused at write
 

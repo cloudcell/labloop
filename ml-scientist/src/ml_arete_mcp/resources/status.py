@@ -25,6 +25,7 @@ from ..enforcement.recurrence import (
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import ImproverStore
+from .. import _grounded_constants as _gc
 
 # Which tools a down channel blocks.
 _BLOCKED_TOOLS = {
@@ -357,6 +358,7 @@ def status_digest(
         "recommended_next": recs,
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
+        "constants": _gc.constants_block(),
     }
     TRACKER.mark_status_read(digest)
     return digest

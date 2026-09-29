@@ -9,12 +9,15 @@ the philosophy from a-00 §5 as code.
 
 from __future__ import annotations
 
+import math
+
 import json
 import re
 from typing import Any
 
 from ..state.models import Hypothesis, Programme, Trial, Bundle
 from ..state.store import StateStore
+from .. import _grounded_constants as _gc
 
 
 # --- Commitment 1: The loop is the unit ---
@@ -587,6 +590,84 @@ def check_contract_programme_exists(
     """An evaluation contract must attach to a real programme."""
     if store.get_programme(programme_id) is None:
         return f"Programme not found: {programme_id}."
+    return None
+
+
+POWER_POLICY_KEYS = ("sesoi_d", "target_power", "min_evidence_rung")
+
+
+def check_promotion_policy_power(policy: dict | None) -> str | None:
+    """A promotion policy must declare the design inputs a power
+    analysis reads — Bakker et al. (2020): a preregistration states
+    its SESOI and target power before the data exists. This is the
+    gate that makes promotion_policy load-bearing rather than
+    decorative."""
+    policy = policy or {}
+    missing = [k for k in POWER_POLICY_KEYS if k not in policy]
+    if missing:
+        return (
+            f"promotion_policy lacks required power keys "
+            f"({', '.join(missing)}) — contracts declare the design "
+            "inputs up front: 'sesoi_d' (standardized smallest "
+            "effect of interest, Cohen's d > 0), 'target_power' in "
+            "(0, 1), 'min_evidence_rung' "
+            f"({'|'.join(_gc.EVIDENCE_RUNGS)}); optional 'alpha' "
+            "(default 0.05)."
+        )
+    d = policy["sesoi_d"]
+    if (
+        not isinstance(d, (int, float))
+        or isinstance(d, bool)
+        or d <= 0
+    ):
+        return (
+            f"promotion_policy.sesoi_d must be a number > 0 — the "
+            f"standardized smallest effect worth detecting (a "
+            f"declaration, never a pilot estimate), got: {d!r}"
+        )
+    p = policy["target_power"]
+    if (
+        not isinstance(p, (int, float))
+        or isinstance(p, bool)
+        or not 0 < p < 1
+    ):
+        return (
+            f"promotion_policy.target_power must be in (0, 1), "
+            f"got: {p!r}"
+        )
+    rung = policy["min_evidence_rung"]
+    if rung not in _gc.EVIDENCE_RUNGS:
+        return (
+            f"promotion_policy.min_evidence_rung must be one of "
+            f"{'|'.join(_gc.EVIDENCE_RUNGS)} (the Kass–Raftery "
+            f"2 ln BF ladder), got: {rung!r}"
+        )
+    alpha = policy.get("alpha", 0.05)
+    if (
+        not isinstance(alpha, (int, float))
+        or isinstance(alpha, bool)
+        or not 0 < alpha < 1
+    ):
+        return (
+            f"promotion_policy.alpha must be in (0, 1), "
+            f"got: {alpha!r}"
+        )
+    # Optional declared prior P[H₁] — NAP Table D-1 tabulates to
+    # 0.5; a challenger starting above 'as likely as not' before
+    # the evidence exists is not a preregistration. Absent → the
+    # mint uses PRIOR_CONFIDENCE_MAX (0.3).
+    prior = policy.get("prior")
+    if prior is not None and (
+        not isinstance(prior, (int, float))
+        or isinstance(prior, bool)
+        or not math.isfinite(prior)
+        or not 0 < prior <= 0.5
+    ):
+        return (
+            f"promotion_policy.prior must be in (0, 0.5] — the "
+            f"NAP D-1 tabulated range; P[H₁] declared before the "
+            f"evidence exists, got: {prior!r}"
+        )
     return None
 
 

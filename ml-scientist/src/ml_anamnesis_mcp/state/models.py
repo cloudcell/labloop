@@ -3,8 +3,9 @@
 claims      → information content entity (a cross-programme assertion
               about a disposition or relation — a hypothesis that
               outlives its programme)
-claim_edges → relational quality (typed, weighted relations between a
-              claim and evidence/other claims)
+claim_edges → relational quality (typed relations between a
+              claim and evidence/other claims — unweighted by design:
+              the graph does not rank evidence)
 
 Both tables are insert-only by surface: bi-temporal invalidation
 (valid_until) replaces deletion.
@@ -126,12 +127,17 @@ class Claim(BaseModel):
     content: str
     type: ClaimType
     confidence: float = Field(ge=0.0, le=1.0)
-    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     valid_from: str = Field(default_factory=_utc_now)
     valid_until: str | None = None
     supersedes_id: str | None = None
     content_hash: str
     source_id: str | None = None
+    # Confidence provenance (plan-20260929-1642Z): what the float
+    # rests on — grounded = a posterior bound was computed;
+    # weakly_grounded = evidence consulted, no likelihood;
+    # ungrounded = prior-ceiling mint, no evidence. NULL on
+    # legacy rows — recorded as ungrounded, not guessed.
+    confidence_basis: str | None = None
     created_at: str = Field(default_factory=_utc_now)
 
 
@@ -141,6 +147,5 @@ class ClaimEdge(BaseModel):
     to_ref: str
     ref_type: RefType
     relation: Relation
-    weight: float = 1.0
     source_id: str | None = None
     created_at: str = Field(default_factory=_utc_now)

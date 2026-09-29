@@ -30,7 +30,9 @@ PART A — R1: the conditional-proposal human gate at decision-write
    "admitted" or "rejected", the fixture is wrong; say so and stop.
 2. register_improver under that proposal → candidate.
 3. Run a tournament involving the candidate (open_tournament →
-   record results both arms → close_tournament), then pull_evidence
+   record results both arms → close_tournament) — the open needs a
+   powered meta-contract (README §Contract recipe) and seeds=[1] —
+   then pull_evidence
    to mint an eref in a context involving the candidate.
 4. THE TEST: record_meta_decision(candidate, verdict="promote",
    decided_by="agent:diagnostics", evidence_refs=[eref]) — it MUST

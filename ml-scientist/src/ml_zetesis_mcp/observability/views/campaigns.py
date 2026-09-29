@@ -7,6 +7,7 @@ import json
 
 from starlette.responses import HTMLResponse
 
+from ... import _grounded_constants as _gc
 from ...state.models import PromotionCampaign, RosterEntry
 from ...state.store import SearchStore
 from ..links import link_id, link_ids
@@ -181,6 +182,50 @@ def render_campaign_detail(
         if c.closed_at else ""
     )
 
+    # Contract-declared power design — NULL on pre-gate campaigns.
+    power_bits = []
+    if c.sesoi_d is not None:
+        power_bits.append(
+            f"sesoi_d <b>{c.sesoi_d}</b> · target_power "
+            f"<b>{c.target_power}</b> · alpha <b>{c.alpha}</b> · "
+            f"min rung <b>{escape(c.min_evidence_rung or '?')}</b>"
+            + (f" · prior <b>{c.prior}</b>"
+               if c.prior is not None else "")
+        )
+    if c.n_required is not None:
+        power_bits.append(
+            f"n required <b>{c.n_required}</b> / requested "
+            f"<b>{c.n_requested}</b>"
+            + (" / achieved <b>{}</b>".format(c.n_achieved)
+               if c.n_achieved is not None else "")
+        )
+    if c.power_acknowledged:
+        power_bits.append(
+            '<span class="status status-abandoned">underpowered — '
+            'acknowledged at open</span>'
+        )
+    if c.underpowered:
+        power_bits.append(
+            '<span class="status status-abandoned">underpowered — '
+            'delivered below requested</span>'
+        )
+    if c.type_s_risk is not None:
+        power_bits.append(
+            f"type S risk <b>{c.type_s_risk:.3f}</b> · "
+            f"type M ratio <b>{c.type_m_ratio:.2f}</b>"
+        )
+    if c.bf_2ln is not None:
+        power_bits.append(
+            f"p <b>{c.p_value:.4f}</b> · 2 ln BF "
+            f"<b>{c.bf_2ln:.2f}</b> (oracle bound) · reaches "
+            f"<b>{_gc.rung_for_2lnbf(c.bf_2ln)}</b>"
+        )
+    power_block = (
+        '<p class="muted" style="margin-top: 0.5rem">power '
+        'design:</p><p>' + " &nbsp;·&nbsp; ".join(power_bits) + "</p>"
+        if power_bits else ""
+    )
+
     body = f"""
     <h1><span class="mono">{escape(c.id)}</span></h1>
     <div class="card">
@@ -198,6 +243,7 @@ def render_campaign_detail(
         <p class="muted" style="margin-top: 0.5rem">
             opened {format_timestamp(c.created_at)}
         </p>{closed}
+        {power_block}
         <p class="muted" style="margin-top: 0.5rem">budget:</p>
         <pre>{escape(json.dumps(c.budget, indent=2))}</pre>
         <p class="muted">seeds: {escape(json.dumps(c.seeds))}</p>

@@ -82,13 +82,15 @@ class MockClaims(ClaimsRole):
         self.asserts: list[dict[str, Any]] = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None
+        self, content, type, confidence, evidence=None, source_id=None,
+        confidence_basis=None,
     ):
         if self.fail:
             raise RuntimeError("claims server unreachable")
         self.asserts.append({
             "content": content, "type": type, "confidence": confidence,
             "evidence": evidence, "source_id": source_id,
+            "confidence_basis": confidence_basis,
         })
         return f"claim-{len(self.asserts)}"
 
@@ -605,7 +607,11 @@ class TestClaimMinting:
                 client, store, verdict=verdict
             )
         assert result["claim_status"] == "minted"
-        assert claims.asserts[0]["confidence"] == 0.85
+        # Single-arm verdicts carry no comparative likelihood — the
+        # mint is the grounded prior ceiling, honestly labelled
+        # (plan-20260929-1642Z).
+        assert claims.asserts[0]["confidence"] == 0.3
+        assert claims.asserts[0]["confidence_basis"] == "weakly_grounded"
 
     @pytest.mark.asyncio
     async def test_rejected_mints_the_falsification(
@@ -734,7 +740,7 @@ class TestRoleInterfaceNotProductDependent:
                 return "custom"
 
         class CustomClaims(ClaimsRole):
-            async def assert_claim(self, content, type, confidence, evidence=None, source_id=None):
+            async def assert_claim(self, content, type, confidence, evidence=None, source_id=None, confidence_basis=None):
                 return "custom-claim"
             async def relate(self, from_claim, to_ref, ref_type, relation):
                 return "custom-edge"

@@ -17,11 +17,16 @@ The intended chain (discover exact argument shapes from the tool
 schemas — read them before calling):
 
   episteme: create_evaluation_contract (an upstream contract —
-            carries the primary metric) + register_candidate for
+            carries the primary metric; promotion_policy must be
+            powered — README §Contract recipe: {"sesoi_d": 4.0,
+            "target_power": 0.8, "min_evidence_rung": "not_worth"})
+            + register_candidate for
             both arms (champion + challenger cand- ids)
   arete:    improver parent + candidate → open_tournament whose
             budget carries programmes_per_arm + trials_per_programme
-            → open_arm_campaign(tournament, arm, upstream_contract_id,
+            (programmes_per_arm doubles as the declared n under the
+            power gate) → open_arm_campaign(tournament, arm,
+            upstream_contract_id,
             challenger_id) — one campaign per arm; budget is carried
             verbatim, the caller cannot redefine it
   zetesis:  spawn_campaign_programme → creates a REAL upstream

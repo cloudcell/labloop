@@ -131,7 +131,12 @@ class TestCampaignOverRealLoop0:
             loop0, "create_evaluation_contract", {
                 "programme_id": prog_champ["programme_id"],
                 "metrics": {"hits": "maximize"},
-                "promotion_policy": {"threshold": 1.0},
+                # Powered contract — sesoi_d=4.0 keeps required_n=1.
+                "promotion_policy": {
+                    "threshold": 1.0,
+                    "sesoi_d": 4.0, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             },
         )
         assert "error" not in contract, contract
@@ -140,7 +145,7 @@ class TestCampaignOverRealLoop0:
         r = await call_tool_http(zet, "open_campaign", {
             "contract_id": contract["contract_id"],
             "challenger_id": challenger,
-            "budget": {},
+            "budget": {}, "seeds": [1],
         })
         assert "error" not in r, r
         assert r["champion_id"] == champion
@@ -184,6 +189,7 @@ class TestCampaignOverRealLoop0:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:battery",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
+            "claimed_rung": "positive",
         })
         assert "error" not in r, r
         assert r["decision_id"].startswith("decision-")
@@ -244,12 +250,16 @@ class TestCampaignOverRealLoop0:
             loop0, "create_evaluation_contract", {
                 "programme_id": prog["programme_id"],
                 "metrics": {"hits": "maximize"},
-                "promotion_policy": {},
+                "promotion_policy": {
+                    "sesoi_d": 4.0, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             },
         )
         cid = (await call_tool_http(zet, "open_campaign", {
             "contract_id": contract["contract_id"],
             "challenger_id": challenger, "budget": {},
+            "seeds": [1],
         }))["campaign_id"]
         for arm, pid in (
             ("champion", prog["programme_id"]),

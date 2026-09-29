@@ -82,6 +82,7 @@ def create_claims_server():
         confidence: float,
         evidence: list | None = None,
         source_id: str | None = None,
+        confidence_basis: str | None = None,
     ) -> str:
         for cid, c in claims.items():
             if c["content"] == content and c["type"] == type:
@@ -90,7 +91,7 @@ def create_claims_server():
         claims[claim_id] = {
             "id": claim_id, "content": content, "type": type,
             "confidence": confidence, "evidence": evidence or [],
-            "source_id": source_id,
+            "source_id": source_id, "confidence_basis": confidence_basis,
         }
         return json.dumps({"claim_id": claim_id, "status": "created"})
 

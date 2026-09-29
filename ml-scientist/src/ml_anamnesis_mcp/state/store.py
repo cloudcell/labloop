@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 
 from .models import Claim, ClaimEdge, INTERNAL_REF_PREFIXES
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA = """
@@ -20,12 +23,12 @@ CREATE TABLE IF NOT EXISTS claims (
     content       TEXT NOT NULL,
     type          TEXT NOT NULL,
     confidence    REAL NOT NULL,
-    importance    REAL NOT NULL DEFAULT 0.5,
     valid_from    TEXT NOT NULL,
     valid_until   TEXT,
     supersedes_id TEXT REFERENCES claims(id),
     content_hash  TEXT NOT NULL UNIQUE,
     source_id     TEXT,
+    confidence_basis TEXT,
     created_at    TEXT NOT NULL
 );
 
@@ -35,7 +38,6 @@ CREATE TABLE IF NOT EXISTS claim_edges (
     to_ref      TEXT NOT NULL,
     ref_type    TEXT NOT NULL,
     relation    TEXT NOT NULL,
-    weight      REAL NOT NULL DEFAULT 1.0,
     source_id   TEXT,
     created_at  TEXT NOT NULL
 );
@@ -77,7 +79,42 @@ class MemoryStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self._retype_misfiled_external_edges()
+
+    def _migrate(self) -> None:
+        """Column migrations — adds stay additive (existing rows
+        readable, null where the field postdates them); drops remove
+        fields whose presence itself was a falsehood
+        (plan-20260929-1643Z). Adds run before drops so a DB needing
+        both upgrades gets each independently."""
+        cols = {
+            r["name"] for r in self._fetchall("PRAGMA table_info(claims)")
+        }
+        for name, ddl in (("confidence_basis", "TEXT"),):
+            if name not in cols:
+                self._execute(
+                    f"ALTER TABLE claims ADD COLUMN {name} {ddl}"
+                )
+        for table, col, default in (
+            ("claims", "importance", "0.5"),
+            ("claim_edges", "weight", "1.0"),
+        ):
+            cols = {
+                r["name"]
+                for r in self._fetchall(f"PRAGMA table_info({table})")
+            }
+            if col in cols:
+                n = self._fetchone(
+                    f"SELECT COUNT(*) AS n FROM {table} "
+                    f"WHERE {col} != {default}"
+                )["n"]
+                logger.info(
+                    "migrating %s: dropping %s (%d non-default rows)",
+                    table, col, n,
+                )
+                self._execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+        self.conn.commit()
 
     def _retype_misfiled_external_edges(self) -> None:
         """Retype 'external' edges whose to_ref carries a known internal
@@ -140,15 +177,16 @@ class MemoryStore:
     def create_claim(self, claim: Claim) -> None:
         self._execute(
             """INSERT INTO claims
-               (id, content, type, confidence, importance, valid_from,
+               (id, content, type, confidence, valid_from,
                 valid_until, supersedes_id, content_hash, source_id,
-                created_at)
+                confidence_basis, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 claim.id, claim.content, claim.type.value,
-                claim.confidence, claim.importance, claim.valid_from,
+                claim.confidence, claim.valid_from,
                 claim.valid_until, claim.supersedes_id,
-                claim.content_hash, claim.source_id, claim.created_at,
+                claim.content_hash, claim.source_id,
+                claim.confidence_basis, claim.created_at,
             ),
         )
 
@@ -257,17 +295,21 @@ class MemoryStore:
         }
 
     def _row_to_claim(self, row: sqlite3.Row) -> Claim:
+        cols = set(row.keys())
         return Claim(
             id=row["id"],
             content=row["content"],
             type=row["type"],
             confidence=row["confidence"],
-            importance=row["importance"],
             valid_from=row["valid_from"],
             valid_until=row["valid_until"],
             supersedes_id=row["supersedes_id"],
             content_hash=row["content_hash"],
             source_id=row["source_id"],
+            confidence_basis=(
+                row["confidence_basis"]
+                if "confidence_basis" in cols else None
+            ),
             created_at=row["created_at"],
         )
 
@@ -276,12 +318,12 @@ class MemoryStore:
     def create_edge(self, edge: ClaimEdge) -> None:
         self._execute(
             """INSERT INTO claim_edges
-               (id, from_claim, to_ref, ref_type, relation, weight,
+               (id, from_claim, to_ref, ref_type, relation,
                 source_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 edge.id, edge.from_claim, edge.to_ref,
-                edge.ref_type.value, edge.relation.value, edge.weight,
+                edge.ref_type.value, edge.relation.value,
                 edge.source_id, edge.created_at,
             ),
         )
@@ -336,7 +378,6 @@ class MemoryStore:
             to_ref=row["to_ref"],
             ref_type=row["ref_type"],
             relation=row["relation"],
-            weight=row["weight"],
             source_id=row["source_id"],
             created_at=row["created_at"],
         )

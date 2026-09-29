@@ -59,8 +59,11 @@ Drive one programme through completion while touching every transition:
 
 PART B — Loop 0 promotion machinery (episteme; seeds zetesis' truth)
 
-12. register_candidate (diag candidate) → create_evaluation_contract →
-    record_promotion_decision with a promote verdict → confirm
+12. register_candidate (diag candidate) → create_evaluation_contract
+    (powered promotion_policy required — README §Contract recipe:
+    {"sesoi_d": 4.0, "target_power": 0.8, "min_evidence_rung":
+    "not_worth"}) → record_promotion_decision with a promote
+    verdict → confirm
     get_incumbent now reports an incumbent. This is the upstream truth
     zetesis' roster derives from.
 
@@ -94,14 +97,19 @@ PART D — Loop 1 (zetesis: investigation, finding, campaign, spawn, roster)
 19. open_investigation → abandon_investigation → abandoned (second
     investigation, no findings needed).
 20. Campaign (the orchestration path): open_campaign on the incumbent
-    contract → open. spawn_campaign_programme → spawned. NEGATIVE:
+    contract with seeds=[1] (declared-n gate — the contract is
+    powered) → open. spawn_campaign_programme → spawned. NEGATIVE:
     close_campaign before both arms have results → refused.
     record_campaign_result for each arm (the spawn's programme must
     actually run on episteme — drive it through Part A's sequence).
     NEGATIVE: record_campaign_result for a programme whose
     candidate_version_id doesn't match the arm → refused.
     close_campaign → closed; confirm promotion_score is frozen on the
-    record. record_promotion_verdict → claim minted.
+    record alongside p_value/bf_2ln/computed_rung.
+    record_promotion_verdict (verdict=promote → claimed_rung
+    "not_worth" — the contract's declared rung and the campaign's
+    computed rung both bound it) → claim minted with
+    confidence_basis set.
 
 PART E — Loop 2 (arete: proposal gate, tournament, decision, policy, canary)
 
@@ -109,13 +117,15 @@ PART E — Loop 2 (arete: proposal gate, tournament, decision, policy, canary)
     outcomes: one touching a class-1 immutable surface → rejected at
     the gate (rejection_reason recorded); one touching an
     unknown/class-3 component → conditional; one class-2 → admitted.
-22. open_tournament T-A. NEGATIVE: close_tournament on it unpaired →
+22. open_tournament T-A (the meta-contract's promotion_policy needs
+    the power keys — README §Contract recipe — and the open needs a
+    declared n: seeds=[1]). NEGATIVE: close_tournament on it unpaired →
     refused (both arms need ≥1 result). Instead void_tournament with
     rationale + decided_by=human:<you> → voided. NEGATIVE:
     record_tournament_result on the voided record → refused (the
     message must say "voided", not "closed").
 23. Open T-B for real: open_tournament(parent champion vs a registered
-    candidate improver). record_tournament_result on BOTH arms (seed
+    candidate improver, seeds=[1]). record_tournament_result on BOTH arms (seed
     the metrics so candidate wins or loses deliberately — you choose).
     pull_evidence on context=tournament T-B and KEEP the evidence_ref_id
     — the decision in 24 must cite one. close_tournament → closed;
@@ -130,7 +140,9 @@ PART E — Loop 2 (arete: proposal gate, tournament, decision, policy, canary)
     T-A → refused (a voided record is not a comparison). Then a real
     decision on T-B citing the eref from 23 (verdict=hold is fine if
     you don't want to promote — it still discharges the debt;
-    verdict=promote if you continue to step 25).
+    verdict=promote if you continue to step 25 — under the powered
+    contract a promote needs claimed_rung, "not_worth" clears both
+    gates).
 25. register_improver a child of the champion naming the admitted
     proposal (proposal_id + parent_id). If you promoted at 24:
     promote_policy → minted→active, champion pointer moves, displaced

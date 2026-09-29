@@ -146,6 +146,25 @@ class Tournament(BaseModel):
     # The attributed void record {rationale, decided_by, voided_at} —
     # set when status=voided, NULL otherwise.
     void: dict[str, Any] | None = None
+    # Contract-declared power design, snapshotted at open — the frozen
+    # contract stays the authority; these keep the row self-contained.
+    n_required: int | None = None
+    n_requested: int | None = None
+    power_acknowledged: bool = False
+    sesoi_d: float | None = None
+    target_power: float | None = None
+    min_evidence_rung: str | None = None
+    alpha: float | None = None
+    # Declared prior P[H₁] (plan-20260929-1642Z) — frozen with the
+    # contract; None → PRIOR_CONFIDENCE_MAX at mint.
+    prior: float | None = None
+    # Close-time accounting — set by close_tournament.
+    n_achieved: int | None = None
+    underpowered: bool | None = None
+    type_s_risk: float | None = None
+    type_m_ratio: float | None = None
+    p_value: float | None = None   # one-sided, candidate-favored
+    bf_2ln: float | None = None    # oracle LR bound: max(z,0)²
 
 
 class TournamentResult(BaseModel):
@@ -184,6 +203,16 @@ class MetaDecision(BaseModel):
     decided_by: str
     claim_id: str | None = None
     claim_error: str | None = None
+    # Evidence-rung accounting: the contract's declared minimum vs the
+    # rung the decision claims vs the rung the cited tournament
+    # measured at close (plan-20260929-1642Z — evidence-vs-ladder).
+    declared_rung: str | None = None
+    claimed_rung: str | None = None
+    computed_rung: str | None = None
+    # What the minted claim confidence rests on (CONFIDENCE_BASIS
+    # enum) — grounded = posterior bound computed; weakly_grounded =
+    # evidence consulted, no likelihood.
+    confidence_basis: str | None = None
     created_at: str = Field(default_factory=_utc_now)
 
 

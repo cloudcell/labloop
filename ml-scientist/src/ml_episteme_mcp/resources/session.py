@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from ..state.store import StateStore
+from .. import _grounded_constants as _gc
 from .status import status_digest
 
 
@@ -339,7 +340,7 @@ WARMUP = {
 }
 
 
-STALE_PROGRAMME_HOURS = 24.0
+STALE_PROGRAMME_HOURS = _gc.STALE_PROGRAMME_HOURS.value
 
 
 def _get_dynamic_state(

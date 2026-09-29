@@ -15,11 +15,14 @@ from ..state.models import (
     Relation,
 )
 from ..state.store import MemoryStore
+from .. import _grounded_constants as _gc
 
 # Claims asserted without evidence-bearing edges may not exceed this
 # confidence — a prior-level ceiling, not a truth judgement. Named so
 # the threshold is tunable without archaeology (i-review note).
-PRIOR_CONFIDENCE_MAX = 0.3
+# Value + grounding: _grounded_constants.PRIOR_CONFIDENCE_MAX
+# (IN-RANGE, NAP 2019 App. D Table D-1).
+PRIOR_CONFIDENCE_MAX = _gc.PRIOR_CONFIDENCE_MAX.value
 
 
 def check_relation_valid(relation: str) -> str | None:

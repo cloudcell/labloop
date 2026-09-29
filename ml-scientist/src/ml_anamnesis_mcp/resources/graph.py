@@ -112,7 +112,6 @@ def register(mcp, store) -> None:
                     "from_claim": e.from_claim,
                     "to_ref": e.to_ref,
                     "ref_type": e.ref_type.value,
-                    "weight": e.weight,
                 }
                 for e in edges
             ],

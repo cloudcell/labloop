@@ -44,6 +44,7 @@ from mcp.types import CallToolResult, TextContent
 
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs, read_run
+from .. import _grounded_constants as _gc
 
 STATUS_RESOURCE = "improver://status"
 STATUS_SESSION = "improver://session"
@@ -232,12 +233,12 @@ def check_no_decision_debt(store, tool_name: str) -> str | None:
 # Improvement epoch — configured from [enforcement]
 # improvement_epoch_seconds at server creation; the digest reads the
 # module value so session/status surfaces share one setting.
-EPOCH_SECONDS = 86400.0
+EPOCH_SECONDS = _gc.IMPROVEMENT_EPOCH_SECONDS.value
 
 
 def configure_epoch(seconds: float | int | None) -> None:
     global EPOCH_SECONDS
-    EPOCH_SECONDS = float(seconds or 86400.0)
+    EPOCH_SECONDS = float(seconds or _gc.IMPROVEMENT_EPOCH_SECONDS.value)
 
 
 def improvement_due(store, epoch_seconds: float | None = None) -> bool:

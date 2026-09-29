@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS promotion_campaigns (
     abandon_rationale TEXT,
     abandoned_by    TEXT,
     abandoned_at    TEXT,
+    n_required      INTEGER,
+    n_requested     INTEGER,
+    power_acknowledged INTEGER NOT NULL DEFAULT 0,
+    sesoi_d         REAL,
+    target_power    REAL,
+    min_evidence_rung TEXT,
+    alpha           REAL,
+    prior           REAL,
+    n_achieved      INTEGER,
+    underpowered    INTEGER,
+    type_s_risk     REAL,
+    type_m_ratio    REAL,
+    p_value         REAL,
+    bf_2ln          REAL,
     created_at      TEXT NOT NULL,
     closed_at       TEXT
 );
@@ -255,6 +269,29 @@ class SearchStore:
                      AND abandoned_at IS NULL
                      AND closed_at IS NOT NULL"""
             )
+            # Contract-declared power design — additive columns
+            # (plan-20260929-1641Z). NULLs mark pre-power campaigns.
+            for col, decl in (
+                ("n_required", "INTEGER"),
+                ("n_requested", "INTEGER"),
+                ("power_acknowledged", "INTEGER NOT NULL DEFAULT 0"),
+                ("sesoi_d", "REAL"),
+                ("target_power", "REAL"),
+                ("min_evidence_rung", "TEXT"),
+                ("alpha", "REAL"),
+                ("prior", "REAL"),
+                ("n_achieved", "INTEGER"),
+                ("underpowered", "INTEGER"),
+                ("type_s_risk", "REAL"),
+                ("type_m_ratio", "REAL"),
+                ("p_value", "REAL"),
+                ("bf_2ln", "REAL"),
+            ):
+                if col not in cols:
+                    self.conn.execute(
+                        f"ALTER TABLE promotion_campaigns "
+                        f"ADD COLUMN {col} {decl}"
+                    )
             self.conn.commit()
 
     def close(self) -> None:
@@ -660,13 +697,26 @@ class SearchStore:
                (id, contract_id, champion_id, challenger_id,
                 primary_metric, budget_json, seeds_json, status,
                 promotion_score, decision_id, claim_id,
+                n_required, n_requested, power_acknowledged,
+                sesoi_d, target_power, min_evidence_rung, alpha,
+                prior, n_achieved, underpowered, type_s_risk,
+                type_m_ratio, p_value, bf_2ln,
                 created_at, closed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.id, c.contract_id, c.champion_id, c.challenger_id,
                 c.primary_metric, json.dumps(c.budget),
                 json.dumps(c.seeds), c.status.value, c.promotion_score,
-                c.decision_id, c.claim_id, c.created_at, c.closed_at,
+                c.decision_id, c.claim_id,
+                c.n_required, c.n_requested,
+                int(c.power_acknowledged),
+                c.sesoi_d, c.target_power, c.min_evidence_rung, c.alpha,
+                c.prior, c.n_achieved,
+                (int(c.underpowered)
+                 if c.underpowered is not None else None),
+                c.type_s_risk, c.type_m_ratio, c.p_value, c.bf_2ln,
+                c.created_at, c.closed_at,
             ),
         )
         self.conn.commit()
@@ -713,12 +763,29 @@ class SearchStore:
         )
         return [self._row_to_campaign(r) for r in rows]
 
-    def close_campaign(self, campaign_id: str, score: float) -> None:
+    def close_campaign(
+        self,
+        campaign_id: str,
+        score: float,
+        n_achieved: int | None = None,
+        underpowered: bool | None = None,
+        type_s_risk: float | None = None,
+        type_m_ratio: float | None = None,
+        p_value: float | None = None,
+        bf_2ln: float | None = None,
+    ) -> None:
         self._execute(
             """UPDATE promotion_campaigns
-               SET status = ?, promotion_score = ?, closed_at = ?
+               SET status = ?, promotion_score = ?, n_achieved = ?,
+                   underpowered = ?, type_s_risk = ?, type_m_ratio = ?,
+                   p_value = ?, bf_2ln = ?, closed_at = ?
                WHERE id = ?""",
-            (CampaignStatus.closed.value, score, _now_iso(), campaign_id),
+            (
+                CampaignStatus.closed.value, score, n_achieved,
+                int(underpowered) if underpowered is not None else None,
+                type_s_risk, type_m_ratio, p_value, bf_2ln,
+                _now_iso(), campaign_id,
+            ),
         )
         self.conn.commit()
 
@@ -760,6 +827,7 @@ class SearchStore:
         self.conn.commit()
 
     def _row_to_campaign(self, row: sqlite3.Row) -> PromotionCampaign:
+        cols = row.keys()
         return PromotionCampaign(
             id=row["id"],
             contract_id=row["contract_id"],
@@ -774,16 +842,52 @@ class SearchStore:
             claim_id=row["claim_id"],
             abandon_rationale=(
                 row["abandon_rationale"]
-                if "abandon_rationale" in row.keys() else None
+                if "abandon_rationale" in cols else None
             ),
             abandoned_by=(
                 row["abandoned_by"]
-                if "abandoned_by" in row.keys() else None
+                if "abandoned_by" in cols else None
             ),
             abandoned_at=(
                 row["abandoned_at"]
-                if "abandoned_at" in row.keys() else None
+                if "abandoned_at" in cols else None
             ),
+            n_required=(
+                row["n_required"] if "n_required" in cols else None
+            ),
+            n_requested=(
+                row["n_requested"] if "n_requested" in cols else None
+            ),
+            power_acknowledged=bool(
+                row["power_acknowledged"]
+            ) if "power_acknowledged" in cols else False,
+            sesoi_d=row["sesoi_d"] if "sesoi_d" in cols else None,
+            target_power=(
+                row["target_power"] if "target_power" in cols else None
+            ),
+            min_evidence_rung=(
+                row["min_evidence_rung"]
+                if "min_evidence_rung" in cols else None
+            ),
+            alpha=row["alpha"] if "alpha" in cols else None,
+            prior=row["prior"] if "prior" in cols else None,
+            n_achieved=(
+                row["n_achieved"] if "n_achieved" in cols else None
+            ),
+            underpowered=(
+                bool(row["underpowered"])
+                if "underpowered" in cols
+                and row["underpowered"] is not None
+                else None
+            ),
+            type_s_risk=(
+                row["type_s_risk"] if "type_s_risk" in cols else None
+            ),
+            type_m_ratio=(
+                row["type_m_ratio"] if "type_m_ratio" in cols else None
+            ),
+            p_value=row["p_value"] if "p_value" in cols else None,
+            bf_2ln=row["bf_2ln"] if "bf_2ln" in cols else None,
             created_at=row["created_at"],
             closed_at=row["closed_at"],
         )

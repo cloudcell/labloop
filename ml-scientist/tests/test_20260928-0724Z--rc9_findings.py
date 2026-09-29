@@ -149,7 +149,8 @@ class _RecordingClaims:
         self.minted = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None
+        self, content, type, confidence, evidence=None, source_id=None,
+        confidence_basis=None,
     ):
         cid = f"claim-{len(self.minted) + 1:04d}"
         self.minted.append({
@@ -403,7 +404,8 @@ class _EpistemeClaims:
         self.asserts = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None
+        self, content, type, confidence, evidence=None, source_id=None,
+        confidence_basis=None,
     ):
         self.asserts.append({
             "content": content, "source_id": source_id,

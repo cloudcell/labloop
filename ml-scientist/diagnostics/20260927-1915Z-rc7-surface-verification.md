@@ -34,14 +34,22 @@ PART B — unrunnable_campaigns (rc-7 Q3) + abandoned_at (Q5)
 4. zetesis check_invariants → report the FULL checks array: expect
    15 checks including `unrunnable_campaigns`,
    `campaigns_awaiting_verdict`, and `incomplete_campaigns` by name.
-5. Construct the wedge it detects: open_campaign with a budget that
-   cannot carry a spawn (read the open_campaign schema and craft the
-   minimal non-carryable budget — e.g. zero trials/seeds capacity).
-   Leave it open with zero spawns and zero results →
-   check_invariants → `unrunnable_campaigns` flags it by id, and the
-   detail names `abandon_campaign` as the exit. A campaign with NO
-   budget (caller-driven) must NOT flag — open one bare and confirm
-   it stays clean.
+5. The `unrunnable_campaigns` wedge is no longer manufacturable
+   through the write path — two layered gates refuse it: a non-empty
+   non-carryable budget fails `check_campaign_budget_carryable`, and
+   a bare open (no seeds, no programmes_per_arm) fails the
+   post-1641Z declared-n gate. Verify both refusals verbatim:
+   a. open_campaign with a degenerate budget (e.g.
+      programmes_per_arm=0) → refused naming the carryable check.
+   b. open_campaign bare (no seeds, no budget) → refused naming the
+      declared-n requirement.
+   Then check_invariants → `unrunnable_campaigns` fires only on
+   pre-existing residue rows (pre-write-gate data); if none exist,
+   report the check as healthy-with-no-fixture — honest SKIP on the
+   flagging half, the write-path refusals are the live assertion.
+   A campaign with seeds but no budget IS legal (caller-driven,
+   n declared) — open one with seeds=[1] and confirm it does NOT
+   flag.
 6. close_campaign on the wedged campaign → refusal must name the
    structural wedge and `abandon_campaign` as the exit — verbatim.
    An ordinary pending campaign's close refusal does NOT claim a

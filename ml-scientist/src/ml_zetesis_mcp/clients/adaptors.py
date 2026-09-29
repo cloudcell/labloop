@@ -73,6 +73,7 @@ class ClaimsAdaptor(UpstreamAdaptor):
         confidence: float,
         evidence: list[dict[str, Any]] | None = None,
         source_id: str | None = None,
+        confidence_basis: str | None = None,
     ) -> dict[str, Any]:
         return self._parse(await self.call_tool("assert_claim", {
             "content": content,
@@ -80,6 +81,7 @@ class ClaimsAdaptor(UpstreamAdaptor):
             "confidence": confidence,
             "evidence": evidence,
             "source_id": source_id,
+            "confidence_basis": confidence_basis,
         }), "assert_claim")
 
     async def relate(

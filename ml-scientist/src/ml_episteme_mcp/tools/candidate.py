@@ -17,6 +17,7 @@ from ..state.models import (
     PromotionDecision,
 )
 from ..state.store import StateStore
+from .. import _grounded_constants as _gc
 from ..clients.adaptor import MCPAdaptor
 from ..enforcement.commitments import (
     check_candidate_parent_exists,
@@ -24,6 +25,7 @@ from ..enforcement.commitments import (
     check_decision_valid,
     check_digest_claim,
     check_programme_active,
+    check_promotion_policy_power,
 )
 from .schemas import coerce_json, fail, ok, CandidateScorecardOut, RegisterCandidateOut, CreateEvaluationContractOut, GetCandidateLineageOut, GetCandidateOut, GetEvaluationContractOut, GetIncumbentOut, ListCandidatesOut, ListPromotionDecisionsOut, RecordPromotionDecisionOut
 from typing import Annotated, Literal
@@ -201,6 +203,10 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
                         "evidence_refs": d.evidence_refs,
                         "rationale": d.rationale,
                         "decided_by": d.decided_by,
+                        "declared_rung": d.declared_rung,
+                        "claimed_rung": d.claimed_rung,
+                        "computed_rung": d.computed_rung,
+                        "bf_2ln": d.bf_2ln,
                         "created_at": d.created_at,
                     }
                     for d in decisions
@@ -323,6 +329,12 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             if err:
                 return fail(json.dumps({"error": err}))
 
+            # Enforcement: a contract without declared SESOI/power is
+            # not a preregistration — the policy must carry the design
+            # inputs before any campaign can open under it.
+            if err := check_promotion_policy_power(promotion_policy):
+                return fail(json.dumps({"error": err}))
+
             existing = store.list_evaluation_contracts(programme_id)
             version = (max(c.version for c in existing) + 1) if existing else 1
             contract = EvaluationContract(
@@ -380,6 +392,9 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         rationale: Annotated[str, Field(description='Non-empty justification — accountability is first-class.')],
         decided_by: Annotated[str, Field(description="Attributable decider (e.g. 'human:<name>' or a protocol/improver id).")],
         contract_id: Annotated[str | None, Field(description='Optional contract the decision was scored under; must exist if given.')] = None,
+        claimed_rung: Annotated[str | None, Field(description="Evidence rung this verdict claims (not_worth|positive|strong|very_strong — the Kass–Raftery ladder). Required on 'promote' when the cited contract declares min_evidence_rung.")] = None,
+        computed_rung: Annotated[str | None, Field(description="Evidence rung the promotion channel measured (forwarded by zetesis record_promotion_verdict — the rung close computed from the arm data). Stored beside claimed for audit; upstream cannot recompute it.")] = None,
+        bf_2ln: Annotated[float | None, Field(description="The measured 2 ln BF bound forwarded with computed_rung. Stored for audit.")] = None,
     ) -> Annotated[CallToolResult, RecordPromotionDecisionOut]:
         """Record an attributed verdict on a candidate (RSI Phase 0).
 
@@ -401,6 +416,51 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             if err:
                 return fail(json.dumps({"error": err}))
 
+            # Declared-vs-claimed rung (plan-20260929-1641Z W4): a
+            # promote under a rung-declaring contract must claim an
+            # evidence rung at or above the contract minimum.
+            declared_rung = None
+            if contract_id is not None:
+                c = store.get_evaluation_contract(contract_id)
+                declared_rung = (c.promotion_policy or {}).get(
+                    "min_evidence_rung"
+                )
+            if claimed_rung is not None and (
+                claimed_rung not in _gc.EVIDENCE_RUNGS
+            ):
+                return fail(json.dumps({
+                    "error": f"claimed_rung must be one of "
+                    f"{'|'.join(_gc.EVIDENCE_RUNGS)}, got: "
+                    f"{claimed_rung!r}"
+                }))
+            if computed_rung is not None and (
+                computed_rung not in _gc.EVIDENCE_RUNGS
+            ):
+                return fail(json.dumps({
+                    "error": f"computed_rung must be one of "
+                    f"{'|'.join(_gc.EVIDENCE_RUNGS)}, got: "
+                    f"{computed_rung!r}"
+                }))
+            if verdict == "promote" and declared_rung is not None:
+                if claimed_rung is None:
+                    return fail(json.dumps({
+                        "error": f"promote under contract "
+                        f"{contract_id} must claim an evidence rung — "
+                        f"the contract declares min_evidence_rung="
+                        f"'{declared_rung}'. Claim the rung the "
+                        "evidence reaches, or the verdict is bare."
+                    }))
+                if not _gc.rung_at_least(claimed_rung, declared_rung):
+                    return fail(json.dumps({
+                        "error": f"claimed_rung '{claimed_rung}' is "
+                        f"below the contract minimum '{declared_rung}' "
+                        f"(Kass–Raftery 2 ln BF "
+                        f"{_gc.min_evidence_rung(claimed_rung):.0f} < "
+                        f"{_gc.min_evidence_rung(declared_rung):.0f}) "
+                        "— a promote cannot assert less evidence than "
+                        "the contract requires."
+                    }))
+
             decision = PromotionDecision(
                 id=f"decision-{uuid.uuid4().hex[:8]}",
                 candidate_id=candidate_id,
@@ -409,11 +469,18 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
                 evidence_refs=evidence_refs,
                 rationale=rationale,
                 decided_by=decided_by,
+                declared_rung=declared_rung,
+                claimed_rung=claimed_rung,
+                computed_rung=computed_rung,
+                bf_2ln=bf_2ln,
             )
             store.create_promotion_decision(decision)
             return ok({
                 "decision_id": decision.id,
                 "status": "recorded",
+                "declared_rung": declared_rung,
+                "claimed_rung": claimed_rung,
+                "computed_rung": computed_rung,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

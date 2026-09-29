@@ -28,6 +28,7 @@ from ..enforcement.checks import (
     check_campaign_exists,
     check_campaign_open,
     check_close_budget_audit,
+    check_promotion_policy_power,
     check_promotion_tool_whitelisted,
     check_roster_entry,
     check_source_valid,
@@ -51,6 +52,7 @@ from ..state.models import (
     SpawnStatus,
 )
 from ..state.store import SearchStore
+from .. import _grounded_constants as _gc
 from .investigation import _extract_ref_ids, _ref_type_for
 from mcp.types import CallToolResult
 from .schemas import coerce_json, fail, ok, AbandonCampaignOut, CloseCampaignOut, GetCampaignOut, ListCampaignsOut, ListSearchPoliciesOut, OpenCampaignOut, PullCampaignEvidenceOut, RecordCampaignResultOut, RecordPromotionVerdictOut, RefreshRosterOut, RegisterChallengerOut, RegisterSearchPolicyOut, SpawnCampaignProgrammeOut, GetIncumbentOut, ListCandidatesOut
@@ -121,6 +123,24 @@ def _campaign_json(c: PromotionCampaign, store: SearchStore) -> dict:
             "abandon_rationale": c.abandon_rationale,
             "abandoned_by": c.abandoned_by,
             "abandoned_at": c.abandoned_at,
+            "n_required": c.n_required,
+            "n_requested": c.n_requested,
+            "power_acknowledged": c.power_acknowledged,
+            "sesoi_d": c.sesoi_d,
+            "target_power": c.target_power,
+            "min_evidence_rung": c.min_evidence_rung,
+            "alpha": c.alpha,
+            "prior": c.prior,
+            "n_achieved": c.n_achieved,
+            "underpowered": c.underpowered,
+            "type_s_risk": c.type_s_risk,
+            "type_m_ratio": c.type_m_ratio,
+            "p_value": c.p_value,
+            "bf_2ln": c.bf_2ln,
+            "computed_rung": (
+                _gc.rung_for_2lnbf(c.bf_2ln)
+                if c.bf_2ln is not None else None
+            ),
             "created_at": c.created_at,
             "closed_at": c.closed_at,
         },
@@ -632,6 +652,7 @@ def register(
         challenger_id: Annotated[str, Field(description="Roster ID of the challenger arm's candidate.")],
         budget: Annotated[dict | str, Field(description='Budget carried from the orchestrating tournament, verbatim. May be JSON-encoded.')],
         seeds: Annotated[list | str | None, Field(description='Seed set for the arm (list of ints); may be JSON-encoded.')] = None,
+        allow_underpowered: Annotated[bool, Field(description='Open with n below the contract\'s required_n — records power_acknowledged on the campaign row; the underpowered state is declared, not silent.')] = False,
     ) -> Annotated[CallToolResult, OpenCampaignOut]:
         """Open a champion/challenger promotion campaign.
 
@@ -686,6 +707,53 @@ def register(
                     "metrics — nothing to score the campaign under."
                 }))
 
+            # Contract-declared power gate (plan-20260929-1641Z): the
+            # pulled contract's promotion_policy must carry sesoi_d /
+            # target_power / min_evidence_rung. The declared n is the
+            # seed count when seeds are given, else the carried
+            # budget's programmes_per_arm; a contract missing the
+            # keys is legacy — readable, but cannot open new work.
+            policy = contract.get("promotion_policy") or {}
+            if e := check_promotion_policy_power(policy):
+                return fail(json.dumps({
+                    "error": f"Contract {contract_id} cannot open new "
+                    f"work: {e} Contracts are insert-only — mint a new "
+                    "version upstream via create_evaluation_contract."
+                }))
+            power = _gc.required_n(
+                policy["sesoi_d"],
+                policy["target_power"],
+                policy.get("alpha", 0.05),
+            )
+            n_required = power["n_per_arm"]
+            n_requested = (
+                len(seeds)
+                if seeds
+                else int(budget.get("programmes_per_arm") or 0)
+            )
+            if n_requested == 0:
+                return fail(json.dumps({
+                    "error": "Campaign declares no n — pass seeds, or "
+                    "carry a budget with programmes_per_arm; the "
+                    "contract's required_n "
+                    f"({n_required} at sesoi_d={policy['sesoi_d']}, "
+                    f"target_power={policy['target_power']}) has "
+                    "nothing to bind to.",
+                }))
+            if n_requested < n_required and not allow_underpowered:
+                return fail(json.dumps({
+                    "error": f"Campaign under-powered: declared n "
+                    f"{n_requested} < required_n={n_required} per arm "
+                    f"(sesoi_d={policy['sesoi_d']}, target_power="
+                    f"{policy['target_power']}, alpha="
+                    f"{power['alpha']}). Widen the seed set/budget, or "
+                    "pass allow_underpowered: true — the shortfall is "
+                    "then recorded as power_acknowledged on the "
+                    "campaign row.",
+                    "n_required": n_required,
+                    "n_requested": n_requested,
+                }))
+
             data, err = _parse_upstream(
                 await adaptors.evidence.pull("get_incumbent", {})
             )
@@ -710,6 +778,16 @@ def register(
                 primary_metric=primary,
                 budget=budget,
                 seeds=seeds,
+                n_required=n_required,
+                n_requested=n_requested,
+                power_acknowledged=(
+                    allow_underpowered and n_requested < n_required
+                ),
+                sesoi_d=policy["sesoi_d"],
+                target_power=policy["target_power"],
+                min_evidence_rung=policy["min_evidence_rung"],
+                alpha=power["alpha"],
+                prior=policy.get("prior"),
             )
             store.create_campaign(campaign)
             return ok({
@@ -717,6 +795,9 @@ def register(
                 "champion_id": champion_id,
                 "challenger_id": challenger_id,
                 "primary_metric": primary,
+                "n_required": n_required,
+                "n_requested": n_requested,
+                "power_acknowledged": campaign.power_acknowledged,
                 "status": "open",
             })
         except Exception as e:
@@ -1153,17 +1234,81 @@ def register(
                 sum(by_arm[CampaignArm.challenger])
                 / len(by_arm[CampaignArm.challenger])
             )
-            score = (
-                challenger_mean / champion_mean
-                if champion_mean != 0 else 0.0
+            # Gleser–Hwang (1987): no always-bounded ratio score has
+            # coverage when the denominator may be zero — writing 0.0
+            # here is what froze camp-532d7b60's challenger win. Refuse
+            # like close_tournament (arete): the outcome is recorded,
+            # the score is not fabricated.
+            if champion_mean == 0:
+                return fail(json.dumps({
+                    "error": "cannot close: champion-arm mean "
+                    f"{campaign.primary_metric} is 0 — the promotion "
+                    "score challenger/champion is undefined "
+                    "(Gleser–Hwang 1987). Record the outcome via "
+                    "abandon_campaign with rationale.",
+                    "champion_mean": champion_mean,
+                    "challenger_mean": challenger_mean,
+                }))
+            score = challenger_mean / champion_mean
+
+            # Close-time power accounting (plan-20260929-1641Z): the
+            # smaller scored-arm count is the achieved n; Type S/M at
+            # that n under the declared SESOI is the honest error
+            # profile — null, not fabricated, when the campaign
+            # predates the power contract.
+            n_achieved = min(
+                len(by_arm[CampaignArm.champion]),
+                len(by_arm[CampaignArm.challenger]),
             )
-            store.close_campaign(campaign_id, score)
+            tsm = None
+            if campaign.sesoi_d is not None:
+                tsm = _gc.type_s_m(
+                    campaign.sesoi_d, n_achieved,
+                    campaign.alpha or 0.05,
+                )
+            # The evidence statistic (plan-20260929-1642Z): the
+            # challenger-favored z over the same samples the score
+            # just compared — persisted so the verdict gate reads a
+            # measured rung, not an asserted one. None when the arms
+            # can't support it (n<2 or zero variance).
+            ev = _gc.arm_evidence(
+                by_arm[CampaignArm.champion],
+                by_arm[CampaignArm.challenger],
+            )
+            # underpowered compares achieved n against the contract's
+            # required_n — an acknowledged shortfall that delivered its
+            # request is still underpowered under the declared SESOI.
+            underpowered = (
+                n_achieved < campaign.n_required
+                if campaign.n_required is not None
+                else (
+                    n_achieved < campaign.n_requested
+                    if campaign.n_requested is not None
+                    else None
+                )
+            )
+            store.close_campaign(
+                campaign_id, score,
+                n_achieved=n_achieved,
+                underpowered=underpowered,
+                type_s_risk=tsm["type_s_risk"] if tsm else None,
+                type_m_ratio=tsm["type_m_ratio"] if tsm else None,
+                p_value=ev["p"] if ev else None,
+                bf_2ln=ev["bf_2ln"] if ev else None,
+            )
             return ok({
                 "campaign_id": campaign_id,
                 "status": "closed",
                 "promotion_score": score,
                 "champion_mean": champion_mean,
                 "challenger_mean": challenger_mean,
+                "n_achieved": n_achieved,
+                "underpowered": underpowered,
+                "type_s_risk": tsm["type_s_risk"] if tsm else None,
+                "type_m_ratio": tsm["type_m_ratio"] if tsm else None,
+                "p_value": ev["p"] if ev else None,
+                "bf_2ln": ev["bf_2ln"] if ev else None,
+                "computed_rung": ev["computed_rung"] if ev else None,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
@@ -1226,6 +1371,7 @@ def register(
         decided_by: Annotated[str, Field(description="Attributable decider — 'rollback' requires 'human:<name>' (corrective verdicts need human authority).")],
         evidence_ref_ids: Annotated[list | str | None, Field(description='Evidence_ref IDs minted by pull_evidence/pull_arm_evidence calls; list or JSON-encoded.')] = None,
         rationale: Annotated[str | None, Field(description='Non-empty justification — accountability is first-class.')] = None,
+        claimed_rung: Annotated[str | None, Field(description="Evidence rung this verdict claims (not_worth|positive|strong|very_strong — the Kass–Raftery ladder). Required on 'promote' when the campaign's contract declares min_evidence_rung.")] = None,
     ) -> Annotated[CallToolResult, RecordPromotionVerdictOut]:
         """Write the campaign's verdict upstream as a promotion decision.
 
@@ -1284,6 +1430,62 @@ def register(
             ):
                 return _err(e)
 
+            # Evidence-vs-ladder rung gate (plan-20260929-1642Z):
+            # declared ≤ claimed ≤ computed. The campaign row carries
+            # the contract's declared minimum AND the bound close
+            # measured — a promote must reach the former and may not
+            # assert past the latter. Legacy campaigns (bf_2ln NULL)
+            # keep the declared-vs-claimed check — the statistic
+            # legitimately doesn't exist for them.
+            if claimed_rung is not None and (
+                claimed_rung not in _gc.EVIDENCE_RUNGS
+            ):
+                return fail(json.dumps({
+                    "error": f"claimed_rung must be one of "
+                    f"{'|'.join(_gc.EVIDENCE_RUNGS)}, got: "
+                    f"{claimed_rung!r}"
+                }))
+            declared_rung = campaign.min_evidence_rung
+            computed_rung = (
+                _gc.rung_for_2lnbf(campaign.bf_2ln)
+                if campaign.bf_2ln is not None else None
+            )
+            if verdict == "promote" and declared_rung is not None:
+                if claimed_rung is None:
+                    return fail(json.dumps({
+                        "error": f"promote under campaign {campaign_id} "
+                        f"must claim an evidence rung — the contract "
+                        f"declares min_evidence_rung='{declared_rung}'. "
+                        "Claim the rung the evidence reaches, or the "
+                        "verdict is bare."
+                    }))
+                if not _gc.rung_at_least(claimed_rung, declared_rung):
+                    return fail(json.dumps({
+                        "error": f"claimed_rung '{claimed_rung}' is "
+                        f"below the contract minimum '{declared_rung}' "
+                        f"(Kass–Raftery 2 ln BF "
+                        f"{_gc.min_evidence_rung(claimed_rung):.0f} < "
+                        f"{_gc.min_evidence_rung(declared_rung):.0f}) "
+                        "— a promote cannot assert less evidence than "
+                        "the contract requires."
+                    }))
+            if (
+                verdict == "promote"
+                and claimed_rung is not None
+                and computed_rung is not None
+                and not _gc.rung_at_least(computed_rung, claimed_rung)
+            ):
+                return fail(json.dumps({
+                    "error": f"claimed_rung '{claimed_rung}' exceeds "
+                    f"the evidence — close measured "
+                    f"2 ln BF = {campaign.bf_2ln:.2f}, reaching "
+                    f"'{computed_rung}' (the oracle bound); claiming "
+                    f"'{claimed_rung}' asserts more than the data's "
+                    "own bound. Claim what the evidence reaches.",
+                    "computed_rung": computed_rung,
+                    "bf_2ln": campaign.bf_2ln,
+                }))
+
             if adaptors.promotion is None:
                 return fail(json.dumps({
                     "error": "No promotion adaptor configured — the "
@@ -1322,6 +1524,9 @@ def register(
                     "rationale": rationale_text,
                     "decided_by": decided_by,
                     "contract_id": campaign.contract_id,
+                    "claimed_rung": claimed_rung,
+                    "computed_rung": computed_rung,
+                    "bf_2ln": campaign.bf_2ln,
                 },
             )
             data, err = _parse_upstream(payload)
@@ -1390,6 +1595,32 @@ def register(
             # same assert_claim call: anamnesis caps unevidenced claims
             # at the prior ceiling, and edges minted inline satisfy the
             # gate (post-hoc relate would hit the chicken-and-egg).
+            # Confidence is the NAP D-1 posterior bound when the
+            # campaign's statistic exists — a promote mints P[H₁|data],
+            # retain/rollback mint the conservative H₀ bound (the
+            # oracle BF is the most generous reading for H₁, so
+            # 1−posterior understates H₀'s support — defensible).
+            # No statistic → the prior ceiling, labelled
+            # weakly_grounded (evidence was consulted; no likelihood).
+            prior = (
+                campaign.prior
+                if campaign.prior is not None
+                else _gc.PRIOR_CONFIDENCE_MAX.value
+            )
+            if campaign.bf_2ln is not None:
+                # Posterior straight from the persisted 2 ln BF —
+                # no p → z round-trip (p underflows to 0.0 at
+                # extreme z, losing the statistic).
+                posterior = _gc.posterior_from_2lnbf(
+                    prior, campaign.bf_2ln
+                )
+                confidence = (
+                    posterior if verdict == "promote" else 1 - posterior
+                )
+                confidence_basis = "grounded"
+            else:
+                confidence = _gc.PRIOR_CONFIDENCE_MAX.value
+                confidence_basis = "weakly_grounded"
             claim_id = None
             claim_status = "skipped"
             if adaptors.claims is None:
@@ -1414,9 +1645,8 @@ def register(
                             + (f" {rationale}" if rationale else "")
                         ),
                         type="methodological",
-                        confidence=min(
-                            1.0, abs(campaign.promotion_score or 0.0)
-                        ),
+                        confidence=confidence,
+                        confidence_basis=confidence_basis,
                         evidence=[
                             {
                                 "to_ref": ref_id,
@@ -1439,6 +1669,10 @@ def register(
                 "decision_id": decision_id,
                 "claim_id": claim_id,
                 "claim_status": claim_status,
+                "declared_rung": declared_rung,
+                "claimed_rung": claimed_rung,
+                "computed_rung": computed_rung,
+                "confidence_basis": confidence_basis,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

@@ -19,16 +19,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .. import _grounded_constants as _gc
+
 # Margin past a running trial's enforced deadline before it counts as
 # stalled. Trials legitimately run for hours; the executor kills them
 # at its own timeout, so only outliving the deadline means wedged.
-DEFAULT_STALLED_MARGIN_SECONDS = 300
+DEFAULT_STALLED_MARGIN_SECONDS = _gc.STALLED_MARGIN_SECONDS.value
 # completed → record_observation is the normal loop order, but the
 # analysis phase can lag execution by a whole session. Grace is a
 # day: anything older is clearly abandoned debt, not in-flight work.
-DEFAULT_OBSERVATION_GRACE_SECONDS = 86400
-DEFAULT_LOG_MAX_FILES = 100
-DEFAULT_CHECK_INTERVAL_SECONDS = 300
+DEFAULT_OBSERVATION_GRACE_SECONDS = _gc.OBSERVATION_GRACE_SECONDS.value
+DEFAULT_LOG_MAX_FILES = _gc.LOG_MAX_FILES.value
+DEFAULT_CHECK_INTERVAL_SECONDS = _gc.CHECK_INTERVAL_SECONDS.value
 
 
 def _utc_now() -> str:
@@ -134,7 +136,7 @@ def _check_terminal_with_live_executor(store, executor) -> dict:
             continue
         # A 1s margin absorbs timestamp rounding and normal finalize
         # lag — only a process that ran *well past* the mark flags.
-        if exec_duration > window + 1.0:
+        if exec_duration > window + _gc.TERMINAL_RESIDUE_MARGIN_SECONDS.value:
             residue_violations.append({
                 "trial_id": tid,
                 "status": r["status"],

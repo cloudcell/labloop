@@ -18,14 +18,17 @@ contract and candidates live upstream on episteme.
 PART A — setup
 
 1. Episteme: create_evaluation_contract with primary metric
-   "rec_gain" (any distinct metric name — record it) + register two
-   candidates (champion + challenger).
+   "rec_gain" (any distinct metric name — record it) and a powered
+   promotion_policy (README §Contract recipe: {"sesoi_d": 4.0,
+   "target_power": 0.8, "min_evidence_rung": "not_worth"}) +
+   register two candidates (champion + challenger).
 2. Promote the champion upstream: record_promotion_decision
    (verdict "promote", evidence_refs ≥1, non-empty rationale and
    decided_by). Establishing an incumbent is required for a campaign.
 3. Zetesis: refresh_roster → both candidates tracked, the champion
    reconciled as champion. Then open_campaign naming the contract and
-   the challenger → campaign id, armed/open.
+   the challenger with seeds=[1] (the declared-n gate — required_n
+   is 1 under the recipe) → campaign id, armed/open.
 
 PART B — NEGATIVE: wrong metric refused at write
 

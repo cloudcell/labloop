@@ -107,6 +107,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         upstream_contract_id: Annotated[str, Field(description="The upstream evaluation contract the arm's campaign is scored under.")],
         challenger_id: Annotated[str, Field(description="Roster ID of the challenger arm's candidate.")],
         seeds: Annotated[list | str | None, Field(description='Seed set for the arm (list of ints); may be JSON-encoded.')] = None,
+        allow_underpowered: Annotated[bool, Field(description='Forwarded to upstream open_campaign — records power_acknowledged when the declared n is below the contract\'s required_n.')] = False,
     ) -> Annotated[CallToolResult, OpenArmCampaignOut]:
         """Open the descendant Loop-1 campaign for a tournament arm.
 
@@ -153,6 +154,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "challenger_id": challenger_id,
                 "budget": tournament.budget,
                 "seeds": resolved_seeds,
+                "allow_underpowered": allow_underpowered,
             })
             if err:
                 return fail(json.dumps({"error": err}))
@@ -399,6 +401,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         decided_by: Annotated[str, Field(description="Attributable decider (e.g. 'human:<name>' or a protocol/improver id).")],
         evidence_ref_ids: Annotated[list | str | None, Field(description='Evidence_ref IDs minted by pull_evidence/pull_arm_evidence calls; list or JSON-encoded.')] = None,
         rationale: Annotated[str | None, Field(description='Non-empty justification — accountability is first-class.')] = None,
+        claimed_rung: Annotated[str | None, Field(description="Evidence rung this verdict claims (not_worth|positive|strong|very_strong — the Kass–Raftery ladder). Forwarded to the campaign's contract gate on 'promote'.")] = None,
     ) -> Annotated[CallToolResult, RecordArmVerdictOut]:
         """Record the descendant campaign's promotion verdict.
 
@@ -428,6 +431,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                     "decided_by": decided_by,
                     "evidence_ref_ids": evidence_ref_ids,
                     "rationale": rationale,
+                    "claimed_rung": claimed_rung,
                 },
             )
             if err:

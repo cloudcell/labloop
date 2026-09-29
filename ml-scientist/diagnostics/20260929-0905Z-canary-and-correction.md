@@ -36,7 +36,9 @@ PART B — correct_tournament_result
 
 6. You need an OPEN tournament with at least one result row
    (`tres-*`). open_tournament + record_tournament_result if none
-   exists — record the result id from list surfaces or the write
+   exists — a fresh open needs a powered meta-contract (README
+   §Contract recipe) and seeds=[1] — record the result id from list
+   surfaces or the write
    response.
 7. NEGATIVE — empty correction: correct_tournament_result(result_id,
    reason='', …) → refused (reason required). With reason but no

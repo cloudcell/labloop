@@ -98,6 +98,10 @@ class RecordMetaDecisionOut(TypedDict, total=False):
     claim_status: str | None
     claim_error: str | None
     edges_created: int | None
+    declared_rung: str | None
+    claimed_rung: str | None
+    computed_rung: str | None
+    confidence_basis: str | None
 
 
 class PromotePolicyOut(TypedDict, total=False):
@@ -136,6 +140,13 @@ class CloseTournamentOut(TypedDict, total=False):
     tournament_id: str | None
     status: str | None
     recursive_gain: int | float | None
+    n_achieved: int | None
+    underpowered: bool | None
+    type_s_risk: int | float | None
+    type_m_ratio: int | float | None
+    p_value: int | float | None
+    bf_2ln: int | float | None
+    computed_rung: str | None
     primary_metric: str | None
     interpretation: str | None
 
@@ -193,6 +204,9 @@ class OpenTournamentOut(TypedDict, total=False):
     tournament_id: str | None
     status: str | None
     contract_frozen: bool | None
+    n_required: int | None
+    n_requested: int | None
+    power_acknowledged: bool | None
 
 
 class ProposeMetaChangeOut(TypedDict, total=False):

@@ -496,6 +496,15 @@ class PromotionDecision(BaseModel):
     decided_by: str = Field(
         ..., description="Attribution: 'human', operator id, or role ref"
     )
+    # Evidence-rung accounting: the contract's declared minimum vs the
+    # rung the decision claims vs the rung the promotion channel
+    # measured (plan-20260929-1642Z — the statistic lands on the
+    # campaign row; this record stores what was forwarded, keeping
+    # declared/claimed/computed side by side for audit).
+    declared_rung: str | None = None
+    claimed_rung: str | None = None
+    computed_rung: str | None = None
+    bf_2ln: float | None = None
     created_at: str = Field(default_factory=_utc_now)
 
     ontological_category: str = "information content entity"

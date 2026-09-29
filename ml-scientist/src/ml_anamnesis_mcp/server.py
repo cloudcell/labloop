@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .state.store import MemoryStore
+from . import _grounded_constants as _gc
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ def create_server(
         from .enforcement import recurrence
 
         recurrence.TRACKER.configure(
-            enf.get("status_freshness_seconds", 600)
+            enf.get("status_freshness_seconds", _gc.STATUS_FRESHNESS_SECONDS.value)
         )
         recurrence.install(mcp, store, recurrence.TRACKER)
 

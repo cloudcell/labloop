@@ -227,14 +227,18 @@ class TestFullStackPromotion:
             loop0, "create_evaluation_contract", {
                 "programme_id": prog_c,
                 "metrics": {"hits": "maximize"},
-                "promotion_policy": {},
+                # Powered contract — sesoi_d=4.0 keeps required_n=1.
+                "promotion_policy": {
+                    "sesoi_d": 4.0, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             },
         ))["contract_id"]
 
         # 5. Campaign opens against the derived champion.
         r = await call_tool_http(zet, "open_campaign", {
             "contract_id": contract, "challenger_id": chall,
-            "budget": {},
+            "budget": {}, "seeds": [1],
         })
         assert "error" not in r, r
         assert r["champion_id"] == champ
@@ -278,6 +282,7 @@ class TestFullStackPromotion:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:stack",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
+            "claimed_rung": "positive",
         })
         assert "error" not in r, r
         assert r["decision_id"].startswith("decision-")

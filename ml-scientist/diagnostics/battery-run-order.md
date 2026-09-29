@@ -22,6 +22,15 @@ Plus: `read_resource` must appear in every server's tool list, and
 `assert_claim` must accept `valid_until`. Any miss → wrong build;
 stop, redeploy, restart.
 
+Post-1641Z/1643Z fingerprint: `create_evaluation_contract` must
+refuse `promotion_policy` without `sesoi_d`/`target_power`/
+`min_evidence_rung`; `close_campaign`/`close_tournament` must return
+`p_value`/`bf_2ln`/`computed_rung`; `assert_claim` must NOT accept
+`importance` and `relate` must NOT accept `weight` — a server that
+still takes them is a pre-1643Z build. Prompts minting contracts or
+opening campaigns/tournaments need the powered-contract recipe —
+see `diagnostics/README.md` §Contract recipe.
+
 ## Phase 1 — build gate
 
 1. **`20260927-1915Z-rc7-surface-verification`** — runs the Phase-0
@@ -65,7 +74,7 @@ stop, redeploy, restart.
    Requires the rc-11 build — a pre-fix server fails Part A step 3
    and Part B step 8.
 
-## Phase 3 — the standing battery (29)
+## Phase 3 — the standing battery (30)
 
 Order within the standing set matters less; group by blast radius:
 
@@ -115,6 +124,16 @@ Order within the standing set matters less; group by blast radius:
 - `20260929-0905Z-canary-and-correction` — `record_canary`/
   `close_canary` lifecycle + `correct_tournament_result` (a
   correction path — post-R35 these get deliberate coverage)
+- `20260929-1615Z-grounded-constants` — `constants` block in every
+  digest; the zero-divisor `close_campaign` refusal (requires the
+  grounded-constants build — a pre-fix server writes score 0.0)
+- `20260929-1740Z-contract-declared-power` — the power-clause gates
+  (requires the contract-declared-power build — a pre-gate server
+  accepts unpowered policies and seedless opens silently)
+- `20260929-1830Z-verdict-posterior` — the computed-rung ceiling and
+  `confidence_basis` labels (requires the posterior build — a
+  pre-1642Z server has no statistic at close and mints flat
+  confidence literals)
 
 **Long-running / deadline-dependent**:
 - `20260929-0925Z-deadline-exceeded` — needs a ~150 s trial to cross

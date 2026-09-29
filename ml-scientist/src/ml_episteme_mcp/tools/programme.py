@@ -28,14 +28,20 @@ from typing import Annotated, Literal
 from pydantic import Field
 from mcp.types import CallToolResult
 
+from .. import _grounded_constants as _gc
 
-# Verdict → claim confidence for Phase-3a minting. Claim confidence
-# tracks strength of evidence for the *finding*, not the verdict
-# (Popper: a clean falsification is positive knowledge, not a weak
-# claim). Accepted and rejected are symmetric when evidence is decisive;
+
+# Verdict → claim minting for Phase-3a. Hypothesis verdicts are
+# single-arm — no comparative likelihood exists on them
+# (plan-20260929-1642Z) — so the minted confidence is the grounded
+# prior ceiling, labelled weakly_grounded: evidence (trials +
+# observations) was consulted, but no posterior bound computes.
+# The indicted flat 0.85 is gone — NAP D-1 bounds what the
+# system's evidence can support at 0.795 even at prior 0.5.
+# Accepted and rejected are symmetric (Popper: a clean
+# falsification is positive knowledge, not a weak claim);
 # inconclusive mints nothing — an undecided test is methodological
 # knowledge about the regime's power, not an empirical claim.
-VERDICT_CONFIDENCE = {"accepted": 0.85, "rejected": 0.85}
 VERDICT_FINDING = {"accepted": "holds", "rejected": "does not hold"}
 
 
@@ -366,7 +372,8 @@ def register(
                                 f"under {regime}: {evidence_summary}"
                             ),
                             type="empirical",
-                            confidence=VERDICT_CONFIDENCE[verdict],
+                            confidence=_gc.PRIOR_CONFIDENCE_MAX.value,
+                            confidence_basis="weakly_grounded",
                             evidence=[
                                 {
                                     "to_ref": conclusion.id,

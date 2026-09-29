@@ -33,6 +33,7 @@ async def _tourn_with_eref(mcp, store, eref_id="eref-x1"):
         "parent_improver_id": parent,
         "candidate_improver_id": candidate,
         "budget": {"descendant_runs": 2},
+        "seeds": [1],
     })
     tourn = t["tournament_id"]
     store.create_evidence_ref(EvidenceRef(

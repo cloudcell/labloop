@@ -21,8 +21,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_CHECK_INTERVAL_SECONDS = 300
-DEFAULT_LOG_MAX_FILES = 30
+from .. import _grounded_constants as _gc
+
+DEFAULT_CHECK_INTERVAL_SECONDS = _gc.CHECK_INTERVAL_SECONDS.value
+DEFAULT_LOG_MAX_FILES = _gc.LOG_MAX_FILES.value
 
 from ..clients.adaptors import CHANNEL_STATUS_URIS
 

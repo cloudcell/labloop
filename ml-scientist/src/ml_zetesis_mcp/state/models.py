@@ -151,6 +151,26 @@ class PromotionCampaign(BaseModel):
     abandoned_at: str | None = None
     created_at: str = Field(default_factory=_utc_now)
     closed_at: str | None = None
+    # Contract-declared power design, snapshotted at open from the
+    # upstream contract's promotion_policy (the contract is
+    # insert-only; the snapshot keeps this row self-contained).
+    n_required: int | None = None
+    n_requested: int | None = None
+    power_acknowledged: bool = False
+    sesoi_d: float | None = None
+    target_power: float | None = None
+    min_evidence_rung: str | None = None
+    alpha: float | None = None
+    # Declared prior P[H₁] (plan-20260929-1642Z) — snapshotted like
+    # the other policy fields; None → PRIOR_CONFIDENCE_MAX at mint.
+    prior: float | None = None
+    # Close-time accounting — set by close_campaign.
+    n_achieved: int | None = None
+    underpowered: bool | None = None
+    type_s_risk: float | None = None
+    type_m_ratio: float | None = None
+    p_value: float | None = None   # one-sided, challenger-favored
+    bf_2ln: float | None = None    # oracle LR bound: max(z,0)²
 
 
 class CampaignResult(BaseModel):

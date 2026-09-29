@@ -56,6 +56,32 @@ From the host:
 
 `diagnostics-out/` is a run artifact — gitignored.
 
+## Contract recipe (post-1641Z/1642Z/1643Z)
+
+Prompts written before `plan-20260929-1641Z` assume a looser schema.
+The current contract surface:
+
+- **`promotion_policy` is required** at `create_evaluation_contract`/
+  `create_meta_contract` and must carry `sesoi_d`, `target_power`,
+  `min_evidence_rung` (optional `alpha`, `prior`). A policy missing
+  them is refused at creation; contracts minted pre-gate can be read
+  but open no new work — mint a new version.
+- **Minimal recipe** for any prompt that needs a contract:
+  `{"sesoi_d": 4.0, "target_power": 0.8, "min_evidence_rung":
+  "not_worth"}` → `required_n = 1` per arm, so `seeds=[1]` (or a
+  `budget.programmes_per_arm ≥ 1`) satisfies the declared-n gate at
+  `open_campaign`/`open_tournament`/`open_arm_campaign`.
+- **Promotes need `claimed_rung`** when the contract declares
+  `min_evidence_rung`, and may not claim above the closed
+  campaign's/tournament's `computed_rung` — `claimed_rung:
+  "not_worth"` always satisfies `declared ≤ claimed ≤ computed`.
+- `close_campaign`/`close_tournament` now return `p_value`,
+  `bf_2ln`, `computed_rung` alongside the Type S/M fields; minted
+  claims carry `confidence_basis`.
+- `assert_claim` has no `importance` and `relate` has no `weight`
+  param — callers sending them are refused (1643Z). A `weight` key
+  inside an evidence dict is ignored, like any unrecognized key.
+
 ## Inventory
 
 | Prompt | Verifies |
@@ -94,6 +120,9 @@ From the host:
 | `20260929-0915Z-resource-surface` | Coverage (R49): every `read_resource` URI family ×5 servers; field-shape assertions (`kind`/`src`/`dst`), negative-URI probes, agora routing |
 | `20260929-0920Z-ingest-surface` | Coverage (R49): `:38082` ingest API fail-closed probes — 401 without/with wrong token; UNREACHABLE ≠ pass |
 | `20260929-0925Z-deadline-exceeded` | Coverage (R49, post-rc-11): tool deadline fires at ~120 s AND shielded trial completes server-side; loop stays responsive |
+| `20260929-1615Z-grounded-constants` | Grounded-constants registry (e-plan 20260929-1514Z): `constants` block in every status digest, `close_campaign` zero-divisor refusal (camp-532d7b60), prior-ceiling enforcement, disclosure table |
+| `20260929-1740Z-contract-declared-power` | Contract-declared power (e-plan 20260929-1641Z): policy power keys gate creation, declared-n + underpowered gates at open (ack path records `power_acknowledged`), close-time n/Type-S/M freeze, rung gate on all three decision writers, legacy contracts open no new work |
+| `20260929-1830Z-verdict-posterior` | Verdict posterior (e-plan 20260929-1642Z): `p_value`/`bf_2ln`/`computed_rung` persisted at close, claimed ≤ computed rung gate, NAP D-1 posterior bound minted as `confidence`, `confidence_basis` on every claim, indicted confidence literals deleted |
 
 The `20260927-03xxZ` set is the rc-5 verification battery — each
 targets one rc-5 fix and exercises both the valid path and the

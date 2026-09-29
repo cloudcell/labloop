@@ -326,7 +326,10 @@ class TestFullLoopWithRealMCPDownstream:
                 assert "depth=12 beats depth=6" in minted["content"]
                 assert "holds under" in minted["content"]
                 assert minted["type"] == "empirical"
-                assert minted["confidence"] == 0.85
+                # Prior-ceiling mint — no comparative likelihood on a
+                # single-arm verdict (plan-20260929-1642Z).
+                assert minted["confidence"] == 0.3
+                assert minted["confidence_basis"] == "weakly_grounded"
 
                 # Verify the tested_by evidence edge to the trial
                 tested_by = [

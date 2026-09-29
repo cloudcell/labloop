@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from . import _grounded_constants as _gc
 
 DEFAULTS: dict[str, Any] = {
     "db_path": str(Path.home() / ".ml-arete" / "improver.db"),
@@ -26,8 +27,8 @@ DEFAULTS: dict[str, Any] = {
     # Recurrent protocol ships enabled (plan-20260926-0438Z).
     "enforcement": {
         "recurrent_protocol": True,
-        "status_freshness_seconds": 600,
-        "improvement_epoch_seconds": 86400,
+        "status_freshness_seconds": _gc.STATUS_FRESHNESS_SECONDS.value,
+        "improvement_epoch_seconds": _gc.IMPROVEMENT_EPOCH_SECONDS.value,
     },
 }
 

@@ -1,0 +1,566 @@
+\documentclass[11pt,letterpaper]{article}
+
+% Sourcing proposal, single column. Single column is deliberate: the central
+% summary table has fifteen rows of prose, and the prior->posterior table has
+% nine columns. Neither survives two columns legibly.
+
+\usepackage[T1]{fontenc}
+\usepackage{times}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage[letterpaper,top=1.0in,bottom=1.0in,left=1.0in,right=1.0in]{geometry}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parskip}{3pt}
+\setstretch{1.04}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\bs}{\allowbreak\hspace{0pt}}
+\setlength{\tabcolsep}{5pt}
+
+\lstdefinestyle{tiny}{basicstyle=\ttfamily\scriptsize,breaklines=true,
+  columns=fullflexible,frame=single,rulecolor=\color{gray!40},xleftmargin=4pt,
+  xrightmargin=4pt,aboveskip=4pt,belowskip=6pt}
+\lstset{style=tiny}
+
+\title{\textbf{Grounding the Decision Constants of a Self-Evaluating\\ Research System}\\[6pt]
+\large A sourcing proposal: which values the literature determines,\\ which it
+merely contains, and which it does not touch}
+\author{
+  \normalsize Prepared with \code{opencode}\\[3pt]
+  \small Companion to \emph{Provisional Constants} (\code{paper.pdf}) and Figure~1
+  (\code{flow.pdf})\\
+  \small Audited system: \code{github.com/cloudcell/labloop}, commit \code{21d91f1}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+An audit of an agentic ML research system found fifteen numeric constants that
+gate scientific decisions and carry no stated derivation. This document attempts,
+for each, to locate literature that \emph{determines} the value. Four are
+groundable in a specific source; two are settled by a theorem rather than by a
+number; nine have no literature basis and should either be reclassified as
+operational preferences or deleted. The largest single result is negative: a
+constant producing a bounded score for a ratio whose denominator may be near
+zero is \emph{invalid}, not merely conservative, by a theorem of 1987. The
+second is quantitative: a session size of $n \approx 9$ seeds per arm is required
+for 80\% directional accuracy at a specified smallest effect size of interest, a
+figure the audited system's own benchmark independently confirms to within
+$0.023$, against a shipped default of $n = 1$.
+\end{abstract}
+
+\section{Purpose}
+
+The companion paper argues that a decision constant is not a parameter but a
+claim, and that an unsourced claim should be labelled \code{PROVISIONAL} rather
+than quietly published. This document performs the labelling. For every decision
+constant identified in the audit, it asks a narrow question: \emph{is there a
+retrievable source that fixes this value, and states why?} Where the answer is
+no, that is recorded as a finding, not as a failure to search hard enough.
+
+The result is stated up front so that the tables are not read as more favourable
+than they are.
+
+\begin{quote}
+\textbf{Of fifteen decision constants audited, four can be grounded in a
+specific citable source, two are settled by a mathematical theorem rather than
+by a value, and nine have no literature basis at all --- and should be
+reclassified as operational, or deleted.}
+\end{quote}
+
+A large fraction of the numbers that attracted audit attention are not
+epistemic claims. They are timeouts, retention counts and bind addresses.
+Presenting those to a literature review is a category error, and part of this
+proposal's purpose is to say so explicitly rather than to manufacture citations
+for them.
+
+\section{What counts as grounding}
+
+A constant is \code{SOURCED} only if a retrieved source states the value
+\emph{and} the reason for it, such that a maintainer could substitute a
+different value knowing what breaks. Three weaker outcomes are recorded
+separately and must never be reported as grounding.
+
+\begin{table}[h]
+\centering
+\caption{Status vocabulary. The third row is the failure mode this proposal is
+most at risk of.}
+\label{tab:status}
+\begin{tabular}{@{}p{0.16\textwidth}p{0.76\textwidth}@{}}
+\toprule
+\textbf{Status} & \textbf{Meaning} \\
+\midrule
+\code{SOURCED} & A source names this value, or a procedure that yields it,
+with justification. \\
+\code{DERIVED} & No source gives the value, but a method does; the value
+follows from inputs we supply. \\
+\code{IN-RANGE} & A source tabulates a family of values and ours is one of
+them, but the source does not single ours out. \\
+\code{UNGROUNDED} & No source found. Delete, reclassify as operational, or
+retain as \code{PROVISIONAL} with a stated reason. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\code{IN-RANGE} is separated because it is how an audit of this kind deceives
+itself: a paper is found that happens to contain the number $0.3$ somewhere in
+a table of unrelated quantities, and the constant is declared grounded. The
+distinction is maintained throughout \S\ref{sec:results}.
+
+\section{C1 --- Calibration constants}
+
+\subsection{The prior ceiling: \code{0.3}}
+\label{sec:prior}
+
+This is the best-anchored constant in the system. The National Academies' report
+on reproducibility \cite{nap2019} tabulates the posterior probability that a
+hypothesis is true as a function of the prior probability and the observed
+$p$-value. Its Table~D-1 gives, for a one-tailed $p = 0.05$:
+
+\begin{table}[h]
+\centering
+\caption{Posterior probability that the hypothesis is true, one-tailed
+$p = 0.05$ (National Academies 2019, Table D-1). The bold column is the
+audited system's prior ceiling.}
+\label{tab:nap}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l*{8}{c}@{}}
+\toprule
+prior $P[H_1]$ & .01 & .05 & .10 & .20 & .25 & \textbf{.30} & .40 & .50 \\
+\midrule
+posterior & .038 & .169 & .301 & .492 & .563 & \textbf{.624} & .721 & .795 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The report discusses $0.3$ explicitly as \emph{``its pre-experimental probability
+of being true is about 1 in 3.''} That is a substantively defensible prior for a
+scientific claim, and it maps cleanly onto a ceiling for a claim with no
+evidence-bearing edge: an ungrounded claim is worth your prior, and one-in-three
+is a documented choice rather than a guess.
+
+\textbf{Proposal.} Retain $0.3$, but cite the source at the definition site,
+make the assumed prior a deployable configuration value, and look the ceiling up
+in the same table rather than hardcoding it. An operator who believes their prior
+is $0.10$ should obtain a ceiling near $0.30$, not $0.3$.
+
+\textbf{Caveat.} The report offers $0.3$ as one row among many, not as a
+recommendation. The status is \code{IN-RANGE}, not \code{SOURCED}.
+
+\subsection{Verdict confidence: \code{0.85}}
+
+This is the constant the literature actively indicts rather than merely failing
+to support. From the same table, at a one-tailed $p = 0.05$ the posterior
+\emph{cannot exceed $0.795$} even at a $50\%$ prior. The audited system mints
+$0.85$ on a verdict that may rest on a single trial, with no $p$-value computed
+and no evidence count recorded. Reaching $0.85$ requires simultaneously a high
+prior and a strong result; the system assumes the first by fiat and never measures
+the second.
+
+The report also states the principle the system violates \cite{nap2019}:
+
+\begin{quote}\small
+\emph{``It is clearly inappropriate to apply the same confidence to the results
+of a study with a highly unexpected and surprising result as in a study in which
+the results were a priori more plausible.''}
+\end{quote}
+
+The system applies an identical confidence to every accepted and every rejected
+hypothesis, regardless of effect size, variance, or surprise --- which is the
+specific thing the sentence forbids.
+
+\textbf{Proposal.} Replace the verdict-to-float lookup with a computed posterior
+using the deployment's declared prior and an effect-size test. For the common
+case of prior $0.3$ at one-tailed $p = 0.05$, Table~D-1 gives \textbf{$0.624$}.
+Where no $p$-value is available, the correct output is an enumeration, not a
+float. A further check the system currently lacks is available: the Brier score
+decomposes into \emph{calibration} and \emph{refinement} components
+\cite{gneiting2007}, so the system could audit whether its confidences are
+calibrated rather than assert that they are.
+
+\subsection{Meta-decision confidence: \code{0.6}}
+
+No literature supports $0.6$, and the provenance trace is worse than merely
+unsourced. The value is traceable to a unit-test fixture whose assertion is that
+the value \emph{must be rejected}:
+
+\begin{lstlisting}
+r = await call_tool(mcp, "record_finding", {
+    "investigation_id": inv_id, "content": "too confident",
+    "confidence": 0.6,
+})
+assert "prior ceiling" in r["error"]
+\end{lstlisting}
+
+\noindent
+(\code{tests/zetesis/test\_20260916-1721Z--enforcement.py:109})
+
+The production call site sits in \code{arete/tools/decisions.py:122} beside a
+comment explaining that evidence edges are minted inline because the claims
+server caps unevidenced claims at the prior ceiling. The mechanism is documented;
+the magnitude is not.
+
+\textbf{Proposal.} Delete. Replace with the same posterior computation as above,
+keyed on the decision's own evidence count. Meta-decisions are required to cite
+at least one evidence reference, so the inputs exist --- they are simply never
+read.
+
+\subsection{Importance and edge weight}
+
+\code{edge.weight = 1} is defensible \emph{if} it is read as \emph{unweighted},
+which is the honest interpretation: the claim graph does not attempt to rank
+evidence. The difficulty is that a field named \emph{weight} carrying a constant
+invites the reading that evidence is being weighted when it is not. Rename it to
+declare the fact, or drop it.
+
+\code{importance = 0.5} has no defensible reading. It is the midpoint of the unit
+interval and it responds to nothing.
+
+\textbf{Proposal.} \textbf{Delete \code{importance}.} No citation is needed to
+delete a field that carries no information --- and that is a better outcome than a
+spurious reference.
+
+\section{C2 --- Discriminative constants}
+
+\subsection{Zero-divisor handling: settled by theorem}
+
+This is the one item where the literature supplies no number but \emph{proves the
+current implementation wrong}. The proof has been available since 1954.
+
+Fieller's construction of a confidence interval for a ratio of two means yields an
+\emph{unbounded} interval whenever the denominator is not significantly different
+from zero \cite{fieller1954} --- either the whole real line, or two disconnected
+infinite rays. This is not a defect of the method; it is the correct answer, since
+a ratio whose denominator is compatible with zero can be arbitrarily large in
+either direction.
+
+Gleser and Hwang \cite{gleser1987} then close the door on the alternative. A
+retrieved restatement gives their result as a theorem:
+
+\begin{quote}\small
+\emph{``Any confidence interval which has finite length for almost every
+observation has minimum zero coverage probability while minimizing over
+$(\alpha_1,\alpha_2)$.''}
+\end{quote}
+
+Read plainly: \emph{one cannot manufacture a bounded, valid score for a ratio when
+the denominator may be near zero.} Any method that always returns a finite number
+in that situation has zero coverage. It is not a conservative estimate; it is an
+invalid one. Returning $0.0$ is a decision that has been taken, not a limit that
+has been reached. Independent reviews reach the same conclusion and note in
+addition that the naive ratio estimator is biased away from the singular case, so
+the problem is not confined to exact zero \cite{axioms2025,fiellerguide}.
+
+Empirically this is what was observed. One campaign closed with a frozen score of
+$0$ for \code{champion\bs \_mean = 0} against \code{challenger\bs \_mean = 0.5}: the
+challenger beat the champion, the ratio is undefined, and the frozen score is the
+worst value the scale admits. The same session produced a tournament, driven with
+the identical input, that correctly refused to close.
+
+\textbf{Proposal.}
+\begin{enumerate}
+\item The campaign closer must \emph{refuse} a zero divisor, matching the
+tournament closer, which already does. This is a one-line correctness fix and the
+single highest-value change identified by the audit.
+\item Replace the point ratio with a Fieller confidence set and record the set's
+boundedness. The correct output for a near-zero denominator is \emph{undefined}.
+\item Refusing on exact equality to zero catches only the measure-zero case. Gate
+on the Fieller condition instead: the denominator's confidence interval must
+exclude zero. That condition covers the whole neighbourhood, which is where the
+$37.8\%$ sign-error rate lives.
+\end{enumerate}
+
+\subsection{Session size $n$: derived from a citable procedure}
+\label{sec:n}
+
+This is the constant with a fully specified literature procedure, and the
+procedure is unambiguous: declare a smallest effect size of interest, then compute
+the $n$ that achieves a stated power against it \cite{lakens2018sesoi,albers2018}.
+Two warnings from the same literature apply directly.
+
+\emph{First, do not use the observed effect size from a pilot to set $n$.}
+Albers and Lakens \cite{albers2018} demonstrate that pilot-derived effect sizes are
+upwardly biased by follow-up bias, which systematically yields underpowered main
+studies. The audited system's tournaments routinely run one seed and record what
+they observe; that is the pilot-as-design error.
+
+\emph{Second, relying on a benchmark is ``the weakest possible justification''} of a
+smallest effect size of interest \cite{lakens2018sesoi}. The threshold must come
+from the individual contract, not from a global default.
+
+\subsubsection{Worked example, validated against the system's own data}
+
+Using the parameters of the audit benchmark: base accuracy $\mu = 0.50$,
+per-observation $\sigma = 0.05$, and a smallest effect size of interest
+$\delta = 0.02$ in the challenger-minus-parent difference. On the log-ratio
+scale $\delta \approx \log(0.52/0.50) = 0.03922$, and the delta-method standard
+error is $\sigma\sqrt{2/n}/\mu$. Solving for the $n$ giving 80\% directional
+accuracy ($z = 0.8416$):
+
+\begin{equation}
+n \;=\; 2\left(\frac{\sigma z}{\mu\,\delta}\right)^{2}
+   \;=\; 2\left(\frac{0.05 \times 0.8416}{0.50 \times 0.03922}\right)^{2}
+   \;=\; \mathbf{9.2} \ \ \text{seeds per arm}
+\end{equation}
+
+and $n \approx 21.4$ per arm for 90\%.
+
+The normal approximation is not a hand-wave: the audited system's own Monte-Carlo
+benchmark confirms it to within $0.023$ at every sample size tested
+(Table~\ref{tab:valid}).
+
+\begin{table}[h]
+\centering
+\caption{Closed-form prediction of sign error against measured Monte-Carlo sign
+error, 400 replicates per cell, $\sigma = 0.05$, true effect $+0.02$.}
+\label{tab:valid}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{seeds / arm} & \textbf{predicted} & \textbf{measured} & \textbf{error} \\
+\midrule
+1  & 0.391 & 0.378 & $+0.013$ \\
+5  & 0.268 & 0.245 & $+0.023$ \\
+20 & 0.107 & 0.103 & $+0.004$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+So the figure of roughly nine is not a formula transplanted from a textbook; it is
+a prediction the audited system's own recorded data supports. The system ships
+with a default of $n = 1$ --- a nine-fold deficit --- and records neither the
+required nor the achieved $n$.
+
+\textbf{Proposal.}
+\begin{enumerate}
+\item The promotion policy, currently inert, must require a smallest effect size of
+interest and a target power, and the tournament must refuse to open without them.
+This is what makes the field non-inert.
+\item Store $n_{\text{requested}}$, $n_{\text{achieved}}$, the effect size of
+interest, and the Type~S / Type~M error \cite{gelman2014} on the frozen score row
+itself. A score is uninterpretable without them.
+\end{enumerate}
+
+\subsection{Promotion threshold: an odds ratio, not a metric ratio}
+
+The current decision is \code{score > 1} --- an unweighted ratio with no threshold
+search. The Bayes-factor literature supplies a graded evidence scale better suited
+to the task, with named rungs a contract may select from
+\cite{kass1995}:
+
+\begin{table}[h]
+\centering
+\caption{Evidence rungs on the $2\ln BF$ scale (Kass \& Raftery 1995).}
+\label{tab:bf}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+$2\ln BF$ & 0--2 & 2--6 & 6--10 & 10--150 & $>150$ \\
+\midrule
+reading & not worth more & & & & \\
+         & than a bare & positive & strong & very strong & decisive \\
+         & mention & & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Proposal.} Replace the bare threshold with a minimum-evidence requirement
+expressed on this ladder, and require the contract to name which rung constitutes
+promotion. The value is contract-specific and cannot be defaulted.
+
+\section{C3 and C4 --- Governance and operational constants}
+
+\subsection{Staleness, freshness, epoch: reclassify, do not cite}
+
+No literature was found for $3600$ (staleness), $600$ (freshness time-to-live),
+or $86400$ (improvement epoch), and I do not believe any exists. These are not
+scientific claims. A staleness threshold states how long an operator will wait
+before treating an open record as abandoned; it is a property of the deployment's
+cadence, not of nature.
+
+The correct action is therefore \textbf{reclassification, not citation}: these
+belong in the governance and operational classes, and the disclosure should say so
+rather than list them beside a verdict confidence.
+
+Two of them do carry a defect, but it is a duplication defect rather than a
+missing one. The $600$ freshness value is written seven times across four
+packages, so setting it in one place does not set it in the others. Log
+retention is 100 files in four packages and 30 in one, meaning the audit trail
+that gates all writes has different retention in one server than in the others.
+Both are fixed by a single shared constants module and a stated reason, and
+neither requires a citation.
+
+\subsection{Operational remainders}
+
+The observation grace period, the stalled-trial margin, and the $1.0$-second
+margin that absorbs timestamp rounding are likewise ungrounded, and should be
+recorded with a reason string rather than a reference: the last is a fact about
+the clock, not about science. The default bind address is a security-posture
+decision and belongs in an operator knob.
+
+\section{Summary}
+\label{sec:results}
+
+\begin{table}[h]
+\centering
+\caption{All fifteen decision constants, with sourcing status and proposed
+action.}
+\label{tab:summary}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}p{0.150\textwidth}p{0.068\textwidth}p{0.135\textwidth}p{0.527\textwidth}@{}}
+\toprule
+\textbf{Constant} & \textbf{Value} & \textbf{Status} & \textbf{Proposed action} \\
+\midrule
+prior confidence ceiling & 0.3 & \code{IN-RANGE} & keep; cite source; make prior deployable \\
+verdict confidence & 0.85 & \code{UNGROUNDED} & replace with posterior; $0.624$ for prior .3, $p{=}0.05$ \\
+meta-decision confidence & 0.6 & \code{UNGROUNDED} & delete; compute from evidence count \\
+claim importance & 0.5 & \code{UNGROUNDED} & delete --- carries no information \\
+edge weight & 1 & \code{UNGROUNDED} & rename to declare unranked, or drop \\
+zero-divisor fallback & 0.0 & \code{VOID} & refuse; Fieller / Gleser--Hwang \\
+seed count & 1 & \code{DERIVED} & $n \approx 9$ per arm (80\%); SESOI in contract \\
+promotion threshold & $>1$ & \code{DERIVED} & minimum rung on the Bayes-factor ladder \\
+staleness & 3600 & ungrounded & reclassify; deduplicate \\
+freshness TTL & 600 & ungrounded & reclassify; deduplicate (7 copies) \\
+improvement epoch & 86400 & ungrounded & reclassify \\
+observation grace & 86400 & ungrounded & reclassify \\
+stalled margin & 300 & ungrounded & reclassify \\
+log retention & 100 / 30 & ungrounded & unify; document as audit policy \\
+bind address & 0.0.0.0 & posture & operator knob \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Acceptance criteria}
+
+The proposal is implemented when:
+
+\begin{enumerate}
+\item \textbf{R1} --- every constant carries a source status from
+\S\ref{sec:results} in both the code and the API schema.
+\item \textbf{R2} --- no constant is defined in more than one location; a
+continuous-integration check fails on the second definition.
+\item \textbf{R3} --- the campaign closer refuses a zero divisor, matching the
+tournament closer.
+\item \textbf{R4} --- a tournament cannot open without an effect size of interest
+and a target power in its promotion policy; the field stops being inert.
+\item \textbf{R5} --- the frozen score row carries requested and achieved
+sample size, the effect size of interest, and the sign and magnitude errors
+where computable.
+\item \textbf{R6} --- confidence is either computed from a stated prior and
+likelihood, or is an enumeration.
+\item \textbf{R7} --- constants with status \code{UNGROUNDED} may not be cited as
+grounds for a promotion decision. This is the rule that makes the table above
+binding rather than decorative.
+\item \textbf{R8} --- a generated disclosure table --- value, file, line, class,
+status, citation, last-changed commit --- is checked in and regenerated in CI.
+\end{enumerate}
+
+\section{What this proposal does not resolve}
+
+\textbf{No literature fixes a staleness duration.} Any citation offered for the
+value $3600$ is mislabelling a preference as a result.
+
+\textbf{The calibration question is open, not solved.} \S\ref{sec:prior} specifies
+how to \emph{compute} a defensible confidence; it does not say what this system's
+prior ought to be. That is a domain judgement about agent-generated claims and
+belongs to the maintainers.
+
+\textbf{The power figures are model-based.} They assume roughly normal
+per-observation noise. Whether they transfer to the heavy-tailed metric
+distributions typical of deep-learning benchmarks is not established, and the
+worked example in \S\ref{sec:n} inherits that assumption. The appropriate response
+is simulation from the system's own observed trial distributions, not a different
+textbook formula.
+
+\textbf{One prior sub-test failed and is reported as failed.} A measurement of how
+often a null arm mean lands on exactly zero returned $0.00\%$ and is
+uninformative by construction, because continuous draws do not average to exactly
+zero. The degenerate case arises from bounded or discrete metrics. That sub-test
+has not been rebuilt.
+
+\begin{thebibliography}{9}
+
+\bibitem{nap2019}
+National Academies of Sciences, Engineering, and Medicine.
+\emph{Reproducibility and Replicability in Science}.
+National Academies Press, 2019. Appendix D, Table D-1.
+
+\bibitem{fieller1954}
+E.~C. Fieller.
+Some problems in interval estimation.
+\emph{Journal of the Royal Statistical Society, Series B}, 16:174--185, 1954.
+
+\bibitem{gleser1987}
+L.~J. Gleser and J.~D. Hwang.
+The application of Fieller's theorem for confidence
+intervals for a ratio.
+\emph{Biometrika}, 1987. Not obtained; known only through the restatement in
+\cite{axioms2025}, which was read in full on the publisher's site.
+
+\bibitem{axioms2025}
+Re-examining confidence intervals for ratios of parameters.
+\emph{Axioms}, 13(3):37, 2025. Read in full on the publisher's site; the PDF
+could not be archived (the publisher's asset path resolved to a different
+article in the same volume).
+
+\bibitem{fiellerguide}
+V.~H. Franz.
+Ratios: a short guide to confidence limits and proper use.
+Technical report, Justus-Liebig-Universit\"at Giessen, 2007. arXiv:0710.2024.
+
+\bibitem{morey2016}
+R.~D. Morey, R.~Hoekstra, J.~N. Rouder, M.~D. Lee, and E.-J. Wagenmakers.
+The fallacy of placing confidence in confidence intervals.
+\emph{Psychonomic Bulletin \& Review}, 23(1):103--123, 2016.
+
+\bibitem{gelman2014}
+A.~Gelman and J.~B. Carlin.
+Beyond power calculations: assessing Type~S (sign) and Type~M (magnitude)
+errors.
+\emph{Perspectives on Psychological Science}, 9(6):641--651, 2014.
+
+\bibitem{lakens2018sesoi}
+D.~Lakens, A.~M. Scheel, and P.~M. Isager.
+Equivalence testing for psychological research: a tutorial.
+\emph{Advances in Methods and Practices in Psychological Science}, 1(2):259--269,
+2018. Read in full on the publisher's site; the PDF is paywalled.
+
+\bibitem{albers2018}
+C.~J. Albers and D.~Lakens.
+When power analyses based on pilot data are biased.
+\emph{Journal of Experimental Social Psychology}, 2018.
+
+\bibitem{kass1995}
+R.~E. Kass and A.~E. Raftery.
+Bayes factors.
+\emph{Journal of the American\bs Statistical Association}, 90(430):773--795, 1995.
+
+\bibitem{gneiting2007}
+T.~Gneiting and A.~E. Raftery.
+Strictly proper scoring rules, prediction, and estimation.
+\emph{Journal of the American Statistical Association}, 102(477):359--378, 2007.
+
+\bibitem{akker2023}
+R.~van den Akker et al.
+Preregistration in practice: a comparison of preregistered and
+non-preregistered studies in psychology.
+\emph{Behavior Research Methods}, 2023.
+
+\bibitem{bakker2020}
+B.~J. Bakker et al.
+Recommendations in pre-registrations and internal review board proposals
+promote formal power analyses but do not increase sample size.
+\emph{PLOS ONE}, 2020.
+
+\end{thebibliography}
+
+\end{document}

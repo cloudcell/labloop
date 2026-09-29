@@ -38,6 +38,9 @@ PART A — setup: an orchestrated campaign with a cap
 1. Arete: open a tournament with a budget that carries
    trials_per_programme AND a small programmes_per_arm cap (e.g. 1) —
    read propose/open tool schemas; the budget must be carryable.
+   The meta-contract must be powered (README §Contract recipe) and
+   programmes_per_arm doubles as the declared n — with
+   sesoi_d=4.0 a cap of 1 satisfies required_n.
 2. open_arm_campaign for an arm → the response MUST include `budget`
    and `seeds` fields echoing what was carried (P8c). Report the
    response verbatim — missing fields = FAIL.

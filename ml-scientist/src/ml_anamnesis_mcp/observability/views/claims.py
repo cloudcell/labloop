@@ -172,8 +172,13 @@ def _claim_row(claim: Claim, store: MemoryStore) -> str:
         f'<td><a href="/claim/{escape(claim.id)}">{escape(short)}</a></td>'
         f'<td><span class="status status-{escape(claim.type.value)}">'
         f"{escape(claim.type.value)}</span></td>"
-        f"<td>{_confidence(claim.confidence)}</td>"
-        f"<td>{claim.importance:.2f}</td>"
+        f"<td>{_confidence(claim.confidence)}"
+        + (
+            f'<br><span class="muted">{escape(claim.confidence_basis)}'
+            "</span>"
+            if claim.confidence_basis else ""
+        )
+        + "</td>"
         f'<td><span class="status status-{status}">{status}</span></td>'
         f"<td>{format_timestamp(claim.created_at)}</td>"
         "</tr>"
@@ -190,7 +195,7 @@ def _claims_table(claims: list[Claim], store: MemoryStore) -> str:
     return (
         "<table><thead><tr>"
         "<th>Claim</th><th>Type</th><th>Confidence</th>"
-        "<th>Importance</th><th>Status</th><th>Asserted</th>"
+        "<th>Status</th><th>Asserted</th>"
         "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
@@ -284,21 +289,19 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
         f"<td>{_rel_badge(e.relation.value)}</td>"
         f"<td>{_ref_link(e.to_ref, e.ref_type.value)}</td>"
         f'<td class="muted">{escape(e.ref_type.value)}</td>'
-        f"<td>{e.weight:.2f}</td>"
         f"<td>{format_timestamp(e.created_at)}</td>"
         "</tr>"
         for e in out_edges
-    ) or '<tr><td colspan="5" class="muted">No outgoing edges — this claim cites nothing.</td></tr>'
+    ) or '<tr><td colspan="4" class="muted">No outgoing edges — this claim cites nothing.</td></tr>'
 
     in_rows = "".join(
         f'<tr id="edge-{escape(e.id)}">'
         f'<td><a class="mono" href="/claim/{escape(e.from_claim)}">{escape(e.from_claim)}</a></td>'
         f"<td>{_rel_badge(e.relation.value)}</td>"
-        f"<td>{e.weight:.2f}</td>"
         f"<td>{format_timestamp(e.created_at)}</td>"
         "</tr>"
         for e in in_edges
-    ) or '<tr><td colspan="4" class="muted">Nothing cites this claim yet.</td></tr>'
+    ) or '<tr><td colspan="3" class="muted">Nothing cites this claim yet.</td></tr>'
 
     superseded_line = ""
     if claim.supersedes_id:
@@ -318,7 +321,7 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
         </p>
         <p style="margin-top: 0.5rem">
             confidence {_confidence(claim.confidence)}
-            &nbsp;·&nbsp; importance {claim.importance:.2f}
+            {('· basis <b>' + escape(claim.confidence_basis) + '</b>') if claim.confidence_basis else ''}
         </p>
         <p class="muted" style="margin-top: 0.5rem">
             valid from {format_timestamp(claim.valid_from)}
@@ -331,13 +334,13 @@ def render_claim_detail(store: MemoryStore, claim_id: str) -> HTMLResponse:
     <div class="card">
         <h2>Cites ({len(out_edges)})</h2>
         <table><thead><tr><th>Relation</th><th>Reference</th>
-        <th>Type</th><th>Weight</th><th>When</th></tr></thead>
+        <th>Type</th><th>When</th></tr></thead>
         <tbody>{out_rows}</tbody></table>
     </div>
     <div class="card">
         <h2>Cited by ({len(in_edges)})</h2>
         <table><thead><tr><th>Claim</th><th>Relation</th>
-        <th>Weight</th><th>When</th></tr></thead>
+        <th>When</th></tr></thead>
         <tbody>{in_rows}</tbody></table>
     </div>
     """

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .server import create_server
 from .state.store import MemoryStore
+from . import _grounded_constants as _gc
 
 
 def _check_port_available(host: str, port: int, label: str) -> bool:
@@ -136,7 +137,7 @@ def main() -> None:
         task = None
         try:
             task = start_integrity_monitor(store, config=integrity_config)
-            interval = integrity_config.get("check_interval_seconds", 300)
+            interval = integrity_config.get("check_interval_seconds", _gc.CHECK_INTERVAL_SECONDS.value)
             print(
                 "integrity monitor: startup check logged"
                 + (f"; periodic every {interval}s" if task else "")

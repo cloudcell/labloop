@@ -92,12 +92,16 @@ async def test_gui_promotion_pages(zetesis_promotion_server):
         loop0, "create_evaluation_contract", {
             "programme_id": prog,
             "metrics": {"hits": "maximize"},
-            "promotion_policy": {},
+            # Powered contract — sesoi_d=4.0 keeps required_n=1.
+            "promotion_policy": {
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         },
     ))["contract_id"]
     cid = (await call_tool_http(zet, "open_campaign", {
         "contract_id": contract, "challenger_id": challenger,
-        "budget": {},
+        "budget": {}, "seeds": [1],
     }))["campaign_id"]
 
     status, body = _get(gui + "/promotion")

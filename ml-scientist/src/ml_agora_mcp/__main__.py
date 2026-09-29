@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from .server import create_server
+from . import _grounded_constants as _gc
 
 
 def _check_port_available(host: str, port: int, label: str) -> bool:
@@ -191,7 +192,7 @@ def main() -> None:
                 config=config.get("integrity", {}),
             )
             interval = config.get("integrity", {}).get(
-                "check_interval_seconds", 300
+                "check_interval_seconds", _gc.CHECK_INTERVAL_SECONDS.value
             )
             print(
                 "integrity monitor: startup check logged"

@@ -3,7 +3,7 @@
 anamnesis is otherwise CLI-configured; the only config-file surface is
 integrity-log retention. Precedence follows the ecosystem convention:
 ./ml-anamnesis.toml then ~/.ml-anamnesis/config.toml. Absent file or
-table → defaults (log_max_files = 100).
+table → registry defaults (see _grounded_constants.py).
 """
 
 from __future__ import annotations

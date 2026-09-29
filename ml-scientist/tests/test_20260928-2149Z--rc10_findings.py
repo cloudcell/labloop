@@ -209,7 +209,7 @@ class TestAreteLoop0Whitelist:
 
             async def assert_claim(
                 self, content, type, confidence, evidence=None,
-                source_id=None,
+                source_id=None, confidence_basis=None,
             ):
                 cid = f"claim-{len(self.minted) + 1:04d}"
                 self.minted.append({"evidence": evidence or []})
@@ -285,7 +285,12 @@ class _ZetesisEvidence:
         if tool == "get_evaluation_contract":
             return json.dumps({
                 "contract": {"id": "contract-1",
-                             "metrics": {"primary_metric": "hits"}},
+                             "metrics": {"primary_metric": "hits"},
+                             # sesoi_d=4.0 keeps required_n=1 — fixture
+                             # convenience, not a design point.
+                             "promotion_policy": {
+                                 "sesoi_d": 4.0, "target_power": 0.8,
+                                 "min_evidence_rung": "not_worth"}},
             })
         if tool == "get_incumbent":
             return json.dumps({"candidate_id": "cand-a"})
@@ -385,6 +390,7 @@ class TestVerdictWedge:
                 "campaign_id": cid, "verdict": "promote",
                 "decided_by": "human:tester",
                 "evidence_ref_ids": [eref],
+                "claimed_rung": "positive",
             })
             assert "error" not in verdict, verdict
             assert verdict["decision_id"] == "decision-9"
@@ -500,6 +506,9 @@ class TestOpenCampaignBudget:
                 "contract_id": "contract-1",
                 "challenger_id": "cand-b",
                 "budget": {},
+                # {} budget is the caller-driven signal; the power gate
+                # still needs a declared n — seeds supply it.
+                "seeds": [1],
             })
             assert "error" not in empty, empty
             full = await _zcall(mcp, "open_campaign", {

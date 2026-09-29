@@ -64,7 +64,11 @@ PART C — arete: registry and lineage reads
 17. get_proposal + list_proposals → verbatim.
 18. get_tournament + list_tournaments → verbatim.
 19. create_meta_contract(metrics={'primary_metric': 'diag'},
-    promotion_policy={…}) → the meta-contract id. Report verbatim.
+    promotion_policy={"sesoi_d": 4.0, "target_power": 0.8,
+    "min_evidence_rung": "not_worth"}) → the meta-contract id.
+    promotion_policy is required and must be powered (README
+    §Contract recipe) — a keyless policy is refused. Report
+    verbatim.
 
 PART D — anamnesis
 

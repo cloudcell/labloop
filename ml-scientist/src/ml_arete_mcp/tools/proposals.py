@@ -16,6 +16,7 @@ from ..enforcement.checks import (
     admission_verdict,
     check_contract_valid,
     check_metric_name_drift,
+    check_promotion_policy_power,
     check_proposal_fields,
     classify_class_map,
 )
@@ -91,6 +92,8 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                     "the promotion rule is pre-registered, not "
                     "invented at decision time."
                 }))
+            if err := check_promotion_policy_power(promotion_policy):
+                return fail(json.dumps({"error": err}))
 
             contract = MetaContract(
                 id=f"mcontract-{uuid.uuid4().hex[:8]}",

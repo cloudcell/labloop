@@ -15,9 +15,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_STALE_INVESTIGATION_SECONDS = 3600
-DEFAULT_STALE_CAMPAIGN_SECONDS = 3600
-DEFAULT_LOG_MAX_FILES = 100
+from .. import _grounded_constants as _gc
+
+DEFAULT_STALE_INVESTIGATION_SECONDS = _gc.STALE_INVESTIGATION_SECONDS.value
+DEFAULT_STALE_CAMPAIGN_SECONDS = _gc.STALE_CAMPAIGN_SECONDS.value
+DEFAULT_LOG_MAX_FILES = _gc.LOG_MAX_FILES.value
 
 
 def _utc_now() -> str:
@@ -622,7 +624,7 @@ async def start_integrity_monitor(
         config=cfg,
         trigger="startup",
     )
-    interval = cfg.get("check_interval_seconds", 300)
+    interval = cfg.get("check_interval_seconds", _gc.CHECK_INTERVAL_SECONDS.value)
     if not interval or interval <= 0:
         return None
 

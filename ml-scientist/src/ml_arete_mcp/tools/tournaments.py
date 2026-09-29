@@ -15,11 +15,13 @@ a comparison.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 
 from ..enforcement.checks import (
     check_ancestry,
     check_arm_valid,
+    check_promotion_policy_power,
     check_tournament_open,
     compute_recursive_gain,
 )
@@ -30,6 +32,7 @@ from ..state.models import (
     TournamentStatus,
 )
 from ..state.store import ImproverStore
+from .. import _grounded_constants as _gc
 from .schemas import coerce_json, fail, ok, CloseTournamentOut, CorrectTournamentResultOut, ListTournamentsOut, OpenTournamentOut, RecordTournamentResultOut, GetTournamentOut, VoidTournamentOut
 from typing import Annotated, Literal
 from pydantic import Field
@@ -58,6 +61,24 @@ def _tournament_json(store: ImproverStore, t: Tournament) -> dict:
         "seeds": t.seeds,
         "status": t.status.value,
         "recursive_gain": t.recursive_gain,
+        "n_required": t.n_required,
+        "n_requested": t.n_requested,
+        "power_acknowledged": t.power_acknowledged,
+        "sesoi_d": t.sesoi_d,
+        "target_power": t.target_power,
+        "min_evidence_rung": t.min_evidence_rung,
+        "alpha": t.alpha,
+        "prior": t.prior,
+        "n_achieved": t.n_achieved,
+        "underpowered": t.underpowered,
+        "type_s_risk": t.type_s_risk,
+        "type_m_ratio": t.type_m_ratio,
+        "p_value": t.p_value,
+        "bf_2ln": t.bf_2ln,
+        "computed_rung": (
+            _gc.rung_for_2lnbf(t.bf_2ln)
+            if t.bf_2ln is not None else None
+        ),
         "created_at": t.created_at,
         "closed_at": t.closed_at,
         "void": t.void,
@@ -91,6 +112,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         candidate_improver_id: Annotated[str, Field(description='The candidate improver — must descend from the parent (ancestry check).')],
         budget: Annotated[dict | str, Field(description='Single budget governing BOTH arms — equal spend is structural. May be JSON-encoded.')],
         seeds: Annotated[list | str | None, Field(description='Seed set for the arm (list of ints); may be JSON-encoded.')] = None,
+        allow_underpowered: Annotated[bool, Field(description='Open with fewer seeds than the contract\'s required_n — records power_acknowledged on the frozen row; the underpowered state is declared, not silent.')] = False,
     ) -> Annotated[CallToolResult, OpenTournamentOut]:
         """Open a paired ancestral tournament.
 
@@ -135,6 +157,48 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             if seeds is not None:
                 seeds = coerce_json(seeds, list, "seeds")
 
+            # Contract-declared power gate (plan-20260929-1641Z): the
+            # frozen contract's promotion_policy must carry sesoi_d /
+            # target_power / min_evidence_rung, and the seed set is the
+            # declared per-arm n the required_n bound is checked
+            # against. A policy missing the keys is a legacy contract —
+            # it stays readable but cannot open new work.
+            policy = contract.promotion_policy or {}
+            if err := check_promotion_policy_power(policy):
+                return fail(json.dumps({
+                    "error": f"Contract {contract_id} cannot open new "
+                    f"work: {err} Contracts are immutable — mint a new "
+                    "version via create_meta_contract."
+                }))
+            power = _gc.required_n(
+                policy["sesoi_d"],
+                policy["target_power"],
+                policy.get("alpha", 0.05),
+            )
+            n_required = power["n_per_arm"]
+            n_requested = len(seeds or [])
+            if n_requested == 0:
+                return fail(json.dumps({
+                    "error": "Tournament declares no n — the seed set "
+                    "is the per-arm replicate count a power contract "
+                    f"is scored under (required_n={n_required} at "
+                    f"sesoi_d={policy['sesoi_d']}, target_power="
+                    f"{policy['target_power']}). Pass seeds; an empty "
+                    "comparison cannot be acknowledged open.",
+                }))
+            if n_requested < n_required and not allow_underpowered:
+                return fail(json.dumps({
+                    "error": f"Tournament under-powered: {n_requested} "
+                    f"seeds < required_n={n_required} per arm "
+                    f"(sesoi_d={policy['sesoi_d']}, target_power="
+                    f"{policy['target_power']}, alpha="
+                    f"{power['alpha']}). Widen the seed set, or pass "
+                    "allow_underpowered: true — the shortfall is then "
+                    "recorded as power_acknowledged on the frozen row.",
+                    "n_required": n_required,
+                    "n_requested": n_requested,
+                }))
+
             tournament = Tournament(
                 id=f"tourn-{uuid.uuid4().hex[:8]}",
                 contract_id=contract_id,
@@ -142,6 +206,16 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 candidate_improver_id=candidate_improver_id,
                 budget=budget,
                 seeds=seeds,
+                n_required=n_required,
+                n_requested=n_requested,
+                power_acknowledged=(
+                    allow_underpowered and n_requested < n_required
+                ),
+                sesoi_d=policy["sesoi_d"],
+                target_power=policy["target_power"],
+                min_evidence_rung=policy["min_evidence_rung"],
+                alpha=power["alpha"],
+                prior=policy.get("prior"),
             )
             with store.transaction():
                 store.create_tournament(tournament)
@@ -151,6 +225,9 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "tournament_id": tournament.id,
                 "status": "open",
                 "contract_frozen": True,
+                "n_required": n_required,
+                "n_requested": n_requested,
+                "power_acknowledged": tournament.power_acknowledged,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
@@ -309,11 +386,82 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             if err:
                 return fail(json.dumps({"error": err}))
 
-            store.close_tournament(tournament_id, gain)
+            # Close-time power accounting (plan-20260929-1641Z): the
+            # per-arm result count is the achieved n; Type S/M at that
+            # n under the declared SESOI is the honest error profile.
+            n_achieved = min(len(parent_results), len(candidate_results))
+            tsm = None
+            if tournament.sesoi_d is not None:
+                tsm = _gc.type_s_m(
+                    tournament.sesoi_d, n_achieved,
+                    tournament.alpha or 0.05,
+                )
+            # underpowered compares achieved n against the contract's
+            # required_n — an acknowledged shortfall that delivered its
+            # request is still underpowered under the declared SESOI.
+            underpowered = (
+                n_achieved < tournament.n_required
+                if tournament.n_required is not None
+                else (
+                    n_achieved < tournament.n_requested
+                    if tournament.n_requested is not None
+                    else None
+                )
+            )
+            # The evidence statistic (plan-20260929-1642Z): per-seed
+            # bests — the quantity recursive_gain compares — under the
+            # same normal-theory bound as campaigns. Under
+            # direction=min the favored side is lower values, so the
+            # samples negate before the challenger-favored z.
+            primary = contract.metrics["primary_metric"]
+            direction = contract.metrics.get("direction", "max")
+            sign = 1.0 if direction == "max" else -1.0
+
+            def _per_seed_bests(results):
+                groups: dict = {}
+                for r in results:
+                    if primary not in r.metrics:
+                        continue
+                    v = r.metrics[primary]
+                    if (
+                        not isinstance(v, (int, float))
+                        or isinstance(v, bool)
+                        or not math.isfinite(v)
+                    ):
+                        continue
+                    seed = r.metrics.get(
+                        "seed", r.descendant_spec.get("seed")
+                    )
+                    groups.setdefault(seed, []).append(float(v))
+                return [
+                    (max if direction == "max" else min)(vals)
+                    for vals in groups.values()
+                ]
+
+            ev = _gc.arm_evidence(
+                [sign * v for v in _per_seed_bests(parent_results)],
+                [sign * v for v in _per_seed_bests(candidate_results)],
+            )
+            store.close_tournament(
+                tournament_id, gain,
+                n_achieved=n_achieved,
+                underpowered=underpowered,
+                type_s_risk=tsm["type_s_risk"] if tsm else None,
+                type_m_ratio=tsm["type_m_ratio"] if tsm else None,
+                p_value=ev["p"] if ev else None,
+                bf_2ln=ev["bf_2ln"] if ev else None,
+            )
             return ok({
                 "tournament_id": tournament_id,
                 "status": "closed",
                 "recursive_gain": gain,
+                "n_achieved": n_achieved,
+                "underpowered": underpowered,
+                "type_s_risk": tsm["type_s_risk"] if tsm else None,
+                "type_m_ratio": tsm["type_m_ratio"] if tsm else None,
+                "p_value": ev["p"] if ev else None,
+                "bf_2ln": ev["bf_2ln"] if ev else None,
+                "computed_rung": ev["computed_rung"] if ev else None,
                 "primary_metric": contract.metrics["primary_metric"],
                 "interpretation": (
                     "recursive_gain > 1 means the candidate improver "

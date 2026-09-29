@@ -94,6 +94,20 @@ CREATE TABLE IF NOT EXISTS tournaments (
     seeds_json TEXT,
     status TEXT NOT NULL DEFAULT 'open',
     recursive_gain REAL,
+    n_required INTEGER,
+    n_requested INTEGER,
+    power_acknowledged INTEGER NOT NULL DEFAULT 0,
+    sesoi_d REAL,
+    target_power REAL,
+    min_evidence_rung TEXT,
+    alpha REAL,
+    prior REAL,
+    n_achieved INTEGER,
+    underpowered INTEGER,
+    type_s_risk REAL,
+    type_m_ratio REAL,
+    p_value REAL,
+    bf_2ln REAL,
     created_at TEXT NOT NULL,
     closed_at TEXT,
     void_json TEXT
@@ -137,6 +151,8 @@ CREATE TABLE IF NOT EXISTS meta_decisions (
     decided_by TEXT NOT NULL,
     claim_id TEXT,
     claim_error TEXT,
+    declared_rung TEXT,
+    claimed_rung TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_mdec_candidate
@@ -237,6 +253,27 @@ class ImproverStore:
                 "ALTER TABLE tournaments ADD COLUMN void_json TEXT"
             )
             self.conn.commit()
+        for col, decl in (
+            ("n_required", "INTEGER"),
+            ("n_requested", "INTEGER"),
+            ("power_acknowledged", "INTEGER NOT NULL DEFAULT 0"),
+            ("sesoi_d", "REAL"),
+            ("target_power", "REAL"),
+            ("min_evidence_rung", "TEXT"),
+            ("alpha", "REAL"),
+            ("prior", "REAL"),
+            ("n_achieved", "INTEGER"),
+            ("underpowered", "INTEGER"),
+            ("type_s_risk", "REAL"),
+            ("type_m_ratio", "REAL"),
+            ("p_value", "REAL"),
+            ("bf_2ln", "REAL"),
+        ):
+            if col not in tcols:
+                self.conn.execute(
+                    f"ALTER TABLE tournaments ADD COLUMN {col} {decl}"
+                )
+        self.conn.commit()
         dcols = {
             r[1] for r in self.conn.execute(
                 "PRAGMA table_info(meta_decisions)"
@@ -246,7 +283,15 @@ class ImproverStore:
             self.conn.execute(
                 "ALTER TABLE meta_decisions ADD COLUMN claim_error TEXT"
             )
-            self.conn.commit()
+        for col in (
+            "declared_rung", "claimed_rung", "computed_rung",
+            "confidence_basis",
+        ):
+            if col not in dcols:
+                self.conn.execute(
+                    f"ALTER TABLE meta_decisions ADD COLUMN {col} TEXT"
+                )
+        self.conn.commit()
 
     def close(self) -> None:
         if self.conn:
@@ -539,8 +584,13 @@ class ImproverStore:
             """INSERT INTO tournaments
                (id, contract_id, parent_improver_id,
                 candidate_improver_id, budget_json, seeds_json,
-                status, recursive_gain, created_at, closed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                status, recursive_gain, n_required, n_requested,
+                power_acknowledged, sesoi_d, target_power,
+                min_evidence_rung, alpha, prior, n_achieved,
+                underpowered, type_s_risk, type_m_ratio, p_value,
+                bf_2ln, created_at, closed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 tournament.id, tournament.contract_id,
                 tournament.parent_improver_id,
@@ -549,6 +599,15 @@ class ImproverStore:
                 json.dumps(tournament.seeds)
                 if tournament.seeds is not None else None,
                 tournament.status.value, tournament.recursive_gain,
+                tournament.n_required, tournament.n_requested,
+                int(tournament.power_acknowledged),
+                tournament.sesoi_d, tournament.target_power,
+                tournament.min_evidence_rung, tournament.alpha,
+                tournament.prior, tournament.n_achieved,
+                (int(tournament.underpowered)
+                 if tournament.underpowered is not None else None),
+                tournament.type_s_risk, tournament.type_m_ratio,
+                tournament.p_value, tournament.bf_2ln,
                 tournament.created_at, tournament.closed_at,
             ),
         )
@@ -584,13 +643,26 @@ class ImproverStore:
         return [self._row_to_tournament(r) for r in rows], total
 
     def close_tournament(
-        self, tournament_id: str, recursive_gain: float | None
+        self,
+        tournament_id: str,
+        recursive_gain: float | None,
+        n_achieved: int | None = None,
+        underpowered: bool | None = None,
+        type_s_risk: float | None = None,
+        type_m_ratio: float | None = None,
+        p_value: float | None = None,
+        bf_2ln: float | None = None,
     ) -> None:
         self._execute(
             "UPDATE tournaments SET status = ?, recursive_gain = ?, "
+            "n_achieved = ?, underpowered = ?, type_s_risk = ?, "
+            "type_m_ratio = ?, p_value = ?, bf_2ln = ?, "
             "closed_at = ? WHERE id = ?",
             (
                 TournamentStatus.closed.value, recursive_gain,
+                n_achieved,
+                int(underpowered) if underpowered is not None else None,
+                type_s_risk, type_m_ratio, p_value, bf_2ln,
                 _now_iso(), tournament_id,
             ),
         )
@@ -630,6 +702,7 @@ class ImproverStore:
         return [self._row_to_tournament(r) for r in rows]
 
     def _row_to_tournament(self, row: sqlite3.Row) -> Tournament:
+        cols = row.keys()
         return Tournament(
             id=row["id"],
             contract_id=row["contract_id"],
@@ -644,9 +717,45 @@ class ImproverStore:
             closed_at=row["closed_at"],
             void=(
                 json.loads(row["void_json"])
-                if "void_json" in row.keys() and row["void_json"]
+                if "void_json" in cols and row["void_json"]
                 else None
             ),
+            n_required=(
+                row["n_required"] if "n_required" in cols else None
+            ),
+            n_requested=(
+                row["n_requested"] if "n_requested" in cols else None
+            ),
+            power_acknowledged=bool(
+                row["power_acknowledged"]
+            ) if "power_acknowledged" in cols else False,
+            sesoi_d=row["sesoi_d"] if "sesoi_d" in cols else None,
+            target_power=(
+                row["target_power"] if "target_power" in cols else None
+            ),
+            min_evidence_rung=(
+                row["min_evidence_rung"]
+                if "min_evidence_rung" in cols else None
+            ),
+            alpha=row["alpha"] if "alpha" in cols else None,
+            prior=row["prior"] if "prior" in cols else None,
+            n_achieved=(
+                row["n_achieved"] if "n_achieved" in cols else None
+            ),
+            underpowered=(
+                bool(row["underpowered"])
+                if "underpowered" in cols
+                and row["underpowered"] is not None
+                else None
+            ),
+            type_s_risk=(
+                row["type_s_risk"] if "type_s_risk" in cols else None
+            ),
+            type_m_ratio=(
+                row["type_m_ratio"] if "type_m_ratio" in cols else None
+            ),
+            p_value=row["p_value"] if "p_value" in cols else None,
+            bf_2ln=row["bf_2ln"] if "bf_2ln" in cols else None,
         )
 
     # --- Tournament results (insert-only) ---
@@ -843,8 +952,9 @@ class ImproverStore:
             """INSERT INTO meta_decisions
                (id, candidate_improver_id, contract_id, tournament_id,
                 verdict, evidence_refs_json, rationale, decided_by,
-                claim_id, claim_error, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                claim_id, claim_error, declared_rung, claimed_rung,
+                computed_rung, confidence_basis, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 decision.id, decision.candidate_improver_id,
                 decision.contract_id, decision.tournament_id,
@@ -852,6 +962,8 @@ class ImproverStore:
                 json.dumps(decision.evidence_refs),
                 decision.rationale, decision.decided_by,
                 decision.claim_id, decision.claim_error,
+                decision.declared_rung, decision.claimed_rung,
+                decision.computed_rung, decision.confidence_basis,
                 decision.created_at,
             ),
         )
@@ -897,6 +1009,7 @@ class ImproverStore:
         self.conn.commit()
 
     def _row_to_decision(self, row: sqlite3.Row) -> MetaDecision:
+        cols = row.keys()
         return MetaDecision(
             id=row["id"],
             candidate_improver_id=row["candidate_improver_id"],
@@ -908,6 +1021,19 @@ class ImproverStore:
             decided_by=row["decided_by"],
             claim_id=row["claim_id"],
             claim_error=row["claim_error"],
+            declared_rung=(
+                row["declared_rung"] if "declared_rung" in cols else None
+            ),
+            claimed_rung=(
+                row["claimed_rung"] if "claimed_rung" in cols else None
+            ),
+            computed_rung=(
+                row["computed_rung"] if "computed_rung" in cols else None
+            ),
+            confidence_basis=(
+                row["confidence_basis"]
+                if "confidence_basis" in cols else None
+            ),
             created_at=row["created_at"],
         )
 

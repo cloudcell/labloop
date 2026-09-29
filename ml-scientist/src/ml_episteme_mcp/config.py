@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from . import _grounded_constants as _gc
 
 from .clients.adaptor import (
     MCPAdaptor,
@@ -39,7 +40,7 @@ DEFAULTS: dict[str, Any] = {
     # disable for debugging.
     "enforcement": {
         "recurrent_protocol": True,
-        "status_freshness_seconds": 600,
+        "status_freshness_seconds": _gc.STATUS_FRESHNESS_SECONDS.value,
     },
 }
 

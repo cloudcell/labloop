@@ -45,7 +45,12 @@ def _contract_payload(direction="minimize", metric="val_ppl"):
             "metrics": {"primary_metric": metric, "direction": direction},
             "holdouts": None,
             "budget": None,
-            "promotion_policy": {},
+            # Powered — sesoi_d=4.0 keeps required_n=1 (fixture
+            # convenience, not a design point).
+            "promotion_policy": {
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
             "created_at": "2026-01-01T00:00:00+00:00",
         }
     })
@@ -148,7 +153,10 @@ class TestSpawnCampaignProgramme:
                     "version": 1,
                     "metrics": {"val_ppl": "minimize"},
                     "holdouts": None, "budget": None,
-                    "promotion_policy": {},
+                    "promotion_policy": {
+                        "sesoi_d": 4.0, "target_power": 0.8,
+                        "min_evidence_rung": "not_worth",
+                    },
                     "created_at": "2026-01-01T00:00:00+00:00",
                 }
             }),
@@ -181,7 +189,10 @@ class TestSpawnCampaignProgramme:
                     "version": 1,
                     "metrics": {"primary_metric": "val_ppl"},
                     "holdouts": None, "budget": None,
-                    "promotion_policy": {},
+                    "promotion_policy": {
+                        "sesoi_d": 4.0, "target_power": 0.8,
+                        "min_evidence_rung": "not_worth",
+                    },
                     "created_at": "2026-01-01T00:00:00+00:00",
                 }
             }),

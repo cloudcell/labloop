@@ -663,6 +663,10 @@ CREATE TABLE IF NOT EXISTS promotion_decisions (
     evidence_refs_json TEXT NOT NULL,
     rationale TEXT NOT NULL,
     decided_by TEXT NOT NULL,
+    declared_rung TEXT,
+    claimed_rung TEXT,
+    computed_rung TEXT,
+    bf_2ln REAL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (candidate_id) REFERENCES candidate_versions(id),
     FOREIGN KEY (contract_id) REFERENCES evaluation_contracts(id)
@@ -868,6 +872,24 @@ class StateStore:
                 "ALTER TABLE data_refs ADD COLUMN generator_code_hash TEXT"
             )
             self._conn.commit()
+
+        # Evidence-rung accounting on promotion decisions
+        # (plan-20260929-1641Z) — additive columns.
+        dec_cols = {
+            r[1] for r in self._conn.execute(
+                "PRAGMA table_info(promotion_decisions)"
+            )
+        }
+        for col in ("declared_rung", "claimed_rung", "computed_rung"):
+            if col not in dec_cols:
+                self._conn.execute(
+                    f"ALTER TABLE promotion_decisions ADD COLUMN {col} TEXT"
+                )
+        if "bf_2ln" not in dec_cols:
+            self._conn.execute(
+                "ALTER TABLE promotion_decisions ADD COLUMN bf_2ln REAL"
+            )
+        self._conn.commit()
 
         # Phase 1: FK indexes for query performance.
         # Idempotent (CREATE INDEX IF NOT EXISTS). These prevent full table
@@ -2001,8 +2023,9 @@ class StateStore:
         self._write(
             "INSERT INTO promotion_decisions "
             "(id, candidate_id, contract_id, verdict, evidence_refs_json, "
-            "rationale, decided_by, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "rationale, decided_by, declared_rung, claimed_rung, "
+            "computed_rung, bf_2ln, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 d.id,
                 d.candidate_id,
@@ -2011,6 +2034,10 @@ class StateStore:
                 json.dumps(d.evidence_refs),
                 d.rationale,
                 d.decided_by,
+                d.declared_rung,
+                d.claimed_rung,
+                d.computed_rung,
+                d.bf_2ln,
                 d.created_at,
             ),
         )
@@ -2032,6 +2059,7 @@ class StateStore:
         return [self._decision_from_row(r) for r in rows]
 
     def _decision_from_row(self, row) -> PromotionDecision:
+        cols = row.keys()
         return PromotionDecision(
             id=row["id"],
             candidate_id=row["candidate_id"],
@@ -2040,6 +2068,16 @@ class StateStore:
             evidence_refs=json.loads(row["evidence_refs_json"]),
             rationale=row["rationale"],
             decided_by=row["decided_by"],
+            declared_rung=(
+                row["declared_rung"] if "declared_rung" in cols else None
+            ),
+            claimed_rung=(
+                row["claimed_rung"] if "claimed_rung" in cols else None
+            ),
+            computed_rung=(
+                row["computed_rung"] if "computed_rung" in cols else None
+            ),
+            bf_2ln=row["bf_2ln"] if "bf_2ln" in cols else None,
             created_at=row["created_at"],
         )
 

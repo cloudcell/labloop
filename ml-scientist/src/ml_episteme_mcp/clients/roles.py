@@ -271,6 +271,7 @@ class ClaimsRole(ABC):
         confidence: float,
         evidence: list[dict[str, Any]] | None = None,
         source_id: str | None = None,
+        confidence_basis: str | None = None,
     ) -> str:
         """Assert a claim into semantic memory. Returns a claim_id.
 

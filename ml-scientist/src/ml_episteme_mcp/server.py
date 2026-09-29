@@ -31,6 +31,7 @@ from starlette.responses import JSONResponse
 
 from .clients.adaptor import MCPAdaptor, create_stub_adaptor
 from .state.store import StateStore
+from . import _grounded_constants as _gc
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ def create_server(
 
     programme_resources.register(mcp, store)
     stale_hours = float(
-        (session_config or {}).get("stale_programme_hours", 24.0)
+        (session_config or {}).get("stale_programme_hours", _gc.STALE_PROGRAMME_HOURS.value)
     )
     session_resources.register(
         mcp, store,
@@ -160,7 +161,7 @@ def create_server(
     status_resources.register(
         mcp, store, adaptor, stale_programme_hours=stale_hours,
         archive_seal_warn_hours=float(
-            (session_config or {}).get("archive_seal_warn_hours", 72.0)
+            (session_config or {}).get("archive_seal_warn_hours", _gc.ARCHIVE_SEAL_WARN_HOURS.value)
         ),
     )
     from .resources import graph as graph_resource
@@ -212,7 +213,7 @@ def create_server(
         from .enforcement import recurrence
 
         recurrence.TRACKER.configure(
-            enf.get("status_freshness_seconds", 600)
+            enf.get("status_freshness_seconds", _gc.STATUS_FRESHNESS_SECONDS.value)
         )
         recurrence.install(
             mcp, store, recurrence.TRACKER,

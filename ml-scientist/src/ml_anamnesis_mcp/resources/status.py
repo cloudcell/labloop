@@ -19,6 +19,7 @@ from ..enforcement.recurrence import TRACKER, open_violations
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import MemoryStore
+from .. import _grounded_constants as _gc
 
 
 def _utc_now_iso() -> str:
@@ -98,6 +99,7 @@ def status_digest(store: MemoryStore) -> dict:
             "channels": [],
         },
         "integrity_summary": _integrity_summary(store),
+        "constants": _gc.constants_block(),
         "claims": {
             "total": total,
             "superseded": superseded,

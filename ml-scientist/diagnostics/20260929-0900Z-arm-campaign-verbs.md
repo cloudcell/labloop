@@ -23,13 +23,19 @@ PART A — setup: tournament + arm campaign
    propose_meta_change → proposal id → record_meta_decision citing at
    least one evidence_ref (pull_evidence first if none exist) →
    promote_policy if the decision warrants → open_tournament on the
-   resulting policy/candidate context. Record every id verbatim.
+   resulting policy/candidate context. A fresh open needs a powered
+   meta-contract (README §Contract recipe: {"sesoi_d": 4.0,
+   "target_power": 0.8, "min_evidence_rung": "not_worth"}) and
+   seeds=[1]. Record every id verbatim.
 2. Register or identify a challenger candidate for the tournament's
    evaluation contract (register_candidate on episteme;
    register_challenger on zetesis if the campaign needs a roster row).
 3. open_arm_campaign(tournament_id, arm='candidate',
    upstream_contract_id=<the tournament's contract>, challenger_id)
-   → the arm's linked campaign id. Report verbatim.
+   → the arm's linked campaign id. The upstream contract is pulled
+   and power-gated — the carried budget's programmes_per_arm is the
+   declared n; pre-1641Z contracts open no new work. Report
+   verbatim.
 
 PART B — the four verbs, in order
 

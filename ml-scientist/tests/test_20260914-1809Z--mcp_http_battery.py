@@ -1190,7 +1190,11 @@ class TestCandidateLineageHTTP:
         contract = await call_tool_http(server_url, "create_evaluation_contract", {
             "programme_id": pid,
             "metrics": '{"ppl": "minimize"}',
-            "promotion_policy": {"threshold": 0.05},
+            "promotion_policy": {
+                "threshold": 0.05,
+                "sesoi_d": 0.5, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         })
         assert "error" not in contract, f"contract failed: {contract}"
         assert contract["version"] == 1

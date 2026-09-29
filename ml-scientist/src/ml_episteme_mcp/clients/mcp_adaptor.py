@@ -378,6 +378,7 @@ class AnamnesisClaimsAdaptor(MCPClientAdaptor, ClaimsRole):
         confidence: float,
         evidence: list[dict[str, Any]] | None = None,
         source_id: str | None = None,
+        confidence_basis: str | None = None,
     ) -> str:
         data = self._parse(await self.call_tool("assert_claim", {
             "content": content,
@@ -385,6 +386,7 @@ class AnamnesisClaimsAdaptor(MCPClientAdaptor, ClaimsRole):
             "confidence": confidence,
             "evidence": evidence or [],
             "source_id": source_id,
+            "confidence_basis": confidence_basis,
         }), "assert_claim")
         return data["claim_id"]
 

@@ -258,9 +258,9 @@ class TestMisfiledExternalMigration:
             # the write path could not have produced post-fix.
             store._execute(
                 "INSERT INTO claim_edges (id, from_claim, to_ref, "
-                "ref_type, relation, weight, created_at) "
+                "ref_type, relation, created_at) "
                 "VALUES ('edge-x', 'claim-1', 'tres-9', "
-                "'external', 'cites', 1.0, '2026-01-01T00:00:00+00:00')"
+                "'external', 'cites', '2026-01-01T00:00:00+00:00')"
             )
             store.conn.commit()
             report = run_checks(store)

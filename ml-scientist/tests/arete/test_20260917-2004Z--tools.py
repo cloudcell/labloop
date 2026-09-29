@@ -212,6 +212,7 @@ async def test_full_lifecycle_gate_walk(arete_server, adaptors):
         "decided_by": "arete:protocol",
         "tournament_id": tourn,
         "contract_id": contract,
+        "claimed_rung": "positive",
     })
     assert "error" not in dec, dec
     assert dec["claim_status"] == "minted"
@@ -255,7 +256,7 @@ async def test_close_refuses_unpaired_tournament(arete_server):
     t = await call_tool(mcp, "open_tournament", {
         "contract_id": contract, "parent_improver_id": parent,
         "candidate_improver_id": candidate,
-        "budget": {"runs": 1},
+        "budget": {"runs": 1}, "seeds": [1],
     })
     closed = await call_tool(
         mcp, "close_tournament", {"tournament_id": t["tournament_id"]}
@@ -378,7 +379,7 @@ async def test_proposal_less_improver_agent_promote_allowed(arete_server):
             "contract_id": await make_contract(mcp),
             "parent_improver_id": parent,
             "candidate_improver_id": candidate,
-            "budget": {"r": 1},
+            "budget": {"r": 1}, "seeds": [1],
         }))["tournament_id"],
         "source": "loop0", "tool": "list_archives",
     })
@@ -400,7 +401,7 @@ async def test_latest_decision_supersedes_promote(arete_server):
             "contract_id": await make_contract(mcp),
             "parent_improver_id": parent,
             "candidate_improver_id": candidate,
-            "budget": {"r": 1},
+            "budget": {"r": 1}, "seeds": [1],
         }))["tournament_id"],
         "source": "loop0", "tool": "list_archives",
     })
@@ -498,6 +499,7 @@ async def test_canary_record_lifecycle(arete_server):
     t = (await call_tool(mcp, "open_tournament", {
         "contract_id": contract, "parent_improver_id": parent,
         "candidate_improver_id": candidate, "budget": {"r": 1},
+        "seeds": [1],
     }))["tournament_id"]
     pull = await call_tool(mcp, "pull_evidence", {
         "context_type": "tournament", "context_id": t,

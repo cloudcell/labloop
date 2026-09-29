@@ -70,7 +70,12 @@ async def test_gate_walk_over_http(arete_http_server):
 
     contract = (await call_tool_http(arete_url, "create_meta_contract", {
         "metrics": {"primary_metric": "hits", "direction": "max"},
-        "promotion_policy": {"min_gain": 1.0},
+        # Powered contract — sesoi_d=4.0 keeps required_n=1.
+        "promotion_policy": {
+            "min_gain": 1.0,
+            "sesoi_d": 4.0, "target_power": 0.8,
+            "min_evidence_rung": "not_worth",
+        },
     }))["contract_id"]
 
     tourn = (await call_tool_http(arete_url, "open_tournament", {
@@ -111,6 +116,7 @@ async def test_gate_walk_over_http(arete_http_server):
         "rationale": "gain 1.5 over the paired parent arm",
         "decided_by": "human:operator",
         "tournament_id": tourn, "contract_id": contract,
+        "claimed_rung": "positive",
     })
     assert dec["claim_status"] == "minted", dec
     assert dec["claim_id"].startswith("claim-")

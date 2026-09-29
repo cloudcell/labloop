@@ -71,7 +71,12 @@ async def _battery_setup(arete_orchestration_server):
                 "primary_metric": "val_ppl",
                 "direction": "minimize",
             },
-            "promotion_policy": {"min_gain": 1.0},
+            "promotion_policy": {
+                "min_gain": 1.0,
+                # Powered contract (sesoi_d=4.0 → required_n=1).
+                "sesoi_d": 4.0, "target_power": 0.8,
+                "min_evidence_rung": "not_worth",
+            },
         })
     assert "error" not in contract, contract
     contract_id = contract["contract_id"]
@@ -98,7 +103,12 @@ async def _battery_setup(arete_orchestration_server):
     child = await _mk_improver(arete, parent_id=parent)
     mc = await call_tool_http(arete, "create_meta_contract", {
         "metrics": {"primary_metric": "hits", "direction": "max"},
-        "promotion_policy": {"min_gain": 1.0},
+        # Powered contract — sesoi_d=4.0 keeps required_n=1.
+        "promotion_policy": {
+            "min_gain": 1.0,
+            "sesoi_d": 4.0, "target_power": 0.8,
+            "min_evidence_rung": "not_worth",
+        },
     })
     assert "error" not in mc, mc
     p = await call_tool_http(arete, "propose_meta_change", {

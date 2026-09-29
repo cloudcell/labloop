@@ -127,6 +127,13 @@ class CloseCampaignOut(TypedDict, total=False):
     promotion_score: int | float | None
     champion_mean: int | float | None
     challenger_mean: int | float | None
+    n_achieved: int | None
+    underpowered: bool | None
+    type_s_risk: int | float | None
+    type_m_ratio: int | float | None
+    p_value: int | float | None
+    bf_2ln: int | float | None
+    computed_rung: str | None
 
 
 class AbandonCampaignOut(TypedDict, total=False):
@@ -163,6 +170,9 @@ class OpenCampaignOut(TypedDict, total=False):
     challenger_id: str | None
     primary_metric: str | None
     status: str | None
+    n_required: int | None
+    n_requested: int | None
+    power_acknowledged: bool | None
 
 
 class PullCampaignEvidenceOut(TypedDict, total=False):
@@ -189,6 +199,10 @@ class RecordPromotionVerdictOut(TypedDict, total=False):
     decision_id: str | None
     claim_id: str | None
     claim_status: str | None
+    declared_rung: str | None
+    claimed_rung: str | None
+    computed_rung: str | None
+    confidence_basis: str | None
 
 
 class RefreshRosterOut(TypedDict, total=False):

@@ -21,6 +21,7 @@ from ..enforcement.recurrence import TRACKER, open_violations
 from ..integrity.checks import log_dir_for
 from ..integrity.log import list_check_logs
 from ..state.store import StateStore
+from .. import _grounded_constants as _gc
 
 # Which tools a down channel blocks — the honest answer to "why can't
 # I do the next step". Local roles (optimizer/executor/data_source)
@@ -135,7 +136,8 @@ def _integrity_summary(store: StateStore) -> dict:
 
 
 def _collect_open_work(
-    store: StateStore, stale_programme_hours: float = 24.0
+    store: StateStore,
+    stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value
 ) -> tuple[list[dict], dict]:
     """Open entities plus the raw facts the recommender needs."""
     open_work: list[dict] = []
@@ -401,8 +403,9 @@ def _unsealed_archives(
 
 
 def status_digest(
-    store: StateStore, adaptor=None, stale_programme_hours: float = 24.0,
-    archive_seal_warn_hours: float = 72.0,
+    store: StateStore, adaptor=None,
+    stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value,
+    archive_seal_warn_hours: float = _gc.ARCHIVE_SEAL_WARN_HOURS.value,
 ) -> dict:
     """The Loop-0 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(
@@ -431,6 +434,7 @@ def status_digest(
         "recommended_next": recs,
         "upstream_summary": _upstream_summary(adaptor),
         "integrity_summary": _integrity_summary(store),
+        "constants": _gc.constants_block(),
     }
     # Consultation-duty watermark — every digest consumer (status
     # resource, session resource, status_report prompt) stamps it.
@@ -440,8 +444,8 @@ def status_digest(
 
 def register(
     mcp, store: StateStore, adaptor=None,
-    stale_programme_hours: float = 24.0,
-    archive_seal_warn_hours: float = 72.0,
+    stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value,
+    archive_seal_warn_hours: float = _gc.ARCHIVE_SEAL_WARN_HOURS.value,
 ) -> None:
     """Register the status digest resource."""
 

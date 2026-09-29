@@ -402,9 +402,10 @@ def register(
                 else:
                     try:
                         for f in provisional:
+                            finding_refs = store.finding_evidence_refs(f.id)
                             consulted = {
                                 ref_id
-                                for r in store.finding_evidence_refs(f.id)
+                                for r in finding_refs
                                 for ref_id in r.ref_ids
                             }
                             # Evidence edges mint inline — anamnesis caps
@@ -414,6 +415,17 @@ def register(
                                 content=f.content,
                                 type="methodological",
                                 confidence=f.confidence,
+                                # Caller-declared confidence — no
+                                # likelihood exists on a finding;
+                                # the basis records which side of the
+                                # prior-ceiling gate it minted on: the
+                                # finding's attached erefs, whether or
+                                # not the pull returned upstream items
+                                # (plan-20260929-1642Z).
+                                confidence_basis=(
+                                    "weakly_grounded"
+                                    if finding_refs else "ungrounded"
+                                ),
                                 evidence=[
                                     {
                                         "to_ref": ref_id,

@@ -110,6 +110,7 @@ async def test_meta_decision_mints_with_loop2_ref_types(
         "parent_improver_id": parent,
         "candidate_improver_id": candidate,
         "budget": {"descendant_runs": 2},
+        "seeds": [1],
     })
     tourn = t["tournament_id"]
 

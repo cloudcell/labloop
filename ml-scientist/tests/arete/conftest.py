@@ -59,13 +59,14 @@ class FakeClaimsAdaptor(FakeUpstreamAdaptor):
         self.edges: list[dict] = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None
+        self, content, type, confidence, evidence=None, source_id=None,
+        confidence_basis=None,
     ):
         cid = f"claim-{len(self.minted) + 1:04d}"
         self.minted.append({
             "claim_id": cid, "content": content, "type": type,
             "confidence": confidence, "evidence": evidence,
-            "source_id": source_id,
+            "source_id": source_id, "confidence_basis": confidence_basis,
         })
         # Inline evidence edges mint the same relations relate() would.
         for e in evidence or []:
@@ -155,7 +156,13 @@ async def make_contract(mcp, **overrides) -> str:
     """Create a meta-contract; return its id."""
     args = {
         "metrics": {"primary_metric": "hits", "direction": "max"},
-        "promotion_policy": {"min_gain": 1.05, "confidence": 0.95},
+        # sesoi_d=4.0 keeps required_n=1 so minimal seed fixtures pass —
+        # a fixture convenience, not a recommended design point.
+        "promotion_policy": {
+            "min_gain": 1.05, "confidence": 0.95,
+            "sesoi_d": 4.0, "target_power": 0.8,
+            "min_evidence_rung": "not_worth",
+        },
     }
     args.update(overrides)
     result = await call_tool(mcp, "create_meta_contract", args)

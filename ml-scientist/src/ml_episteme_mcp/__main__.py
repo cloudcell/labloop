@@ -45,6 +45,7 @@ from pathlib import Path
 from .config import create_adaptor_from_config, load_config
 from .server import create_server
 from .state.store import StateStore
+from . import _grounded_constants as _gc
 
 
 def _check_port_available(host: str, port: int, label: str) -> bool:
@@ -370,7 +371,7 @@ Examples:
                 config=config.get("integrity", {}),
             )
             interval = config.get("integrity", {}).get(
-                "check_interval_seconds", 300
+                "check_interval_seconds", _gc.CHECK_INTERVAL_SECONDS.value
             )
             print(
                 "integrity monitor: startup check logged"

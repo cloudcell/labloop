@@ -1275,12 +1275,20 @@ class TestCandidateLineage:
             r1 = await call_tool(client, "create_evaluation_contract", {
                 "programme_id": "prog-c1",
                 "metrics": {"ppl": "minimize"},
-                "promotion_policy": {"threshold": 0.05},
+                "promotion_policy": {
+                    "threshold": 0.05,
+                    "sesoi_d": 0.5, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             })
             r2 = await call_tool(client, "create_evaluation_contract", {
                 "programme_id": "prog-c1",
                 "metrics": {"ppl": "minimize", "params": "minimize"},
-                "promotion_policy": {"threshold": 0.03},
+                "promotion_policy": {
+                    "threshold": 0.03,
+                    "sesoi_d": 0.5, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             })
         assert r1["version"] == 1 and r2["version"] == 2
 
@@ -1509,7 +1517,11 @@ class TestCandidateReadSurface:
             r1 = await call_tool(client, "create_evaluation_contract", {
                 "programme_id": "prog-ec1",
                 "metrics": {"hits": "maximize"},
-                "promotion_policy": {"threshold": 1.0},
+                "promotion_policy": {
+                    "threshold": 1.0,
+                    "sesoi_d": 0.5, "target_power": 0.8,
+                    "min_evidence_rung": "not_worth",
+                },
             })
             r = await call_tool(client, "get_evaluation_contract", {
                 "contract_id": r1["contract_id"],

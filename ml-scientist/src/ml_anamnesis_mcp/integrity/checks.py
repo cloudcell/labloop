@@ -17,8 +17,10 @@ from pathlib import Path
 from ..enforcement.checks import PRIOR_CONFIDENCE_MAX
 from ..state.models import EVIDENCE_RELATIONS, INTERNAL_REF_PREFIXES
 
-DEFAULT_LOG_MAX_FILES = 100
-DEFAULT_CHECK_INTERVAL_SECONDS = 300
+from .. import _grounded_constants as _gc
+
+DEFAULT_LOG_MAX_FILES = _gc.LOG_MAX_FILES.value
+DEFAULT_CHECK_INTERVAL_SECONDS = _gc.CHECK_INTERVAL_SECONDS.value
 
 
 def _utc_now() -> str:

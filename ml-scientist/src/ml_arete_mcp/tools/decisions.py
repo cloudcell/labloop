@@ -34,6 +34,7 @@ from ..state.models import (
     TournamentStatus,
 )
 from ..state.store import ImproverStore
+from .. import _grounded_constants as _gc
 from .schemas import coerce_json, fail, ok, PromotePolicyOut, RecordMetaDecisionOut, CloseCanaryOut, ListDecisionsOut, RecordCanaryOut, RollbackOut
 from typing import Annotated, Literal
 from pydantic import Field
@@ -90,13 +91,22 @@ def _ref_type_for(ref_id: str) -> str:
     return "external"
 
 
-async def _mint_decision_claim(store, adaptors, decision) -> tuple:
+async def _mint_decision_claim(
+    store, adaptors, decision,
+    confidence: float | None = None,
+    confidence_basis: str | None = None,
+) -> tuple:
     """Mint the methodological claim for a meta-decision row.
 
     Shared by record_meta_decision and rollback — every insert-only
     mdec- row carries the same grounding contract. Returns
     (claim_id, claim_status, claim_error, edges_created); failures are
     reported, never raised — a claims outage must not block a decision.
+
+    confidence/confidence_basis come from the caller's evidence
+    resolution (plan-20260929-1642Z): the posterior bound when the
+    cited tournament carries the statistic, else the grounded prior
+    ceiling labelled weakly_grounded — never a bare literal.
     """
     claim_status = "skipped"
     claim_id = None
@@ -121,7 +131,14 @@ async def _mint_decision_claim(store, adaptors, decision) -> tuple:
                 f"{decision.rationale}"
             ),
             type="methodological",
-            confidence=0.6,
+            confidence=(
+                confidence
+                if confidence is not None
+                else _gc.PRIOR_CONFIDENCE_MAX.value
+            ),
+            confidence_basis=(
+                confidence_basis or "weakly_grounded"
+            ),
             evidence=[
                 {
                     "to_ref": ref_id,
@@ -155,6 +172,10 @@ def _decision_json(d: MetaDecision) -> dict:
         "decided_by": d.decided_by,
         "claim_id": d.claim_id,
         "claim_error": d.claim_error,
+        "declared_rung": d.declared_rung,
+        "claimed_rung": d.claimed_rung,
+        "computed_rung": d.computed_rung,
+        "confidence_basis": d.confidence_basis,
         "created_at": d.created_at,
     }
 
@@ -171,6 +192,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         decided_by: Annotated[str, Field(description="Attributable decider — 'human:<name>' required when the candidate implements a conditional proposal; 'arete:protocol' or an improver id otherwise.")],
         contract_id: Annotated[str | None, Field(description='Optional contract the decision cites; must exist if given.')] = None,
         tournament_id: Annotated[str | None, Field(description='ID of the target tournament.')] = None,
+        claimed_rung: Annotated[str | None, Field(description="Evidence rung this decision claims (not_worth|positive|strong|very_strong — the Kass–Raftery ladder). Required on 'promote' when the cited contract declares min_evidence_rung.")] = None,
     ) -> Annotated[CallToolResult, RecordMetaDecisionOut]:
         """Record a governed meta-decision — insert-only.
 
@@ -214,12 +236,50 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             ):
                 return fail(json.dumps({"error": err}))
 
-            if contract_id is not None and (
-                store.get_meta_contract(contract_id) is None
+            declared_rung = None
+            if contract_id is not None:
+                contract = store.get_meta_contract(contract_id)
+                if contract is None:
+                    return fail(json.dumps({
+                        "error": f"Meta-contract not found: "
+                        f"{contract_id}."
+                    }))
+                declared_rung = (contract.promotion_policy or {}).get(
+                    "min_evidence_rung"
+                )
+            if claimed_rung is not None and (
+                claimed_rung not in _gc.EVIDENCE_RUNGS
             ):
                 return fail(json.dumps({
-                    "error": f"Meta-contract not found: {contract_id}."
+                    "error": f"claimed_rung must be one of "
+                    f"{'|'.join(_gc.EVIDENCE_RUNGS)}, got: "
+                    f"{claimed_rung!r}"
                 }))
+            # Declared-vs-claimed (plan-20260929-1641Z W4): a promote
+            # under a rung-declaring contract must claim a rung at or
+            # above the contract minimum — the record of which rung
+            # the decider asserts. The BF-producing statistic that
+            # makes claimed evidential is the posterior plan's job.
+            if verdict == "promote" and declared_rung is not None:
+                if claimed_rung is None:
+                    return fail(json.dumps({
+                        "error": f"promote under contract "
+                        f"{contract_id} must claim an evidence rung — "
+                        f"the contract declares min_evidence_rung="
+                        f"'{declared_rung}'. Claim the rung the "
+                        "evidence reaches, or the verdict is bare."
+                    }))
+                if not _gc.rung_at_least(claimed_rung, declared_rung):
+                    return fail(json.dumps({
+                        "error": f"claimed_rung '{claimed_rung}' is "
+                        f"below the contract minimum '{declared_rung}' "
+                        f"(Kass–Raftery 2 ln BF "
+                        f"{_gc.min_evidence_rung(claimed_rung):.0f} < "
+                        f"{_gc.min_evidence_rung(declared_rung):.0f}) "
+                        "— a promote cannot assert less evidence than "
+                        "the contract requires."
+                    }))
+            tournament = None
             if tournament_id is not None:
                 t = store.get_tournament(tournament_id)
                 if t is None:
@@ -241,6 +301,32 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                         "voided — decisions rest on comparisons, and "
                         "a voided record is not a comparison."
                     }))
+                tournament = t
+
+            # Evidence-vs-ladder ceiling (plan-20260929-1642Z): when
+            # the cited tournament closed with a measured bound, a
+            # promote may not claim past it — declared ≤ claimed ≤
+            # computed.
+            computed_rung = None
+            if tournament is not None and tournament.bf_2ln is not None:
+                computed_rung = _gc.rung_for_2lnbf(tournament.bf_2ln)
+            if (
+                verdict == "promote"
+                and claimed_rung is not None
+                and computed_rung is not None
+                and not _gc.rung_at_least(computed_rung, claimed_rung)
+            ):
+                return fail(json.dumps({
+                    "error": f"claimed_rung '{claimed_rung}' exceeds "
+                    f"the evidence — tournament {tournament_id} "
+                    f"measured 2 ln BF = {tournament.bf_2ln:.2f}, "
+                    f"reaching '{computed_rung}' (the oracle bound); "
+                    f"claiming '{claimed_rung}' asserts more than "
+                    "the data's own bound. Claim what the evidence "
+                    "reaches.",
+                    "computed_rung": computed_rung,
+                    "bf_2ln": tournament.bf_2ln,
+                }))
 
             decision = MetaDecision(
                 id=f"mdec-{uuid.uuid4().hex[:8]}",
@@ -251,7 +337,44 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 evidence_refs=evidence_refs,
                 rationale=rationale,
                 decided_by=decided_by,
+                declared_rung=declared_rung,
+                claimed_rung=claimed_rung,
+                computed_rung=computed_rung,
             )
+
+            # Confidence the minted claim carries (plan-20260929-1642Z):
+            # when the cited tournament measured a p, promote mints the
+            # NAP D-1 posterior bound; reject/rollback mint the
+            # conservative H₀ bound; hold asserts neither and mints the
+            # prior ceiling. No statistic → the ceiling, labelled
+            # weakly_grounded — evidence was consulted, no likelihood
+            # exists on a meta-decision.
+            confidence = None
+            confidence_basis = None
+            if (
+                tournament is not None
+                and tournament.bf_2ln is not None
+                and verdict in ("promote", "reject", "rollback")
+            ):
+                prior = (
+                    tournament.prior
+                    if tournament.prior is not None
+                    else _gc.PRIOR_CONFIDENCE_MAX.value
+                )
+                # Posterior straight from the persisted 2 ln BF —
+                # the p → z round-trip underflows to p=0 at
+                # extreme z, losing the statistic.
+                posterior = _gc.posterior_from_2lnbf(
+                    prior, tournament.bf_2ln
+                )
+                confidence = (
+                    posterior if verdict == "promote" else 1 - posterior
+                )
+                confidence_basis = "grounded"
+            else:
+                confidence = _gc.PRIOR_CONFIDENCE_MAX.value
+                confidence_basis = "weakly_grounded"
+            decision.confidence_basis = confidence_basis
 
             # Mint the methodological claim — the claim's source_id
             # names the decision record being inserted next.
@@ -260,7 +383,11 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 claim_status,
                 claim_error,
                 edges_created,
-            ) = await _mint_decision_claim(store, adaptors, decision)
+            ) = await _mint_decision_claim(
+                store, adaptors, decision,
+                confidence=confidence,
+                confidence_basis=confidence_basis,
+            )
 
             decision.claim_id = claim_id
             decision.claim_error = claim_error
@@ -273,6 +400,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 "claim_status": claim_status,
                 "claim_error": claim_error,
                 "edges_created": edges_created,
+                "declared_rung": declared_rung,
+                "claimed_rung": claimed_rung,
+                "computed_rung": computed_rung,
+                "confidence_basis": confidence_basis,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

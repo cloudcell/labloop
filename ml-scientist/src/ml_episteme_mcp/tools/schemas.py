@@ -408,6 +408,9 @@ class MarkRetryableOut(TypedDict, total=False):
 class RecordPromotionDecisionOut(TypedDict, total=False):
     decision_id: str | None
     status: str | None
+    declared_rung: str | None
+    claimed_rung: str | None
+    computed_rung: str | None
 
 
 class UpdateMetricDirectionOut(TypedDict, total=False):

@@ -24,6 +24,7 @@ from ..enforcement.checks import (
 )
 from ..state.models import Claim, ClaimEdge, ClaimType, RefType, Relation
 from ..state.store import MemoryStore, content_hash
+from .. import _grounded_constants as _gc
 from .schemas import coerce_json, fail, ok, AssertClaimOut, GetClaimOut, GetClaimsOut, ListClaimsOut, RelateOut
 from typing import Annotated, Literal
 from pydantic import Field
@@ -46,7 +47,7 @@ def register(
         content: Annotated[str, Field(description='The claim text — deduplicated by normalized content (re-asserting identical content returns the existing claim_id).')],
         type: Annotated[Literal['empirical', 'methodological'], Field(description='empirical | methodological.')],
         confidence: Annotated[float, Field(description='0–1 — above the prior ceiling (0.3) requires ≥1 evidence-bearing edge.')],
-        importance: Annotated[float, Field(description='Relative importance 0–1.')] = 0.5,
+        confidence_basis: Annotated[str | None, Field(description="What the confidence number rests on: 'grounded' (a posterior bound was computed) | 'weakly_grounded' (evidence consulted, no likelihood) | 'ungrounded' (prior-ceiling mint, no evidence). NULL on legacy rows.")] = None,
         evidence: Annotated[list | str | None, Field(description='List of {to_ref, ref_type, relation} dicts linking the claim to its support (e.g. {"to_ref": "trial-abc", "ref_type": "trial", "relation": "tested_by"}); may be JSON-encoded. Without ≥1 evidence-bearing edge, confidence is capped at 0.3.')] = None,
         supersedes_id: Annotated[str | None, Field(description='ID of an existing claim this one replaces — the supersedes edge is recorded automatically.')] = None,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity (decision/investigation) that minted this claim.')] = None,
@@ -74,6 +75,14 @@ def register(
         deleted.
         """
         try:
+            if confidence_basis is not None and (
+                confidence_basis not in _gc.CONFIDENCE_BASIS
+            ):
+                return fail(json.dumps({
+                    "error": f"confidence_basis must be one of "
+                    f"{'|'.join(_gc.CONFIDENCE_BASIS)}, got: "
+                    f"{confidence_basis!r}"
+                }))
             if evidence is not None:
                 evidence = coerce_json(evidence, list, "evidence")
 
@@ -146,7 +155,6 @@ def register(
                             to_ref=e["to_ref"],
                             ref_type=RefType(e["ref_type"]),
                             relation=Relation(e["relation"]),
-                            weight=e.get("weight", 1.0),
                             source_id=e.get("source_id", source_id),
                         )
                         store.create_edge(edge)
@@ -176,10 +184,10 @@ def register(
                 content=content,
                 type=ClaimType(type),
                 confidence=confidence,
-                importance=importance,
                 supersedes_id=supersedes_id,
                 content_hash=chash,
                 source_id=source_id,
+                confidence_basis=confidence_basis,
                 valid_until=valid_until,
             )
 
@@ -203,7 +211,6 @@ def register(
                         to_ref=e["to_ref"],
                         ref_type=RefType(e["ref_type"]),
                         relation=Relation(e["relation"]),
-                        weight=e.get("weight", 1.0),
                         source_id=e.get("source_id", source_id),
                     )
                     store.create_edge(edge)
@@ -224,7 +231,6 @@ def register(
         to_ref: Annotated[str, Field(description='Edge target — claim-typed IDs are verified; other ref types are trusted opaque IDs.')],
         ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'bundle', 'dataref', 'reference', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | bundle | dataref | reference | external.")],
         relation: Annotated[Literal['supports', 'contradicts', 'derived_from', 'tested_by', 'valid_under', 'supersedes', 'generalizes', 'specializes', 'similar_to', 'failed_because', 'cites'], Field(description='Edge type: supports | contradicts | derived_from | tested_by | valid_under | supersedes | generalizes | specializes | similar_to | failed_because | cites.')],
-        weight: Annotated[float, Field(description='Edge strength (default 1.0).')] = 1.0,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity that recorded this edge.')] = None,
     ) -> Annotated[CallToolResult, RelateOut]:
         """Link a claim to evidence or another claim.
@@ -268,7 +274,6 @@ def register(
                 to_ref=to_ref,
                 ref_type=RefType(ref_type),
                 relation=Relation(relation),
-                weight=weight,
                 source_id=source_id,
             )
             store.create_edge(edge)
@@ -295,7 +300,6 @@ def register(
                     "to_ref": e.to_ref,
                     "ref_type": e.ref_type.value,
                     "relation": e.relation.value,
-                    "weight": e.weight,
                 }
                 for e in store.edges_from(claim_id)
             ]
@@ -304,7 +308,6 @@ def register(
                     "edge_id": e.id,
                     "from_claim": e.from_claim,
                     "relation": e.relation.value,
-                    "weight": e.weight,
                 }
                 for e in store.edges_to(claim_id)
             ]
@@ -314,11 +317,11 @@ def register(
                     "content": claim.content,
                     "type": claim.type.value,
                     "confidence": claim.confidence,
-                    "importance": claim.importance,
                     "valid_from": claim.valid_from,
                     "valid_until": claim.valid_until,
                     "supersedes_id": claim.supersedes_id,
                     "source_id": claim.source_id,
+                    "confidence_basis": claim.confidence_basis,
                     "created_at": claim.created_at,
                 },
                 "outgoing_edges": out,
@@ -352,11 +355,11 @@ def register(
                         "content": claim.content,
                         "type": claim.type.value,
                         "confidence": claim.confidence,
-                        "importance": claim.importance,
-                        "valid_from": claim.valid_from,
+                            "valid_from": claim.valid_from,
                         "valid_until": claim.valid_until,
                         "supersedes_id": claim.supersedes_id,
                         "source_id": claim.source_id,
+                        "confidence_basis": claim.confidence_basis,
                         "created_at": claim.created_at,
                     },
                     "outgoing_edges": [
@@ -365,8 +368,7 @@ def register(
                             "to_ref": e.to_ref,
                             "ref_type": e.ref_type.value,
                             "relation": e.relation.value,
-                            "weight": e.weight,
-                        }
+                                }
                         for e in store.edges_from(cid)
                     ],
                     "incoming_edges": [
@@ -374,8 +376,7 @@ def register(
                             "edge_id": e.id,
                             "from_claim": e.from_claim,
                             "relation": e.relation.value,
-                            "weight": e.weight,
-                        }
+                                }
                         for e in store.edges_to(cid)
                     ],
                 })
@@ -416,7 +417,6 @@ def register(
                         "content": c.content,
                         "type": c.type.value,
                         "confidence": c.confidence,
-                        "importance": c.importance,
                         "valid_until": c.valid_until,
                         "supersedes_id": c.supersedes_id,
                         "created_at": c.created_at,
