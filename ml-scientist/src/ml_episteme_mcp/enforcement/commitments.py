@@ -405,7 +405,8 @@ def check_evidence_exists(
         return (
             "The loop is the unit: no completed trials for hypothesis "
             f"{hypothesis_id}. Run at least one trial and record its "
-            "results before concluding."
+            "results before concluding. If the hypothesis can never "
+            "produce a completed trial, abandon_hypothesis is the exit."
         )
     return None
 

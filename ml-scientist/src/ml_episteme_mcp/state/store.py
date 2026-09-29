@@ -414,6 +414,9 @@ CREATE TABLE IF NOT EXISTS hypotheses (
     variables_involved_json TEXT NOT NULL,
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    abandon_rationale TEXT,
+    abandoned_by TEXT,
+    abandoned_at TEXT,
     FOREIGN KEY (programme_id) REFERENCES programmes(id)
 );
 
@@ -655,6 +658,18 @@ class StateStore:
                 "ALTER TABLE programmes ADD COLUMN candidate_version_id TEXT"
             )
             self._conn.commit()
+
+        # hypotheses gained abandon_rationale/abandoned_by/abandoned_at
+        # with the abandon_hypothesis tool — plain additive columns.
+        hcols = {
+            r[1] for r in self._conn.execute("PRAGMA table_info(hypotheses)")
+        }
+        for col in ("abandon_rationale", "abandoned_by", "abandoned_at"):
+            if col not in hcols:
+                self._conn.execute(
+                    f"ALTER TABLE hypotheses ADD COLUMN {col} TEXT"
+                )
+        self._conn.commit()
 
         # Fix data corruption from the positional INSERT bug.
         #
@@ -946,7 +961,10 @@ class StateStore:
     def create_hypothesis(self, h: Hypothesis) -> None:
         verify_mece(h)
         self._write(
-            "INSERT INTO hypotheses VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO hypotheses (id, programme_id, statement, "
+            "failure_criterion, variables_involved_json, status, "
+            "created_at, abandon_rationale, abandoned_by, abandoned_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 h.id,
                 h.programme_id,
@@ -955,6 +973,31 @@ class StateStore:
                 json.dumps(h.variables_involved),
                 h.status.value,
                 h.created_at,
+                h.abandon_rationale,
+                h.abandoned_by,
+                h.abandoned_at,
+            ),
+        )
+
+    def _row_to_hypothesis(self, row) -> Hypothesis:
+        keys = set(row.keys())
+        return Hypothesis(
+            id=row["id"],
+            programme_id=row["programme_id"],
+            statement=row["statement"],
+            failure_criterion=row["failure_criterion"],
+            variables_involved=json.loads(row["variables_involved_json"]),
+            status=row["status"],
+            created_at=row["created_at"],
+            abandon_rationale=(
+                row["abandon_rationale"] if "abandon_rationale" in keys
+                else None
+            ),
+            abandoned_by=(
+                row["abandoned_by"] if "abandoned_by" in keys else None
+            ),
+            abandoned_at=(
+                row["abandoned_at"] if "abandoned_at" in keys else None
             ),
         )
 
@@ -964,32 +1007,13 @@ class StateStore:
         )
         if row is None:
             return None
-        return Hypothesis(
-            id=row["id"],
-            programme_id=row["programme_id"],
-            statement=row["statement"],
-            failure_criterion=row["failure_criterion"],
-            variables_involved=json.loads(row["variables_involved_json"]),
-            status=row["status"],
-            created_at=row["created_at"],
-        )
+        return self._row_to_hypothesis(row)
 
     def list_hypotheses(self, programme_id: str) -> list[Hypothesis]:
         rows = self._fetchall(
             "SELECT * FROM hypotheses WHERE programme_id = ?", (programme_id,)
         )
-        return [
-            Hypothesis(
-                id=r["id"],
-                programme_id=r["programme_id"],
-                statement=r["statement"],
-                failure_criterion=r["failure_criterion"],
-                variables_involved=json.loads(r["variables_involved_json"]),
-                status=r["status"],
-                created_at=r["created_at"],
-            )
-            for r in rows
-        ]
+        return [self._row_to_hypothesis(r) for r in rows]
 
     # --- Bundle ---
 
@@ -1149,18 +1173,20 @@ class StateStore:
         preserves what was claimed, what it was corrected to, and why.
         Repair is an explicit recorded act, never a silent rewrite.
 
-        Source must be 'completed' or 'failed' (a trial that ran and
-        has an executor record to reinterpret); target may be
-        'completed', 'failed', or 'retryable'.
+        Source must be 'completed', 'failed', or 'retryable' — all
+        terminal states whose label may need reinterpretation (a
+        retryable source is a correction made in error, or evidence
+        re-read after the fact); target may be 'completed', 'failed',
+        or 'retryable'.
         """
         import json as _json
         with self._lock:
             trial = self.get_trial(trial_id)
             if trial is None:
                 raise ValueError(f"Trial not found: {trial_id}")
-            if trial.status.value not in ("completed", "failed"):
+            if trial.status.value not in ("completed", "failed", "retryable"):
                 raise ValueError(
-                    f"Only completed or failed trials can be corrected "
+                    f"Only terminal trials can be corrected "
                     f"(status: {trial.status.value}). Running trials use "
                     f"cancel_trial/mark_retryable; designed trials are "
                     f"abandoned with the programme."
@@ -1230,6 +1256,36 @@ class StateStore:
             )
             self.conn.execute(
                 "UPDATE hypotheses SET status = ? WHERE id = ?", (status, hypothesis_id)
+            )
+            self.conn.commit()
+
+    def abandon_hypothesis(
+        self, hypothesis_id: str, rationale: str, decided_by: str
+    ) -> None:
+        """Abandon a hypothesis — attributed, rationaled, terminal.
+
+        Unlike update_hypothesis_status, abandonment records WHO ended
+        the line and WHY: the decision is governance, not a verdict —
+        no conclusion is recorded. `abandoned_at` carries the instant;
+        trials already recorded stay on the record.
+        """
+        from .models import _utc_now
+
+        with self._lock:
+            hypothesis = self.get_hypothesis(hypothesis_id)
+            if hypothesis is None:
+                raise ValueError(f"Hypothesis not found: {hypothesis_id}")
+            _validate_transition(
+                "hypothesis", hypothesis.status.value, "abandoned",
+                _HYPOTHESIS_TRANSITIONS,
+            )
+            self.conn.execute(
+                "UPDATE hypotheses SET status = ?, abandon_rationale = ?, "
+                "abandoned_by = ?, abandoned_at = ? WHERE id = ?",
+                (
+                    "abandoned", rationale, decided_by, _utc_now(),
+                    hypothesis_id,
+                ),
             )
             self.conn.commit()
 

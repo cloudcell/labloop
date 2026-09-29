@@ -108,11 +108,11 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "A closed campaign carrying a frozen "
         "<code>promotion_score</code> but no verdict — "
         "<code>record_promotion_verdict</code> needs a "
-        "campaign-scoped eref, and "
-        "<code>pull_campaign_evidence</code> refuses a closed "
-        "campaign, so a campaign closed before any pull can never "
-        "acquire one. Flagged as verdict debt — arete's "
-        "<code>decision_debt</code> is the Loop-2 analogue.",
+        "campaign-scoped eref. Dischargeable: "
+        "<code>pull_campaign_evidence</code> is legal post-close "
+        "while no decision is recorded, so the remediation pair is "
+        "pull → verdict. Arete's <code>decision_debt</code> is the "
+        "Loop-2 analogue.",
     ),
     (
         "unscoreable_campaigns",

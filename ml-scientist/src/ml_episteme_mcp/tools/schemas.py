@@ -184,6 +184,13 @@ class FormulateHypothesisOut(TypedDict, total=False):
     status: str | None
 
 
+class AbandonHypothesisOut(TypedDict, total=False):
+    hypothesis_id: str | None
+    status: str | None
+    from_status: str | None
+    decided_by: str | None
+
+
 class DesignExperimentOut(TypedDict, total=False):
     trial_id: str | None
     status: str | None

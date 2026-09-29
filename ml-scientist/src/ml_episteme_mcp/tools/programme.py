@@ -146,7 +146,7 @@ def register(
                 programme.id, allowed_variables, metric_direction
             )
 
-            result = {"programme_id": programme.id, "status": "created"}
+            result = {"programme_id": programme.id, "status": programme.status.value}
             if budget_extras:
                 result["budget_extras_not_enforced"] = sorted(budget_extras)
             return ok(result)

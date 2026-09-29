@@ -60,6 +60,9 @@ _UPSTREAM_ROUTES = (
     ("spol-", "loop1", "/search-policy/"),
     # episteme (loop0)
     ("trial-", "loop0", "/trial/"),
+    # Bundles are context-bound to trials — episteme's /bundle/
+    # shortcut resolves the owning trial and redirects.
+    ("bundle-", "loop0", "/bundle/"),
     ("prog-", "loop0", "/programme/"),
     ("contract-", "loop0", "/contract/"),
     ("archive-", "loop0", "/archive/"),
@@ -70,6 +73,9 @@ _UPSTREAM_ROUTES = (
     ("belief-", "loop0", "/belief/"),
     # anamnesis (claims)
     ("claim-", "claims", "/claim/"),
+    # Edges are anamnesis-local rows — its /edge/ resolver finds the
+    # owning claim and redirects to the edge's anchor there.
+    ("edge-", "claims", "/edge/"),
     # eref- is minted by BOTH arete and zetesis — for ids of unknown
     # provenance, the anamnesis /ref/ resolver probes both owners'
     # /evidence-ref/ pages and redirects to the real one.

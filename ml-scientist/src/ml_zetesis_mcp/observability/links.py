@@ -61,6 +61,9 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
     # Upstream — episteme via the loop0 channels.
     for prefix, path in (
         ("trial-", "/trial/"),
+        # Bundles are context-bound to trials — episteme's /bundle/
+        # shortcut resolves the owning trial and redirects.
+        ("bundle-", "/bundle/"),
         ("prog-", "/programme/"),
         ("contract-", "/contract/"),
         ("archive-", "/archive/"),
@@ -77,6 +80,11 @@ def entity_url(entity_id: str, gui_bases: dict) -> str | None:
     if entity_id.startswith("claim-"):
         base = gui_bases.get("claims")
         return f"{base}/claim/{entity_id}" if base else None
+    # Edges are anamnesis-local rows — its /edge/ resolver finds the
+    # owning claim and redirects to the edge's anchor there.
+    if entity_id.startswith("edge-"):
+        base = gui_bases.get("claims")
+        return f"{base}/edge/{entity_id}" if base else None
     # eref- is minted by BOTH servers — for ids of unknown provenance,
     # the anamnesis /ref/ resolver probes both owners' /evidence-ref/
     # pages and redirects to the real one. (Refs read back from this

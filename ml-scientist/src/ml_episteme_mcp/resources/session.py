@@ -43,7 +43,13 @@ LOOP_STEPS = [
         "step": 3,
         "name": "prepare_data",
         "tool": "prepare_data",
-        "description": "Prepare datasets (generated or captured) for train/validation/test splits.",
+        "description": (
+            "Prepare datasets (generated or captured) for "
+            "train/validation/test splits. Generated: the generator's "
+            "config dict receives the seed under BOTH 'seed' and "
+            "'generator_seed', with generator_params flattened at the "
+            "top level."
+        ),
         "inputs": ["split", "regime", "generator_code_ref|source_uri", "generator_seed|version"],
         "outputs": ["data_ref_id"],
         "repeat": "Once per split (train, validation, test)",
@@ -76,7 +82,9 @@ LOOP_STEPS = [
         "name": "run_trial",
         "tool": "run_trial",
         "description": (
-            "Run the trial. Resolves DataRefs to read-only paths. "
+            "Run the trial. Resolves DataRefs to read-only paths — "
+            "injected into the config as 'data_paths' ({split: path}) "
+            "and 'data_ref_paths' ({data_ref_id: path}). "
             "While running, poll get_trial_status adaptively — the "
             "reported eta_seconds drives the interval (~eta/4), never "
             "a blind fixed sleep; see the monitor_running_trial prompt."
@@ -139,7 +147,9 @@ FAILURE_HANDLING = [
     "Identical deterministic failure is methodological knowledge, not "
     "hypothesis evidence: mint it in anamnesis via assert_claim with "
     "tested_by→the failed trials.",
-    "If no hypothesis can be concluded, close_programme(status="
+    "If a hypothesis can never produce a completed trial, "
+    "abandon_hypothesis is the exit for that hypothesis; when NO "
+    "hypothesis can be concluded, close_programme(status="
     "'abandoned') is the honest verdict — the record truthfully says "
     "the direction produced no evidence.",
 ]
@@ -154,6 +164,7 @@ TOOL_CATALOG = [
     {"name": "formulate_hypothesis", "category": "hypothesis", "description": "State a falsifiable hypothesis"},
     {"name": "list_hypotheses", "category": "hypothesis", "description": "List a programme's hypotheses (id recovery)"},
     {"name": "conclude_hypothesis", "category": "hypothesis", "description": "Accept/reject/inconclusive; mints a claim"},
+    {"name": "abandon_hypothesis", "category": "hypothesis", "description": "Abandon one hypothesis (terminal, no verdict)"},
     # Data
     {"name": "prepare_data", "category": "data", "description": "Prepare a dataset (generated or captured)"},
     {"name": "verify_data", "category": "data", "description": "Verify data provenance by re-computing hash"},

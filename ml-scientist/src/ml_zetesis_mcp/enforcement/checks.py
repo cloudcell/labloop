@@ -209,7 +209,7 @@ def check_campaign_exists(store: SearchStore, campaign_id: str) -> str | None:
 
 def check_campaign_open(store: SearchStore, campaign_id: str) -> str | None:
     """Load the campaign; error if missing or already terminal —
-    closed campaigns freeze results and evidence, abandoned ones are
+    closed campaigns freeze results and score, abandoned ones are
     equally immutable."""
     campaign = store.get_campaign(campaign_id)
     if campaign is None:
@@ -217,12 +217,40 @@ def check_campaign_open(store: SearchStore, campaign_id: str) -> str | None:
     if campaign.status is CampaignStatus.closed:
         return (
             f"Campaign '{campaign_id}' is already closed — its "
-            "promotion_score and evidence trail are frozen."
+            "promotion_score and recorded results are frozen."
         )
     if campaign.status is CampaignStatus.abandoned:
         return (
             f"Campaign '{campaign_id}' was abandoned — a terminal "
             "record that accrues no further writes."
+        )
+    return None
+
+
+def check_campaign_evidence_pullable(
+    store: SearchStore, campaign_id: str
+) -> str | None:
+    """Evidence consultation is a read against the campaign, not a
+    mutation of the frozen record — it stays legal while a verdict
+    is still pending. A closed campaign awaiting its verdict needs
+    exactly these pulls (the eref is what record_promotion_verdict
+    cites). What freezes at close is results and score; what ends
+    consultation is the verdict itself — pulling after decision_id
+    is set would mint erefs the verdict never consulted."""
+    campaign = store.get_campaign(campaign_id)
+    if campaign is None:
+        return f"Campaign not found: {campaign_id}."
+    if campaign.status is CampaignStatus.abandoned:
+        return (
+            f"Campaign '{campaign_id}' was abandoned — a terminal "
+            "record that accrues no further writes."
+        )
+    if (campaign.status is CampaignStatus.closed
+            and campaign.decision_id is not None):
+        return (
+            f"Campaign '{campaign_id}' already has verdict "
+            f"{campaign.decision_id} — the evidence trail it cites "
+            "is final."
         )
     return None
 

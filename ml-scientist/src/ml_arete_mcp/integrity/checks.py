@@ -196,7 +196,9 @@ def _check_decision_debt(store) -> dict:
     return _res(
         "decision_debt", violations,
         f"{len(violations)} closed tournament(s) awaiting a "
-        "meta_decision",
+        "meta_decision — acknowledge_violation records a disposition "
+        "but does NOT discharge this gate; only record_meta_decision "
+        "(a 'hold' counts) clears it",
     )
 
 

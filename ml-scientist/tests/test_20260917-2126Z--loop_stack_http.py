@@ -234,7 +234,7 @@ class TestFullStackPromotion:
         # 5. Campaign opens against the derived champion.
         r = await call_tool_http(zet, "open_campaign", {
             "contract_id": contract, "challenger_id": chall,
-            "budget": {"seeds": 3},
+            "budget": {},
         })
         assert "error" not in r, r
         assert r["champion_id"] == champ

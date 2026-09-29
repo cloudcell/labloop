@@ -155,11 +155,13 @@ class LocalDataHandler(DataSourceRole):
 
         Generator contract: generator_code_ref names a Python file
         exposing ``generate_data(config, output_path)`` — config is a
-        dict carrying ``seed`` plus generator_params, output_path is
-        where the dataset must be written. A generator may also print
-        a single-line ``{"error": "..."}`` JSON object to stdout to
-        report a structured failure; that payload is surfaced when the
-        run fails.
+        dict carrying ``seed`` AND ``generator_seed`` (same value;
+        both documented spellings resolve) plus generator_params
+        flattened at the top level, output_path is where the dataset
+        must be written. A generator may also print a single-line
+        ``{"error": "..."}`` JSON object to stdout to report a
+        structured failure; that payload is surfaced when the run
+        fails.
 
         Environment: the generator runs under the executor's default
         interpreter (``[executor] python``), not a bundle env — no
@@ -174,9 +176,14 @@ class LocalDataHandler(DataSourceRole):
 
         # Generate the wrapper code that calls generate_data(config, output_path)
         output_path = storage_dir / "dataset.csv"
+        # Params first, seed keys last: the DataRef row records
+        # generator_seed, so the seed the generator receives must
+        # equal the seed recorded — a param-side "seed" override
+        # would silently break that correspondence.
         config = {
-            "seed": generator_seed,
             **(generator_params or {}),
+            "seed": generator_seed,
+            "generator_seed": generator_seed,
         }
         config_json = json.dumps(config)
 

@@ -162,12 +162,11 @@ def _check_closed_campaigns_scored(store) -> dict:
 
 def _check_campaigns_awaiting_verdict(store) -> dict:
     """Closed campaigns with no recorded verdict — the frozen score
-    exists but no decision interprets it. pull_campaign_evidence is
-    refused post-close, so a campaign closed before any evidence pull
-    can never acquire a campaign-scoped eref and record_promotion_
-    verdict stays unreachable: the debt is permanent AND invisible
-    without this check (arete's decision_debt is the analogue for
-    tournaments)."""
+    exists but no decision interprets it. The debt is dischargeable:
+    post-close pull_campaign_evidence is legal while decision_id is
+    unset, so a campaign closed before its evidence pull can still
+    acquire the eref record_promotion_verdict requires (arete's
+    decision_debt is the analogue for tournaments)."""
     rows = store._fetchall(
         "SELECT id, promotion_score FROM promotion_campaigns "
         "WHERE status = 'closed' AND decision_id IS NULL"
@@ -177,15 +176,16 @@ def _check_campaigns_awaiting_verdict(store) -> dict:
             "campaign_id": r["id"],
             "promotion_score": r["promotion_score"],
             "detail": "closed with a frozen score but no verdict — "
-                      "record_promotion_verdict requires a "
-                      "campaign-scoped eref pulled while open",
+                      "pull_campaign_evidence post-close + "
+                      "record_promotion_verdict discharges it",
         }
         for r in rows
     ]
     return _res(
         "campaigns_awaiting_verdict", violations,
-        f"{len(violations)} closed campaign(s) await a verdict they "
-        "may be unable to receive",
+        f"{len(violations)} closed campaign(s) await a verdict — "
+        "pull_campaign_evidence post-close + record_promotion_"
+        "verdict discharges each",
     )
 
 
@@ -340,7 +340,10 @@ def _check_incomplete_campaigns(store, stale_seconds: int) -> dict:
         "incomplete_campaigns", violations,
         f"{len(violations)} open campaign(s) started but one-armed "
         f"and idle >{stale_seconds}s — close needs results on both "
-        "arms",
+        "arms; fill the missing side via spawn_arm_programme "
+        "campaign_arm=… / spawn_campaign_programme arm=…, or "
+        "abandon_campaign is the exit (violations name the missing "
+        "arms)",
     )
 
 

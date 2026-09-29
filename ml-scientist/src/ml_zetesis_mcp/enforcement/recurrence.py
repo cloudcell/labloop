@@ -57,6 +57,12 @@ REMEDY_TOOLS = {
     "concluded_unminted": set(),
     "minted_claims_resolve": set(),
     "closed_campaigns_scored": set(),
+    # The verdict needs a campaign-scoped eref, and post-close pulls
+    # are legal — both remediation tools stay reachable or the debt
+    # could never discharge (the check would gate its own remedy).
+    "campaigns_awaiting_verdict": {
+        "pull_campaign_evidence", "record_promotion_verdict",
+    },
     "campaign_results_have_campaign": set(),
     "campaign_spawns_have_campaign": set(),
     "results_spawn_scoped": set(),
@@ -170,6 +176,9 @@ class RecurrenceTracker:
         self.status_read_at: float | None = None
         self.digest: dict | None = None
         self.digest_computed_at: float | None = None
+        # Post-mutation the cached digest no longer describes the
+        # world — suppress `next` hints until the next status read.
+        self.mutated_since_read: bool = False
 
     def configure(self, freshness_seconds: float | int | None) -> None:
         self.ttl_seconds = float(freshness_seconds or 0.0)
@@ -182,12 +191,14 @@ class RecurrenceTracker:
         self.status_read_at = None
         self.digest = None
         self.digest_computed_at = None
+        self.mutated_since_read = False
 
     def mark_status_read(self, digest: dict) -> None:
         now = time.time()
         self.status_read_at = now
         self.digest = digest
         self.digest_computed_at = now
+        self.mutated_since_read = False
 
     def is_fresh(self) -> bool:
         return (
@@ -204,8 +215,16 @@ class RecurrenceTracker:
             f"status must be re-read every {self.ttl_seconds:.0f}s."
         )
 
+    def note_mutation(self) -> None:
+        """A mutating tool succeeded — the cached digest
+        predates the change, so its recommended_next is
+        unverified. Suppress hints until the client re-reads
+        status."""
+        self.mutated_since_read = True
+
     def next_hint(self) -> dict | None:
-        if not self.enabled or not self.is_fresh() or not self.digest:
+        if (not self.enabled or not self.is_fresh()
+                or not self.digest or self.mutated_since_read):
             return None
         recs = self.digest.get("recommended_next") or []
         top = recs[0] if recs else {}
@@ -287,6 +306,10 @@ def install(
             if err := _gates(name):
                 return _refusal(err)
         result = await original(name, arguments, context)
+        if not _is_exempt(name) and not getattr(
+            result, "is_error", getattr(result, "isError", False)
+        ):
+            tracker.note_mutation()
         return tracker.inject(result)
 
     mcp.call_tool = _guarded_call_tool

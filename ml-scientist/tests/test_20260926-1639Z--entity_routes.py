@@ -556,3 +556,57 @@ class TestAnamnesisEdgeRoute:
         assert (
             anamnesis_client.get("/edge/edge-ghost").status_code == 404
         )
+
+
+# ------------------------------------------------------------------
+# Cross-server link maps — bundle-/edge- resolve on every consumer
+# ------------------------------------------------------------------
+
+
+class TestUpstreamLinkMaps:
+    """bundle- (episteme) and edge- (anamnesis) must link from every
+    server that renders foreign ids — each carries its own copy of the
+    prefix map, so each needs its own assertion."""
+
+    GUI_BASES = {
+        "loop0": "http://epi.gui",
+        "evidence": "http://epi.gui",
+        "loop1": "http://zet.gui",
+        "claims": "http://ana.gui",
+    }
+
+    @pytest.mark.parametrize(
+        "entity_id, expected",
+        [
+            ("bundle-x", "http://epi.gui/bundle/bundle-x"),
+            ("edge-x", "http://ana.gui/edge/edge-x"),
+        ],
+    )
+    def test_zetesis_entity_url(self, entity_id, expected):
+        from ml_zetesis_mcp.observability.links import entity_url
+
+        assert entity_url(entity_id, self.GUI_BASES) == expected
+
+    @pytest.mark.parametrize(
+        "entity_id, expected",
+        [
+            ("bundle-x", "http://epi.gui/bundle/bundle-x"),
+            ("edge-x", "http://ana.gui/edge/edge-x"),
+        ],
+    )
+    def test_arete_entity_url(self, entity_id, expected):
+        from ml_arete_mcp.observability.links import entity_url
+
+        assert entity_url(entity_id, self.GUI_BASES) == expected
+
+    @pytest.mark.parametrize(
+        "entity_id, expected",
+        [
+            ("bundle-x", "http://epi.gui/bundle/bundle-x"),
+            ("edge-x", "http://ana.gui/edge/edge-x"),
+        ],
+    )
+    def test_agora_entity_url(self, entity_id, expected):
+        from ml_agora_mcp.observability.links import entity_url
+
+        assert entity_url(entity_id, self.GUI_BASES) == expected

@@ -134,7 +134,7 @@ class TestCreateProgramme:
                 "budget": {"max_trials": 50, "max_wall_time_hours": 200.0},
             })
             assert "programme_id" in result
-            assert result["status"] == "created"
+            assert result["status"] == "active"
 
     @pytest.mark.asyncio
     async def test_create_programme_stores_state(self, client, store):
@@ -199,7 +199,7 @@ class TestFormulateHypothesis:
                 "variables_involved": ["depth"],
             })
             assert "hypothesis_id" in result
-            assert result["status"] == "created"
+            assert result["status"] == "proposed"
 
     @pytest.mark.asyncio
     async def test_rejects_empty_failure_criterion(self, client):

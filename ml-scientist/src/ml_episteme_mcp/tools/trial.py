@@ -947,6 +947,13 @@ def register(
         {"metrics": {...}, "variance": {...}}.
         Read the executor://contract resource for the full contract.
 
+        When the bundle carries data_refs, the config handed to
+        run_training is extended with two injected keys: 'data_paths'
+        ({split: resolved read-only path}) and 'data_ref_paths'
+        ({data_ref_id: resolved read-only path}). The stored
+        config_json keeps the designed config verbatim — the injection
+        is runtime-only.
+
         For long-running jobs, this returns quickly with status "running".
         Use get_trial_status to poll for completion.
 
@@ -996,21 +1003,26 @@ def register(
             config = json.loads(trial.config_json)
             bundle = store.get_bundle(trial.bundle_id)
 
-            # Resolve DataRefs to read-only paths and inject into config
+            # Resolve DataRefs to read-only paths and inject into config:
+            # data_paths is keyed by split (what run_training consumes),
+            # data_ref_paths is keyed by DataRef id (provenance-addressable).
             if bundle.data_refs_json:
                 data_ref_ids = json.loads(bundle.data_refs_json)
                 data_paths = {}
+                data_ref_paths = {}
                 for ref_id in data_ref_ids:
                     try:
                         path = await adaptor.data_source.resolve_data_path(ref_id)
                         ref = store.get_data_ref(ref_id)
                         if ref is not None:
                             data_paths[ref.split] = path
+                            data_ref_paths[ref_id] = path
                     except Exception as e:
                         return fail(json.dumps({
                             "error": f"Failed to resolve DataRef {ref_id}: {e}",
                         }))
                 config["data_paths"] = data_paths
+                config["data_ref_paths"] = data_ref_paths
 
             # Resolve code_ref: if it's a code:// URI, inline from code_snippets
             code_text = None
@@ -1477,8 +1489,12 @@ def register(
         For mislabeled records: e.g. the executor's outer wrapper
         exited 0 while the recorded output documents a crash
         ("status": "error" / nonzero inner exit code in the payload).
-        Source must be completed|failed; target must be
+        Source must be completed|failed|retryable (all terminal —
+        a retryable source is a correction made in error or evidence
+        re-read after the fact); target must be
         completed|failed|retryable. `reason` is mandatory.
+        Correcting TO completed still requires an executor record —
+        retryable trials have none, so that direction stays refused.
 
         The correction is appended to the trial's executor_output_json
         under 'corrections' — the record shows both what was claimed

@@ -140,7 +140,7 @@ class TestCampaignOverRealLoop0:
         r = await call_tool_http(zet, "open_campaign", {
             "contract_id": contract["contract_id"],
             "challenger_id": challenger,
-            "budget": {"seeds": 3},
+            "budget": {},
         })
         assert "error" not in r, r
         assert r["champion_id"] == champion

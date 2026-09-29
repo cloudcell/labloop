@@ -314,7 +314,7 @@ async def _open_campaign(mcp, adaptors, challenger="cand-beta"):
     r = await call_tool(mcp, "open_campaign", {
         "contract_id": "contract-c1",
         "challenger_id": challenger,
-        "budget": {"seeds": 3},
+        "budget": {},
     })
     assert "error" not in r, r
     return r["campaign_id"]

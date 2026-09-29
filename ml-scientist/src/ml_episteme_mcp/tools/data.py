@@ -41,7 +41,11 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
           computes hash. Requires generator_code_ref, generator_seed.
           Generator contract: the file must expose
           generate_data(config, output_path) — config carries 'seed'
-          plus generator_params; the dataset is written to
+          AND 'generator_seed' (same value — either spelling works)
+          plus generator_params flattened at the top level; a
+          seed/generator_seed key inside generator_params is
+          superseded so the recorded seed always equals the seed
+          delivered. The dataset is written to
           output_path. A generator may print a single-line
           {"error": "..."} JSON object to stdout to report a
           structured failure. The generator runs under the executor's

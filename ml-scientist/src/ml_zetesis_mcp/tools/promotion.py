@@ -24,6 +24,7 @@ import uuid
 from ..enforcement.checks import (
     check_campaign_budget_carryable,
     check_campaign_evidence_refs,
+    check_campaign_evidence_pullable,
     check_campaign_exists,
     check_campaign_open,
     check_close_budget_audit,
@@ -645,6 +646,14 @@ def register(
             if seeds is not None:
                 seeds = coerce_json(seeds, list, "seeds")
             seeds = seeds or []
+            # A non-empty budget that can't carry orchestration is
+            # wedged by the system's own invariant (unrunnable_
+            # campaigns flags exactly this) — refuse it at open
+            # instead of manufacturing a campaign that can only be
+            # abandoned. Empty {} is the caller-driven signal.
+            if budget:
+                if e := check_campaign_budget_carryable(budget):
+                    return fail(json.dumps({"error": e}))
             if adaptors.evidence is None:
                 return fail(json.dumps({
                     "error": "No evidence adaptor configured — cannot "
@@ -996,9 +1005,15 @@ def register(
         instead of an investigation. The promotion verdict cites these
         refs. The tool enum is the union of the per-source whitelists —
         validity is per-source (anamnesis accepts only
-        get_claim|list_claims|recall)."""
+        get_claim|list_claims|recall).
+
+        Pulling BEFORE close is preferred — the trail is more complete
+        evidence — but pulls stay legal on a closed campaign while its
+        verdict is still pending: consultation is a read, not a
+        mutation of the frozen score. A verdicted or abandoned
+        campaign refuses."""
         try:
-            if e := check_campaign_open(store, campaign_id):
+            if e := check_campaign_evidence_pullable(store, campaign_id):
                 return _err(e)
             for e in (check_source_valid(source),
                       check_tool_whitelisted(source, tool)):
@@ -1048,8 +1063,10 @@ def register(
         equal arms score 1.0.
 
         Ordering: pull the evidence a verdict will cite via
-        pull_campaign_evidence BEFORE closing — close freezes the
-        trail and evidence pulls refuse a closed campaign.
+        pull_campaign_evidence BEFORE closing — a pre-close trail is
+        the more complete record. Close freezes results and score,
+        not consultation: pulls stay legal while the verdict is
+        pending, so close-before-pull is recoverable.
         """
         try:
             campaign = store.get_campaign(campaign_id)
@@ -1217,9 +1234,10 @@ def register(
         requires decided_by starting with 'human:' (corrective
         verdicts need human authority). At least one campaign-scoped
         evidence ref is required — a verdict with no consulted trail
-        is a bare assertion. Ordering: pull those refs via
-        pull_campaign_evidence while the campaign is still open —
-        close freezes the trail.
+        is a bare assertion. Ordering: pulling the refs via
+        pull_campaign_evidence before close is preferred, but
+        post-close pulls are legal while no decision is recorded —
+        the wedge is recoverable, not fatal.
 
         The write goes through the promotion adaptor — whitelisted to
         Loop 0's insert-only record_promotion_decision. On 'promote'

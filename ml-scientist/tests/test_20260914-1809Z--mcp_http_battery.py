@@ -1076,7 +1076,7 @@ class TestJSONStringArgumentTolerance:
             "budget": '{"max_trials": 10, "max_wall_time_hours": 5.0}',
         })
         assert "error" not in result, f"create_programme failed: {result}"
-        assert result["status"] == "created"
+        assert result["status"] == "active"
 
     @pytest.mark.asyncio
     async def test_create_programme_rejects_invalid_json_string(self, server_url):

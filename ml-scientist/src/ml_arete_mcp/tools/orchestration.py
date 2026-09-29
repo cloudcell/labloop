@@ -246,7 +246,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         tournament_id: Annotated[str, Field(description='ID of the target tournament.')],
         arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm the pull is scoped to: 'parent' | 'candidate'.")],
         source: Annotated[Literal['loop0', 'loop1', 'anamnesis'], Field(description='Evidence source — the upstream read surface to pull through.')],
-        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate_lineage', 'get_claim', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
+        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate_lineage', 'get_claim', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
         args: Annotated[dict | str | None, Field(description='Arguments forwarded to the upstream tool; object or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, PullArmEvidenceOut]:
         """Campaign-scoped evidence pull for a tournament arm.

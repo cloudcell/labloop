@@ -171,18 +171,24 @@ async def test_check_invariants_exempt(episteme):
 
 async def test_next_injection_on_success(episteme):
     """Successful results carry a compact `next` from the cached
-    digest — the status read warms it (M2)."""
+    digest — the status read warms it (M2). Mutations suppress it:
+    the digest predates the write, so its advice is unverified until
+    the client re-reads status (rc-10 R33)."""
     _, mcp = episteme
     digest = await read_status(mcp, "protocol://status")
-    r = await call_tool(mcp, "create_programme", {
-        "goal": "g", "constraints": {}, "allowed_variables": ["x"],
-        "budget": {"max_trials": 3},
-    })
+    r = await call_tool(mcp, "list_programmes", {})
     assert "error" not in r, r
     assert "next" in r
     top = digest["recommended_next"][0]
     assert r["next"]["action"] == top["action"]
     assert r["next"]["blockers"] == len(digest["blockers"])
+
+    r = await call_tool(mcp, "create_programme", {
+        "goal": "g", "constraints": {}, "allowed_variables": ["x"],
+        "budget": {"max_trials": 3},
+    })
+    assert "error" not in r, r
+    assert "next" not in r
 
 
 async def test_no_injection_on_failure(episteme):
@@ -583,7 +589,7 @@ async def test_anamnesis_freshness_gate(tmp_path):
             "content": "c", "type": "empirical", "confidence": 0.2,
         })
         assert "error" not in r
-        assert "next" in r
+        assert "next" not in r  # post-mutation hints are suppressed (R33)
     finally:
         store.close()
 

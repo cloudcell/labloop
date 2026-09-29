@@ -128,6 +128,9 @@ class Hypothesis(BaseModel):
     )
     status: HypothesisStatus = HypothesisStatus.proposed
     created_at: str = Field(default_factory=_utc_now)
+    abandon_rationale: str | None = None
+    abandoned_by: str | None = None
+    abandoned_at: str | None = None
 
     ontological_category: str = "information content entity"
     aboutness: str = "a relation between a variable and an outcome"

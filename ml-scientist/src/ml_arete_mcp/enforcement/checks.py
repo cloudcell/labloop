@@ -164,6 +164,8 @@ EVIDENCE_READ_TOOLS: dict[str, frozenset[str]] = {
         "get_archived_programme",
         "describe_blob",  # read-only digest resolution — the check
         #                  behind register_improver's artifact claims
+        "list_promotion_decisions",  # decision-* ids — the eref
+        #                            carrier for Loop-1 verdicts
     }),
     EvidenceSource.loop1.value: frozenset({
         "list_investigations",

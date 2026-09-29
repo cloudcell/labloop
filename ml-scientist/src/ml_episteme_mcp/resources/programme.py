@@ -22,7 +22,14 @@ def register(mcp, store: StateStore) -> None:
             {
                 "entrypoint": "run_training",
                 "signature": "def run_training(config: dict) -> dict",
-                "config": "The same dict passed to design_experiment",
+                "config": (
+                    "The same dict passed to design_experiment, plus "
+                    "two keys injected at run time when the bundle "
+                    "carries data_refs: 'data_paths' ({split: resolved "
+                    "read-only path}) and 'data_ref_paths' ({data_ref_id: "
+                    "resolved read-only path}) — read data through these, "
+                    "never hardcode storage paths."
+                ),
                 "returns": {
                     "metrics": "dict[str, float] — measured values (e.g. val_accuracy, val_perplexity)",
                     "variance": "dict[str, float] — variance across seeds (required by commitment 7)",

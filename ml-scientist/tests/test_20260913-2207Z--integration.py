@@ -235,7 +235,7 @@ class TestFullLoopWithRealMCPDownstream:
                 })
                 prog = json.loads(result.content[0].text)
                 pid = prog["programme_id"]
-                assert prog["status"] == "created"
+                assert prog["status"] == "active"
 
                 # 2. Formulate hypothesis
                 result = await client.call_tool("formulate_hypothesis", {

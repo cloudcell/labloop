@@ -990,7 +990,7 @@ class TestDuplicateProgramme:
                 "budget": {"max_trials": 10, "max_wall_time_hours": 5.0},
             })
             assert "error" not in result
-            assert result["status"] == "created"
+            assert result["status"] == "active"
 
     @pytest.mark.asyncio
     async def test_ignores_archived_programmes(self, client, store):
@@ -1016,7 +1016,7 @@ class TestDuplicateProgramme:
                 "budget": {"max_trials": 10, "max_wall_time_hours": 5.0},
             })
             assert "error" not in result
-            assert result["status"] == "created"
+            assert result["status"] == "active"
 
 
 class TestProgrammeIsResearch:
@@ -1087,7 +1087,7 @@ class TestProgrammeIsResearch:
                 "budget": {"max_trials": 10, "max_wall_time_hours": 5.0},
             })
             assert "error" not in result
-            assert result["status"] == "created"
+            assert result["status"] == "active"
 
 
 class TestProgrammeHasTrials:

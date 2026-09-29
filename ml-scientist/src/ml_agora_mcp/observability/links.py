@@ -32,6 +32,9 @@ SERVER_CHANNELS = {
 ENTITY_PREFIXES = {
     "prog-": ("loop0", "/programme/", "programme"),
     "trial-": ("loop0", "/trial/", "trial"),
+    # Bundles are context-bound to trials — episteme's /bundle/
+    # shortcut resolves the owning trial and redirects.
+    "bundle-": ("loop0", "/bundle/", "bundle"),
     "data-ref-": ("loop0", "/dataref/", "dataref"),
     "contract-": ("loop0", "/contract/", "evaluation_contract"),
     "hyp-": ("loop0", None, "hypothesis"),
@@ -45,6 +48,9 @@ ENTITY_PREFIXES = {
     "mcontract-": ("loop2", "/contract/", "meta_contract"),
     "mdec-": ("loop2", None, "meta_decision"),
     "claim-": ("claims", "/claim/", "claim"),
+    # Edges are anamnesis-local rows — its /edge/ resolver finds the
+    # owning claim and redirects to the edge's anchor there.
+    "edge-": ("claims", "/edge/", "claim_edge"),
 }
 
 
