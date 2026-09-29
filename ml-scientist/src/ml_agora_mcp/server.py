@@ -19,6 +19,8 @@ and checks live in their own packages:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -36,6 +38,7 @@ def create_server(
     name: str = "ml-agora-mcp",
     log_tool_args: bool = False,
     integrity_config: dict | None = None,
+    server_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer with the status surfaces registered.
 
@@ -61,6 +64,39 @@ def create_server(
                 raise
 
         mcp.call_tool = _logged_call_tool
+
+    # Per-call response deadline ([server] tool_deadline_seconds,
+    # default 120; <=0 disables). A wedged tool once froze a sibling
+    # server — every port listened, nothing answered. The deadline is a
+    # response bound, not an abort: the handler runs under
+    # asyncio.shield because cancelling it could unwind mid-write (and
+    # a pure-sync spin ignores cancellation anyway). What the client
+    # gets on expiry is a named error it can reason about:
+    # deadline_exceeded.
+    tool_deadline = float(
+        (server_config or {}).get("tool_deadline_seconds", 120.0)
+    )
+    if tool_deadline > 0:
+        _inner_call_tool = mcp.call_tool
+
+        async def _deadlined_call_tool(name, arguments, context=None):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(
+                        _inner_call_tool(name, arguments, context)
+                    ),
+                    tool_deadline,
+                )
+            except TimeoutError:
+                from .tools.schemas import fail
+                return fail(json.dumps({
+                    "error": (
+                        f"deadline_exceeded — {name} exceeded "
+                        f"{tool_deadline:g}s"
+                    )
+                }))
+
+        mcp.call_tool = _deadlined_call_tool
 
     from .prompts import status as status_prompts
     from .resources import status as status_resource

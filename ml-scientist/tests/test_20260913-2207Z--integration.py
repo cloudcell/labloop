@@ -163,7 +163,7 @@ class TestExecutorRoleViaMCP:
             output = await adaptor.execute_code("print('hello')")
             data = json.loads(output)
             assert data["status"] == "completed"
-            assert "integration test" in data["output"]
+            assert "integration test" in data["stdout"]
         finally:
             await adaptor.disconnect()
 
@@ -273,7 +273,7 @@ class TestFullLoopWithRealMCPDownstream:
                 run = json.loads(result.content[0].text)
                 assert run["status"] == "completed"
                 executor_output = json.loads(run["executor_output"])
-                assert "integration test" in executor_output["output"]
+                assert "integration test" in executor_output["stdout"]
 
                 # 6. Record observation (persisted to state.db)
                 result = await client.call_tool("record_observation", {

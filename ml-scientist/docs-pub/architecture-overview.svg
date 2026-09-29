@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="710" viewBox="0 0 960 710" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <!-- High-level overview derived from docs/b-architecture/b-04-target-architecture.svg -->
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5A6474"/>
+    </marker>
+    <marker id="arrRev" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto-start-reverse">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5A6474"/>
+    </marker>
+    <marker id="arrp" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#8B6FB8"/>
+    </marker>
+    <marker id="arrpRev" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto-start-reverse">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#8B6FB8"/>
+    </marker>
+    <marker id="arrs" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#9AA3B8"/>
+    </marker>
+    <style>
+      .title    { font-size: 24px; font-weight: 700; fill: #1E2430; }
+      .subtitle { font-size: 12.5px; fill: #5A6474; }
+      .zone     { font-size: 11px; font-weight: 600; letter-spacing: 2px; fill: #7A8494; }
+      .bt       { font-size: 13.5px; font-weight: 600; fill: #1E2430; }
+      .bs       { font-size: 10.5px; fill: #566074; }
+      .elabel   { font-size: 10px; fill: #6A7384; font-style: italic; }
+      .plabel   { font-size: 10px; fill: #8B6FB8; font-style: italic; }
+      .slabel   { font-size: 10px; fill: #9AA3B8; font-style: italic; }
+      .improve  { font-size: 10.5px; fill: #8A93A3; font-style: italic; }
+      .edge     { stroke: #5A6474; stroke-width: 1.6; fill: none; }
+      .cbuilt   { stroke: #8B6FB8; stroke-width: 1.6; fill: none; }
+      .status   { stroke: #9AA3B8; stroke-width: 1.4; fill: none; }
+      .own      { stroke: #8A93A3; stroke-width: 1.2; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="960" height="710" fill="#FAFAF7"/>
+
+  <!-- ======= title ======= -->
+  <text x="40" y="40" class="title">ml-scientist — architecture at a glance</text>
+  <text x="40" y="60" class="subtitle">three nested loops · one MCP server per loop · commands down, evidence up · claims shared · status read-only</text>
+
+  <!-- ======= clients ======= -->
+  <text x="60" y="90" class="zone">CLIENTS</text>
+  <rect x="60" y="98" width="300" height="64" rx="8" fill="#E9EBF1" stroke="#9AA3B8" stroke-width="1.4"/>
+  <text x="76" y="120" class="bt">LLM client</text>
+  <text x="76" y="138" class="bs">any MCP-capable client — drives all loops</text>
+
+  <rect x="400" y="98" width="220" height="64" rx="8" fill="#E9EBF1" stroke="#9AA3B8" stroke-width="1.4"/>
+  <text x="416" y="120" class="bt">Browser</text>
+  <text x="416" y="138" class="bs">human observer · read-only</text>
+
+  <!-- client bus: one MCP driver into every loop -->
+  <path class="edge" d="M60 130 L40 130 L40 530"/>
+  <path class="edge" d="M40 300 L90 300" marker-end="url(#arr)"/>
+  <path class="edge" d="M40 430 L130 430" marker-end="url(#arr)"/>
+  <path class="edge" d="M40 530 L170 530" marker-end="url(#arr)"/>
+  <text x="47" y="195" class="elabel">MCP</text>
+
+  <!-- ================= LOOP 2 ring ================= -->
+  <rect x="90" y="240" width="560" height="400" rx="14" fill="#F5F6F8" stroke="#A8B0BC" stroke-width="1.6"/>
+  <text x="108" y="264" class="zone">LOOP 2 — IMPROVER</text>
+  <text x="480" y="264" class="improve">improves the improver</text>
+
+  <rect x="120" y="278" width="300" height="58" rx="8" fill="#FFFFFF" stroke="#9AA3B8" stroke-width="1.4"/>
+  <text x="136" y="300" class="bt">ml-arete-mcp</text>
+  <text x="136" y="318" class="bs">improves how research is done</text>
+
+  <path d="M450 285 a50 9 0 0 1 100 0 v40 a50 9 0 0 1 -100 0 z" fill="#EFF1F4" stroke="#9AA3B8" stroke-width="1.4"/>
+  <ellipse cx="500" cy="285" rx="50" ry="9" fill="#E5E8ED" stroke="#9AA3B8" stroke-width="1.4"/>
+  <text x="461" y="310" class="bt">improver.db</text>
+  <path class="own" d="M420 307 L450 307"/>
+
+  <!-- ================= LOOP 1 ring ================= -->
+  <rect x="130" y="352" width="480" height="256" rx="14" fill="#EAF4F1" stroke="#4E9A94" stroke-width="1.8"/>
+  <text x="148" y="376" class="zone" fill="#2F6E68">LOOP 1 — RESEARCHER</text>
+  <text x="445" y="376" class="improve">improves the researcher</text>
+
+  <rect x="160" y="390" width="270" height="58" rx="8" fill="#FFFFFF" stroke="#4E9A94" stroke-width="1.4"/>
+  <text x="176" y="412" class="bt">ml-zetesis-mcp</text>
+  <text x="176" y="430" class="bs">investigates · promotes candidates</text>
+
+  <path d="M465 397 a50 9 0 0 1 100 0 v40 a50 9 0 0 1 -100 0 z" fill="#F2F7EE" stroke="#7A9E6B" stroke-width="1.4"/>
+  <ellipse cx="515" cy="397" rx="50" ry="9" fill="#E4EFE0" stroke="#7A9E6B" stroke-width="1.4"/>
+  <text x="472" y="422" class="bt">search.db</text>
+  <path class="own" d="M430 419 L465 419"/>
+
+  <!-- ================= LOOP 0 ring ================= -->
+  <rect x="170" y="462" width="400" height="130" rx="14" fill="#EEF4FB" stroke="#7FA8CF" stroke-width="1.8"/>
+  <text x="188" y="486" class="zone" fill="#33608C">LOOP 0 — SCIENCE</text>
+  <text x="410" y="486" class="improve">improves the science</text>
+
+  <rect x="200" y="496" width="210" height="62" rx="8" fill="#FFFFFF" stroke="#5B84AC" stroke-width="1.4"/>
+  <text x="215" y="518" class="bt">ml-episteme-mcp</text>
+  <text x="215" y="536" class="bs">hypothesis → trial → conclusion</text>
+
+  <path d="M440 502 a50 9 0 0 1 100 0 v40 a50 9 0 0 1 -100 0 z" fill="#F2F7EE" stroke="#7A9E6B" stroke-width="1.4"/>
+  <ellipse cx="490" cy="502" rx="50" ry="9" fill="#E4EFE0" stroke="#7A9E6B" stroke-width="1.4"/>
+  <text x="452" y="527" class="bt">state.db</text>
+  <path class="own" d="M410 522 L440 522"/>
+
+  <!-- ======= loop ↔ loop : commands down / evidence up ======= -->
+  <path class="edge" d="M140 336 L140 400 L160 400" marker-start="url(#arrRev)" marker-end="url(#arr)"/>
+  <path class="edge" d="M180 448 L180 520 L200 520" marker-start="url(#arrRev)" marker-end="url(#arr)"/>
+
+  <!-- ================= ANAMNESIS ================= -->
+  <rect x="700" y="240" width="220" height="140" rx="14" fill="#F5F0FA" stroke="#8B6FB8" stroke-width="1.8"/>
+  <text x="712" y="262" style="font-size:10px; font-weight:600; letter-spacing:1.2px; fill:#5E4590">ML-ANAMNESIS</text>
+  <text x="716" y="290" class="bt">ml-anamnesis-mcp</text>
+  <text x="716" y="308" class="bs">claims · relations</text>
+  <text x="716" y="324" class="bs">semantic memory — one store,</text>
+  <text x="716" y="340" class="bs">shared by all loops</text>
+
+  <!-- claims bus: every loop asserts/recalls -->
+  <path class="cbuilt" d="M650 300 L668 300"/>
+  <path class="cbuilt" d="M610 440 L668 440"/>
+  <path class="cbuilt" d="M570 525 L668 525"/>
+  <path class="cbuilt" d="M668 300 L668 525"/>
+  <path class="cbuilt" d="M668 310 L700 310" marker-start="url(#arrpRev)" marker-end="url(#arrp)"/>
+  <text x="652" y="236" class="plabel">claims · recall</text>
+
+  <!-- ================= AGORA ================= -->
+  <rect x="700" y="425" width="220" height="135" rx="14" fill="#F0F3F6" stroke="#7A8494" stroke-width="1.8"/>
+  <text x="712" y="447" style="font-size:10px; font-weight:600; letter-spacing:1.2px; fill:#4A5568">ML-AGORA</text>
+  <text x="716" y="472" class="bt">ml-agora-mcp</text>
+  <text x="716" y="490" class="bs">status hub — read-only</text>
+  <text x="716" y="506" class="bs">lab://status · topology</text>
+
+  <!-- status: agora reads every loop's digest, never calls -->
+  <path class="status" d="M560 545 L700 545" marker-end="url(#arrs)"/>
+  <path class="status" d="M810 380 L810 425" marker-end="url(#arrs)"/>
+  <text x="818" y="406" class="slabel">status</text>
+  <text x="700" y="578" class="slabel">reads X://status digests —</text>
+  <text x="700" y="592" class="slabel">never call_tool</text>
+
+  <!-- browser → agora GUI -->
+  <path class="edge" d="M510 162 L510 195 L945 195 L945 490 L920 490" marker-end="url(#arr)"/>
+  <text x="540" y="188" class="elabel">HTTP — read-only</text>
+
+  <!-- ======= caption + legend ======= -->
+  <text x="90" y="668" class="bs">episodic memory = each loop's own db · semantic memory = anamnesis · agora sees status only</text>
+
+  <line x1="90" y1="692" x2="130" y2="692" stroke="#5A6474" stroke-width="1.6" marker-start="url(#arrRev)" marker-end="url(#arr)"/>
+  <text x="138" y="696" class="elabel">commands ↓ · evidence ↑</text>
+  <line x1="330" y1="692" x2="370" y2="692" stroke="#8B6FB8" stroke-width="1.6" marker-start="url(#arrpRev)" marker-end="url(#arrp)"/>
+  <text x="378" y="696" class="elabel">claims · recall</text>
+  <line x1="480" y1="692" x2="520" y2="692" stroke="#9AA3B8" stroke-width="1.4" marker-end="url(#arrs)"/>
+  <text x="528" y="696" class="elabel">status — read-only</text>
+  <line x1="660" y1="692" x2="700" y2="692" stroke="#5A6474" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="708" y="696" class="elabel">MCP / HTTP call</text>
+</svg>

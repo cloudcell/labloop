@@ -46,7 +46,7 @@ class TestAnamnesisHTTP:
             assert resp.status == 200
             body = json.loads(resp.read())
             assert body["status"] in ("ok", "violations")
-            assert len(body["checks"]) == 4
+            assert len(body["checks"]) == 5
         with urllib.request.urlopen(
             f"{anamnesis_gui_url}/integrity", timeout=5
         ) as resp:

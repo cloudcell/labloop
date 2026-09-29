@@ -126,6 +126,7 @@ def main() -> None:
         log_tool_args=args.log_tool_args,
         integrity_config=config.get("integrity", {}),
         enforcement_config=config.get("enforcement", {}),
+        server_config=config.get("server", {}),
     )
 
     async def _run_server(coro):

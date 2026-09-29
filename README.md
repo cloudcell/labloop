@@ -2,6 +2,22 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
 
+## A persistent scientific loop for AI agents
+
+Most AI agents can reason, call tools and run code. LabLoop gives them something more durable: a **persistent scientific loop** in which hypotheses, experiments, evidence, belief updates and research memory survive individual runs and inform what happens next.
+
+`science → adaptation → meta-adaptation → science`
+
+At the **science** level, the system forms falsifiable hypotheses, runs recorded experiments and updates beliefs from evidence. At the **adaptation** level, accumulated outcomes can change which hypotheses, experiments or research strategies are pursued next. At the **meta-adaptation** level, the process used to make those adaptations can itself be evaluated and improved.
+
+**LabLoop's defining claim is that self-improvement happens at the research-process level: the system can improve how it investigates a problem without requiring the underlying model to rewrite or retrain its own weights.**
+
+This is deliberately narrower than claiming a recursively self-improving model. LabLoop provides infrastructure for auditable, evidence-driven improvement of the research process, with each cycle grounded in persistent scientific state rather than transient agent context.
+
+As adaptation and meta-adaptation become explicit and measurable, LabLoop can support **recursive self-improving research systems**: systems that improve not only what they know, but how they decide what to try next and how that improvement process itself changes.
+
+Bring your own model and agent; LabLoop provides the scientific loop, durable state and optional isolated execution environment.
+
 LabLoop gives AI agents a scientific process: form hypotheses, design
 and run experiments, record evidence, update beliefs, and carry what
 they learn forward as durable research state.

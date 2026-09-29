@@ -13,7 +13,7 @@ run:
 | Server | `check_invariants` count (current main) | Stale-build signal |
 | ------ | ------------------------------------- | ------------------ |
 | agora | 2 | — |
-| anamnesis | 4 | — |
+| anamnesis | **5** | 4 = pre-rc-11 |
 | arete | 12 | — |
 | episteme | **12** | 11 = pre-rc-7b |
 | zetesis | **15** | 14 = pre-rc-9; 13 = pre-rc-8 |
@@ -58,8 +58,16 @@ stop, redeploy, restart.
    other diagnostic is mid-flight, and confirm the lab is fully
    healed afterward (Part A's baseline assertion doubles as the
    post-check).
+5. **`20260929-0859Z-rc11-extraction-findings`** — verifies the rc-11
+   extraction fixes: dedup `edges_added` semantics + the
+   bundle/dataref/reference/cites vocabulary + the `external`-prefix
+   guard + the R44 run-artifact gate. Pure MCP calls, no sleeps.
+   Requires the rc-11 build — a pre-fix server fails Part A step 3
+   and Part B step 8.
 
-## Phase 3 — the standing battery (22)
+## Phase 3 — the standing battery (29)
+
+Order within the standing set matters less; group by blast radius:
 
 Order within the standing set matters less; group by blast radius:
 
@@ -71,6 +79,14 @@ Order within the standing set matters less; group by blast radius:
 - `20260927-0330Z-boundary-class-registry`
 - `20260926-0624Z-blob-retrieval-and-input-digests`
 - `20260927-1500Z-stderr-elision-and-schema-docs`
+- `20260929-0910Z-read-paths-and-registries` — sweeps the uncalled
+  read surface; first write to `list_search_policies` (registry has
+  never been written — its `[]` is honest state, not a failure)
+- `20260929-0915Z-resource-surface` — every `read_resource` URI
+  family ×5 servers; asserts field shapes (`kind`/`src`/`dst`),
+  not just payload presence
+- `20260929-0920Z-ingest-surface` — `:38082` fail-closed probes;
+  `connection refused` is a designed state → UNREACHABLE, not pass
 
 **Loop-0 trial lifecycle** (run trials; leave residue rows — normal):
 - `20260927-1455Z-retry-reason-ordering`
@@ -84,12 +100,28 @@ Order within the standing set matters less; group by blast radius:
 - `20260927-1440Z-orphan-rollback-derivation`
 
 **Loop-1/2 campaign machinery** (cross-server, longer):
-- `20260927-0006Z-campaign-orchestration`
+- `20260927-0006Z-campaign-orchestration` — step 16 now expects the
+  post-close pull to be ACCEPTED (verdict, not close, ends
+  consultation); step 18b asserts the post-verdict refusal
 - `20260927-0310Z-campaign-metric-write-gate`
 - `20260927-1430Z-campaign-value-gate-abandon`
 - `20260927-0315Z-roster-rollback-derivation`
 - `20260927-1420Z-claim-mint-loop2-reftypes`
 - `20260926-0552Z-recurrent-protocol-smoke`
+- `20260929-0900Z-arm-campaign-verbs` — the arete-side campaign
+  wrappers (`record_arm_result`, `pull_arm_evidence`,
+  `close_arm_campaign`, `record_arm_verdict`) that
+  `campaign-orchestration` bypassed
+- `20260929-0905Z-canary-and-correction` — `record_canary`/
+  `close_canary` lifecycle + `correct_tournament_result` (a
+  correction path — post-R35 these get deliberate coverage)
+
+**Long-running / deadline-dependent**:
+- `20260929-0925Z-deadline-exceeded` — needs a ~150 s trial to cross
+  the 120 s tool deadline; asserts the named `deadline_exceeded`
+  error AND that the shielded trial completes server-side. Requires
+  the rc-11 build — on a pre-deadline image the call just runs long
+  (honest outcome: UNREACHABLE, not pass).
 
 **Disruptive — run last** (kill/suspend server processes):
 - `20260927-0320Z-connectivity-live-gating`
@@ -103,11 +135,17 @@ Order within the standing set matters less; group by blast radius:
   kill into `lab-cnt-mcp`. Without it they report honest SKIP —
   decide per-run whether that's acceptable.
 - **`sealed_path_patterns`**: unconfigured on the lab → the
-  seal-deny conditional negatives skip. Configure in the VM image if
-  that path matters.
-- **P16 positive control**: still needs a seeded violation or a
-  configurable `observation_grace_seconds`; the 24 h default blocks
-  `integrity-report-honesty`'s positive control. Open item.
+  seal-deny conditional negatives skip. Now a tracked rc-11 finding
+  (R45 — ml-labloop se-plan); the skip stays honest until it arms.
+- **`observation_grace_seconds`** (`[integrity]`): the knob exists
+  — the open item is a VALUE in the VM config (or a seeded
+  backdated fixture); the 24 h default blocks
+  `integrity-report-honesty`'s positive control.
+- **Coverage manifest**: `diagnostics/coverage-manifest.txt` maps
+  every registered tool/resource to the prompt(s) that name it. A
+  sentinel test fails the suite if a new surface ships unnamed —
+  when adding a tool or prompt, update the manifest in the same
+  commit.
 - Each prompt stages its own `labloop-export` deliverable under
   `/srv/lab/exchange/diagnostics-out/<slug>/` — confirm the export
   lands before starting the next prompt, or the extraction misses it.

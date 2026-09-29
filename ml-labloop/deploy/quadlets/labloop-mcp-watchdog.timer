@@ -1,0 +1,18 @@
+# Trusted-zone liveness watchdog timer. See labloop-mcp-watchdog.
+#
+# 30s cadence x FAIL_THRESHOLD 3 = ~90s from wedge to restart, plus the
+# script's own boot grace and cooldown. Deliberately modest: the point is to
+# stop a silent multi-hour freeze, not to chase sub-second transients.
+
+[Unit]
+Description=Run the trusted-zone liveness watchdog every 30s
+Documentation=file:///srv/lab/workspace/ml-labloop/deploy/labloop-mcp-watchdog
+
+[Timer]
+OnBootSec=180s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=labloop-mcp-watchdog.service
+
+[Install]
+WantedBy=default.target

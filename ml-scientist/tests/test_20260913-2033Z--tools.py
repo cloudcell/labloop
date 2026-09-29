@@ -1158,7 +1158,8 @@ class _FakeExecutor:
         self.cancelled: list[str] = []
 
     async def execute_code(self, code, **kwargs):
-        return json.dumps({"status": "completed"})
+        return json.dumps({"status": "completed", "exit_code": 0,
+                           "stdout": "", "stderr": ""})
 
     def get_async_status(self, trial_id):
         return self.async_status

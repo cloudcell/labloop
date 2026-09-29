@@ -95,6 +95,15 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "terminate to be a lineage; a cycle means the belief "
         "history is malformed.",
     ),
+    (
+        "misfiled_external_refs",
+        "Edges typed <code>external</code> whose <code>to_ref</code> "
+        "carries a known internal prefix — <em>external</em> means "
+        "unresolvable elsewhere, so an internal id under it is a "
+        "mislabel that pollutes the bucket. The write-time guard "
+        "and the store's init-time retype keep this at zero; a "
+        "nonzero count means the vocabulary drifted.",
+    ),
 ]
 
 

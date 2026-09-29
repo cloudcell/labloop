@@ -70,23 +70,49 @@ PART C — deleted sealed target: named refusal, not sandbox mystery
     record must not claim seal_enforced: true. If the run payload or
     trial record says enforcement held on a never-run trial, FAIL.
 
-PART D — vacuous-check honesty
+PART D — non-regular input honesty (rc-11 freeze regression)
 
-13. check_invariants → sealed_access_attempts. If the VM has no
+    rc-11: a trial opened /dev/urandom and the finalize-time digest
+    streamed it synchronously on the event loop — every episteme port
+    listened, nothing answered, ~55 min. Post-fix, non-regular paths a
+    trial names must produce sha256: null + a naming reason, and the
+    loop must stay live. The health probe after each arm IS the
+    assertion — a silent/hung call is the pre-fix signature.
+
+13. Character-device arm: write a trial whose code opens /dev/urandom,
+    reads 16 bytes, prints a metric line, exits. run_trial → the call
+    must return (pre-fix it never did). In executed_code.json the
+    urandom row must read role: input_data, sha256: null, reason naming
+    non-regular (e.g. "not a regular file"). Then call any episteme
+    tool (e.g. list_programmes) — it must answer promptly. A hang or
+    multi-minute silence is a FAIL, and proves the digest bound
+    regressed.
+14. FIFO arm: a trial whose code does os.mkfifo("/tmp/diag-sealprov/f")
+    then os.open(path, os.O_RDONLY | os.O_NONBLOCK) (non-blocking so
+    the trial itself doesn't hang waiting for a writer). Same
+    assertions: call returns, manifest row is sha256: null + non-regular
+    reason, follow-up call answers promptly.
+15. input_data_undigested MUST fire for both rows — an undigestable
+    consumed input is a real provenance gap; the reason names it. This
+    is intended post-fix behavior, not noise.
+
+PART E — vacuous-check honesty
+
+16. check_invariants → sealed_access_attempts. If the VM has no
     sealed_path_patterns configured, its detail must say skipped (or
     carry skipped: true) — a bare green check that examined nothing is
     a FAIL. If patterns ARE configured, the check must fire only on
     real denied-access rows; report which case you observed.
-14. If sealed patterns are configured: a trial that attempts to open a
+17. If sealed patterns are configured: a trial that attempts to open a
     deny-listed path produces a manifest entry with denied: true —
     verify such an attempt is recorded, not hashed as input_data.
 
-PART E — honest bookkeeping
+PART F — honest bookkeeping
 
-15. Report verbatim: every manifest JSON, every check_invariants
+18. Report verbatim: every manifest JSON, every check_invariants
     payload, every refusal. For each entry keep the full JSON — do not
     trim to excerpts.
-16. If any step could not be reached — say which and why; a skipped
+19. If any step could not be reached — say which and why; a skipped
     step must be louder than a passing one.
 
 While you work:

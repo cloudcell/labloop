@@ -8,7 +8,12 @@ assertions is worse than no memory at all.
 
 from __future__ import annotations
 
-from ..state.models import EVIDENCE_RELATIONS, RefType, Relation
+from ..state.models import (
+    EVIDENCE_RELATIONS,
+    INTERNAL_REF_PREFIXES,
+    RefType,
+    Relation,
+)
 from ..state.store import MemoryStore
 
 # Claims asserted without evidence-bearing edges may not exceed this
@@ -34,6 +39,22 @@ def check_ref_type_valid(ref_type: str) -> str | None:
             f"ref_type must be one of "
             f"{'|'.join(t.value for t in RefType)}, got: {ref_type}"
         )
+    return None
+
+
+def check_ref_type_consistent(to_ref: str, ref_type: str) -> str | None:
+    """'external' is for refs no internal family owns. An id carrying
+    a known internal prefix filed as 'external' is a mislabel — refuse
+    it at write time and name the honest type."""
+    if ref_type != RefType.external.value:
+        return None
+    for prefix, types in INTERNAL_REF_PREFIXES.items():
+        if to_ref.startswith(prefix):
+            want = "|".join(types)
+            return (
+                f"to_ref {to_ref!r} carries an internal prefix — "
+                f"ref_type must be '{want}', not 'external'"
+            )
     return None
 
 

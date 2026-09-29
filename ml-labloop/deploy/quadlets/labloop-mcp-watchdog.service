@@ -1,0 +1,37 @@
+# Trusted-zone liveness watchdog. See labloop-mcp-watchdog for the rationale.
+#
+# Runs as `mcp` in the user manager that owns lab-cnt-mcp, so it can restart
+# the unit. Deliberately NOT reachable by `lab`: the driver must not gain the
+# ability to exec into or kill the trusted zone.
+#
+# Installed to ~mcp/.config/systemd/user/ by the deploy, not executed from the
+# repo path -- the repo copy is the audit trail, the installed copy is what
+# systemd runs.
+
+[Unit]
+Description=labloop trusted-zone liveness watchdog (catches hangs Restart= cannot)
+Documentation=file:///srv/lab/workspace/ml-labloop/deploy/labloop-mcp-watchdog
+After=lab-cnt-mcp.service
+
+[Service]
+Type=oneshot
+# Installed path. If you run this from the repo instead, point ExecStart at
+# /srv/lab/workspace/ml-labloop/deploy/labloop-mcp-watchdog.
+ExecStart=%h/.local/sbin/labloop-mcp-watchdog
+# The script always exits 0 unless the restart itself failed. A non-zero exit
+# must NOT be allowed to escalate into a restart loop of the watchdog itself.
+SuccessExitStatus=0
+TimeoutStartSec=120
+
+# Hardening: this script only needs to read /proc/uptime, loopback, and the
+# user manager socket.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%S/labloop %t
+# %t (run/user/<uid>) must stay writable: connecting to the user-bus
+# socket needs write on the inode -- ProtectHome=read-only covers
+# /run/user and would silently break the restart this unit exists for.
+# It must talk to systemd --user; NoNewPrivileges is safe because it is not
+# setuid and does not need escalation.

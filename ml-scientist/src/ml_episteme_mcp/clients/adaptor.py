@@ -94,7 +94,13 @@ class StubExecutor(ExecutorRole):
         overlay_ro: list[tuple[str, str]] | None = None,
         timeout_seconds: float | None = None,
     ) -> str:
-        return json.dumps({"status": "completed", "output": "stub execution succeeded"})
+        # The real executor always emits exit_code/stdout — the
+        # completed-evidence gate requires a run artifact, so the stub
+        # must emit the same shape or finalize refuses 'completed'.
+        return json.dumps({
+            "status": "completed", "exit_code": 0,
+            "stdout": "stub execution succeeded", "stderr": "",
+        })
 
     async def read_cell_output(self, cell_id: str) -> str:
         return json.dumps({"cell_id": cell_id, "output": "stub output"})

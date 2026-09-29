@@ -56,7 +56,12 @@ def create_executor_server():
 
     @mcp.tool()
     def execute_code(code: str) -> str:
-        return json.dumps({"status": "completed", "output": "integration test execution"})
+        # Same shape as the real executor — the completed-evidence
+        # gate requires a run artifact (exit_code/stdout).
+        return json.dumps({
+            "status": "completed", "exit_code": 0,
+            "stdout": "integration test execution", "stderr": "",
+        })
 
     @mcp.tool()
     def read_cell_output(cell_id: str) -> str:

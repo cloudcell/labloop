@@ -62,6 +62,8 @@ _REF_TYPE_BY_PREFIX = {
     "cand-": "candidate",
     "contract-": "contract",
     "decision-": "decision",
+    "bundle-": "bundle",
+    "data-ref-": "dataref",
 }
 
 # Anamnesis's RefType vocabulary, mirrored locally (ADR-0001/0002: no
@@ -73,7 +75,7 @@ _CLAIM_REF_TYPES = frozenset({
     "investigation", "finding", "archive", "improver", "tournament",
     "tournament_result", "proposal", "meta_contract", "meta_decision",
     "policy_version", "canary_deployment", "candidate", "contract",
-    "decision", "external",
+    "decision", "bundle", "dataref", "reference", "external",
 })
 
 

@@ -378,35 +378,53 @@ def _last_json_line(text: str) -> dict | None:
     return None
 
 
-def _record_evidences_completion(raw: str | None) -> bool:
-    """Whether the executor record supports a 'completed' label —
-    stricter than _has_executor_record: a verdict key must be present
-    AND the record must document a completed run, not a non-completion.
-    The signal set mirrors mislabeled_outcome: outer status absent or
-    'completed', exit_code absent or 0, no 'error' key, no timed_out
-    flag, and no inner error payload in the last JSON line of stdout.
-    A cancellation receipt, reaper note, timeout, or failure output
-    therefore refuses 'completed' — a row the gate accepts cannot later
-    be flagged for the same signals."""
-    if not _has_executor_record(raw):
-        return False
-    out = json.loads(raw)
+def _completion_failure_signals(out: dict) -> list[str]:
+    """Failure signals inside a parsed executor record — the shared
+    signal set for the completed-evidence gate
+    (_record_evidences_completion) and the mislabeled_outcome audit,
+    so 'accepted by the gate' and 'clean under the check' are the
+    same predicate. Covers outer status, exit_code, error/timed_out
+    keys, and an error payload in the last JSON line of stdout."""
+    signals = []
     if out.get("status") not in (None, "completed"):
-        return False
+        signals.append(f"outer status={out.get('status')!r}")
     if out.get("exit_code"):
-        return False
-    if "error" in out or out.get("timed_out"):
-        return False
+        signals.append(f"exit_code={out['exit_code']}")
+    if "error" in out:
+        signals.append("error key present")
+    if out.get("timed_out"):
+        signals.append("timed_out=true")
     stdout = out.get("stdout")
     if isinstance(stdout, str):
         inner = _last_json_line(stdout)
         if isinstance(inner, dict):
             if inner.get("status") == "error" or inner.get("error"):
-                return False
+                signals.append("inner error payload in stdout")
             inner_rc = inner.get("_exit_code") or inner.get("exit_code")
             if inner_rc:
-                return False
-    return True
+                signals.append(f"inner exit_code={inner_rc}")
+    return signals
+
+
+def _has_run_artifact(out: dict) -> bool:
+    """Whether the record carries a concrete run artifact — exit_code
+    or stdout. A bare {'status': 'completed'} receipt is a status
+    word, not evidence that a run happened."""
+    return "exit_code" in out or "stdout" in out
+
+
+def _record_evidences_completion(raw: str | None) -> bool:
+    """Whether the executor record supports a 'completed' label —
+    stricter than _has_executor_record: the record must carry a
+    concrete run artifact (exit_code or stdout) AND no failure
+    signals — see _completion_failure_signals. A cancellation
+    receipt, reaper note, timeout, failure output, or bare
+    status-word record therefore refuses 'completed' — a row the
+    gate accepts cannot later be flagged for the same signals."""
+    if not _has_executor_record(raw):
+        return False
+    out = json.loads(raw)
+    return _has_run_artifact(out) and not _completion_failure_signals(out)
 
 _HYPOTHESIS_TRANSITIONS: dict[str, set[str]] = {
     "proposed": {"under_test", "abandoned"},

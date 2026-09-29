@@ -54,6 +54,35 @@ entry timestamps are commit times in **UTC**.
 
 ### Fixed
 
+- **rc-11 extraction findings** — the rc-11 VM battery surfaced three
+  code defects, all fixed: `assert_claim` deduplication silently
+  dropped the caller's evidence edges (re-assertion now attaches
+  them to the existing claim and reports `edges_added`); the closed
+  `RefType` vocabulary had no honest type for `bundle-*`/`data-ref-*`
+  ids so callers misfiled them as `external` (new `bundle`/`dataref`/
+  `reference` members + `cites` relation, a write-time guard
+  refusing `external` for known internal prefixes, an init-time
+  retype of legacy rows, and a `misfiled_external_refs` integrity
+  check — 5th anamnesis check); and the completed-trial gate and the
+  `mislabeled_outcome` audit diverged — a bare
+  `{"status": "completed"}` status-word satisfied the gate while the
+  audit never tested `error`/`timed_out` keys (both now share
+  `_completion_failure_signals` + `_has_run_artifact`: a concrete
+  run artifact — `exit_code` or `stdout` — is required in both
+  directions). Diagnostics coverage closed: 7 new battery prompts,
+  a `coverage-manifest.txt` sentinel test so a shipped tool without
+  a diagnostic is a suite failure, and the `campaign-orchestration`
+  step-16 expectation corrected to the documented post-close pull
+  contract. *(2026-09-29 09:30Z)*
+- **rc-11 sibling coverage — tool deadlines + bounded connect on all
+  servers** — the episteme-freeze fixes extended to the siblings that
+  shared the defect class: `tool_deadline_seconds` (shielded
+  `wait_for` → named `deadline_exceeded`) now wraps `call_tool` in
+  zetesis, arete, anamnesis, and agora (`server_config` plumbed
+  through each `__main__`), and zetesis/arete's connectivity
+  supervisors bound `connect()` the same way agora's does — a
+  listening-but-silent upstream is marked `down` and retried instead
+  of parking the supervisor forever. *(2026-09-29 07:29Z)*
 - **Arete decision-debt deadlock (F-17, critical)** — closing a
   tournament created "closed tournament lacks meta_decision" debt,
   which gated *every* arete mutator including the evidence pulls

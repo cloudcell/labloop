@@ -18,6 +18,7 @@ test:
 """
 
 import asyncio
+import importlib
 import json
 import os
 import threading
@@ -325,4 +326,122 @@ class TestChannelConnectDeadline:
         assert "timed out" in spec.last_error
         # The proof it never parked: attempts kept accruing across
         # ticks — a wedged connect froze this counter at the incident.
+        assert spec.attempts >= 2
+
+
+# ---- S1 (watchdog-roll plan): sibling-server coverage ------------------------
+#
+# The incident fixes landed on episteme + agora, but the wedge class is
+# generic: any sibling tool handler that stalls freezes that server the
+# same way, and zetesis/arete run the same connectivity supervisor —
+# an unbounded connect() there parks identically.
+
+
+def _sibling_server(kind: str, tmp_path: Path):
+    """Build each sibling's MCPServer with a live store and a short
+    tool deadline. Returns (server, store|None) so callers can close."""
+    cfg = {"tool_deadline_seconds": 0.3}
+    if kind == "zetesis":
+        from ml_zetesis_mcp.server import create_server
+        from ml_zetesis_mcp.state.store import SearchStore
+        store = SearchStore(str(tmp_path / "z.db"))
+        store.connect()
+        return create_server(store, server_config=cfg), store
+    if kind == "arete":
+        from ml_arete_mcp.server import create_server
+        from ml_arete_mcp.state.store import ImproverStore
+        store = ImproverStore(str(tmp_path / "a.db"))
+        store.connect()
+        return create_server(store, server_config=cfg), store
+    if kind == "anamnesis":
+        from ml_anamnesis_mcp.server import create_server
+        from ml_anamnesis_mcp.state.store import MemoryStore
+        store = MemoryStore(str(tmp_path / "m.db"))
+        store.connect()
+        return create_server(store, server_config=cfg), store
+    if kind == "agora":
+        from ml_agora_mcp.clients.adaptors import Adaptors
+        from ml_agora_mcp.server import create_server
+        return (
+            create_server(
+                Adaptors(),
+                log_dir=tmp_path / "agora-logs",
+                server_config=cfg,
+            ),
+            None,
+        )
+    raise AssertionError(f"unknown sibling {kind}")
+
+
+class TestSiblingToolDeadline:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "kind", ["zetesis", "arete", "anamnesis", "agora"]
+    )
+    async def test_slow_tool_returns_deadline_exceeded(
+        self, kind, tmp_path
+    ):
+        from mcp.client import Client
+
+        mcp, store = _sibling_server(kind, tmp_path)
+        try:
+
+            @mcp.tool()
+            async def slow_op() -> str:
+                """A test tool that outlives the deadline."""
+                await asyncio.sleep(3)
+                return "done"
+
+            @mcp.tool()
+            async def fast_op() -> str:
+                """A test tool inside the deadline."""
+                return "ok"
+
+            client = Client(mcp)
+            async with client:
+                t0 = time.monotonic()
+                result = await client.call_tool("slow_op", {})
+                elapsed = time.monotonic() - t0
+                assert result.is_error
+                payload = json.loads(result.content[0].text)
+                assert "deadline_exceeded" in payload["error"]
+
+                r = await client.call_tool("fast_op", {})
+                assert not r.is_error
+            assert elapsed < 2.0, "deadline did not bound the response"
+        finally:
+            if store is not None:
+                store.close()
+
+
+class TestSiblingConnectDeadline:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mod", ["ml_zetesis_mcp", "ml_arete_mcp"])
+    async def test_supervisor_marks_down_and_keeps_cycling(self, mod):
+        m = importlib.import_module(f"{mod}.clients.adaptors")
+        adaptors = m.Adaptors()
+        adaptors.register_channel(
+            "peer", "protocol", _NeverConnectAdaptor()
+        )
+        spec = adaptors._channels["peer"]
+
+        task = asyncio.create_task(
+            m.run_connectivity_supervisor(
+                adaptors, 0.05,
+                probe_timeout_seconds=0.15,
+                log=lambda *a: None,
+            )
+        )
+        try:
+            await asyncio.sleep(0.6)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert spec.state == "down"
+        assert spec.last_error is not None
+        assert "timed out" in spec.last_error
         assert spec.attempts >= 2

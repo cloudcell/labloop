@@ -87,6 +87,13 @@ From the host:
 | `20260927-1910Z-claim-valid-until-expiry` | rc-7b: `assert_claim(valid_until=…)` — live→expired write path, normalization, naive/garbage refusals, row never deleted (R6) |
 | `20260927-1915Z-rc7-surface-verification` | rc-7 deferred verification — the last VM run predated the deploy: `read_resource` ×5 + agora routing, 15-check zetesis incl. `unrunnable_campaigns`, `abandoned_at`, `list_trials.retry_reason`, generator stdout error, artifact typing |
 | `20260928-1608Z-rc9-findings` | rc-9: `incomplete_campaigns` check (15th; `camp-4f94d190` residue is the fixture), `rollback` claim minting, Loop-0 `RefType` members (`candidate`/`contract`/`decision`), episteme `source_id`=conclusion, dedup `valid_until` echo, `open_arm_campaign` docstring mechanism |
+| `20260929-0859Z-rc11-extraction-findings` | rc-11: dedup `edges_added` (R41), `bundle`/`dataref`/`reference` ref types + `cites` + `external`-prefix guard (R42), run-artifact completion gate + shared predicate (R44) |
+| `20260929-0900Z-arm-campaign-verbs` | Coverage (R49): arete arm-campaign verbs — `record_arm_result`, `pull_arm_evidence`, `close_arm_campaign`, `record_arm_verdict` end-to-end |
+| `20260929-0905Z-canary-and-correction` | Coverage (R49): `record_canary`/`close_canary` lifecycle, `correct_tournament_result` audit trail, sealed-record refusal |
+| `20260929-0910Z-read-paths-and-registries` | Coverage (R49): uncalled read paths + first writes to empty registries (`register_search_policy`, `record_finding`, `verify_archive`, `wait_trial`, `capture_bundle_from_code_hash`, `create_meta_contract`, …) |
+| `20260929-0915Z-resource-surface` | Coverage (R49): every `read_resource` URI family ×5 servers; field-shape assertions (`kind`/`src`/`dst`), negative-URI probes, agora routing |
+| `20260929-0920Z-ingest-surface` | Coverage (R49): `:38082` ingest API fail-closed probes — 401 without/with wrong token; UNREACHABLE ≠ pass |
+| `20260929-0925Z-deadline-exceeded` | Coverage (R49, post-rc-11): tool deadline fires at ~120 s AND shielded trial completes server-side; loop stays responsive |
 
 The `20260927-03xxZ` set is the rc-5 verification battery — each
 targets one rc-5 fix and exercises both the valid path and the

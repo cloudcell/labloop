@@ -41,7 +41,7 @@ def _claim(cid, confidence=0.8, **kw):
 def test_clean_store_is_ok(mem_store):
     payload = run_checks(mem_store)
     assert payload["status"] == "ok"
-    assert len(payload["checks"]) == 4
+    assert len(payload["checks"]) == 5
 
 
 async def test_unsupported_high_confidence(mcp_server, mem_store):
@@ -201,7 +201,7 @@ async def test_health_deep_route(mem_store):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
-        assert len(body["checks"]) == 4
+        assert len(body["checks"]) == 5
 
 
 def test_integrity_gui(mem_store):

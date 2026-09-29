@@ -11,7 +11,7 @@ import hashlib
 import json
 import sqlite3
 
-from .models import Claim, ClaimEdge
+from .models import Claim, ClaimEdge, INTERNAL_REF_PREFIXES
 
 
 SCHEMA = """
@@ -77,6 +77,23 @@ class MemoryStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._retype_misfiled_external_edges()
+
+    def _retype_misfiled_external_edges(self) -> None:
+        """Retype 'external' edges whose to_ref carries a known internal
+        prefix — the closed RefType vocabulary once offered no honest
+        type for these ids, so they were filed as external (e.g.
+        bundle-*). Deterministic and idempotent: touches only
+        external-typed edges matching a prefix, so it is safe to run on
+        every open. Legacy data-ref-* edges were all dataset refs —
+        'reference' did not exist — so they migrate to 'dataref'."""
+        for prefix, types in INTERNAL_REF_PREFIXES.items():
+            self._execute(
+                "UPDATE claim_edges SET ref_type = ? "
+                "WHERE ref_type = 'external' AND to_ref LIKE ?",
+                (types[0], prefix + "%"),
+            )
+        self.conn.commit()
 
     def close(self) -> None:
         if self.conn:

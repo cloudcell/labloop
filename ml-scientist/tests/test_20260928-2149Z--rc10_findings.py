@@ -590,11 +590,13 @@ class _CapturingExecutor:
 
     async def execute_code(self, code, **kwargs):
         self.codes.append(code)
-        return json.dumps({"status": "completed"})
+        return json.dumps({"status": "completed", "exit_code": 0,
+                           "stdout": "", "stderr": ""})
 
     async def execute_code_async(self, trial_id, code, **kwargs):
         self.codes.append(code)
-        return json.dumps({"status": "completed"})
+        return json.dumps({"status": "completed", "exit_code": 0,
+                           "stdout": "", "stderr": ""})
 
     def get_async_status(self, trial_id):
         return json.dumps({"status": "running"})

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..enforcement.checks import PRIOR_CONFIDENCE_MAX
-from ..state.models import EVIDENCE_RELATIONS
+from ..state.models import EVIDENCE_RELATIONS, INTERNAL_REF_PREFIXES
 
 DEFAULT_LOG_MAX_FILES = 100
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
@@ -130,6 +130,29 @@ def _check_broken_supersession(store) -> dict:
     )
 
 
+def _check_misfiled_external_refs(store) -> dict:
+    """Edges typed 'external' whose to_ref carries a known internal
+    prefix — 'external' means unresolvable elsewhere, so an internal
+    id under it is a mislabel that pollutes every query against the
+    bucket. The write-time guard and the init-time retype keep this
+    at zero; a nonzero count means the vocabulary drifted again."""
+    rows = store._fetchall(
+        "SELECT id, from_claim, to_ref FROM claim_edges "
+        "WHERE ref_type = 'external'"
+    )
+    violations = [
+        {"edge_id": r["id"], "from_claim": r["from_claim"],
+         "to_ref": r["to_ref"],
+         "problem": "internal id filed as external"}
+        for r in rows
+        if any(r["to_ref"].startswith(p) for p in INTERNAL_REF_PREFIXES)
+    ]
+    return _res(
+        "misfiled_external_refs", violations,
+        f"{len(violations)} 'external' edge(s) point at internal ids",
+    )
+
+
 def run_checks(
     store, *, prior_confidence_max: float = PRIOR_CONFIDENCE_MAX
 ) -> dict:
@@ -146,6 +169,7 @@ def run_checks(
         _check_unsupported_high_confidence(store, prior_confidence_max),
         _check_dangling_claim_refs(store),
         _check_broken_supersession(store),
+        _check_misfiled_external_refs(store),
     ]
     return {
         "server": "ml-anamnesis-mcp",

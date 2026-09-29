@@ -494,7 +494,11 @@ def _check_mislabeled_outcome(store) -> dict:
     the row's own record must still support the label — a correction
     TO 'completed' over a cancellation receipt or failure record is
     exactly the mislabel this check exists to catch."""
-    from ..state.store import _has_executor_record, _last_json_line
+    from ..state.store import (
+        _completion_failure_signals,
+        _has_executor_record,
+        _has_run_artifact,
+    )
 
     rows = store._fetchall(
         """SELECT t.id, t.executor_output_json,
@@ -518,24 +522,10 @@ def _check_mislabeled_outcome(store) -> dict:
             )
             continue
         out = json.loads(r["executor_output_json"])
-        failed_signals = []
-        if out.get("status") not in (None, "completed"):
-            failed_signals.append(f"outer status={out.get('status')!r}")
-        if out.get("exit_code", 0):
-            failed_signals.append(f"exit_code={out['exit_code']}")
-        # The workspace's run_training payload — outer exit 0 while the
-        # inner job crashed leaves "status": "error" inside stdout.
-        stdout = out.get("stdout")
-        if isinstance(stdout, str):
-            inner = _last_json_line(stdout)
-            if isinstance(inner, dict):
-                if inner.get("status") == "error" or inner.get("error"):
-                    failed_signals.append(
-                        f"inner status={inner.get('status')!r}"
-                    )
-                inner_rc = inner.get("_exit_code") or inner.get("exit_code")
-                if inner_rc:
-                    failed_signals.append(f"inner exit_code={inner_rc}")
+        failed_signals = _completion_failure_signals(out)
+        if not _has_run_artifact(out):
+            failed_signals.append("no run artifact "
+                                  "(no exit_code/stdout)")
         if failed_signals:
             violations.append(
                 {"trial_id": r["id"], "signals": failed_signals}

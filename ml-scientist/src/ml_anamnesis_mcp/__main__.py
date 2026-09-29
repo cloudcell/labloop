@@ -124,6 +124,7 @@ def main() -> None:
         log_tool_args=args.log_tool_args,
         integrity_config=integrity_config,
         enforcement_config=enforcement_config,
+        server_config=file_config.get("server", {}),
     )
 
     async def _with_integrity_monitor(coro):

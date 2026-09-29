@@ -487,12 +487,52 @@ qga "printf 'ML_EPISTEME_INGEST_TOKEN=%s\n' \"\$(head -c 32 /dev/urandom | base6
 
 note "quadlets + linger services"
 # lab-cnt-mcp lives in the mcp account's podman — invisible to lab.
+# Its publish block is rendered from ml-scientist/ports.env — the same
+# file the image's entrypoint.sh sources — so published ports and
+# container ports can never drift apart. The workspace payload keeps
+# the @MCP_PORTS_PUBLISH@ placeholder; the installed copy is rendered.
+( set -a; . "$ML_SCIENTIST/ports.env"; set +a
+  grep -oE '^ML_[A-Z_]+_PORT' "$ML_SCIENTIST/ports.env" \
+      | while read -r v; do
+            printf 'PublishPort=127.0.0.1:%s:%s\n' "${!v}" "${!v}"
+        done ) > "$WORK/mcp-ports.publish"
+sed -e "/^@MCP_PORTS_PUBLISH@\$/r $WORK/mcp-ports.publish" \
+    -e "/^@MCP_PORTS_PUBLISH@\$/d" \
+    "$REPO/deploy/quadlets/lab-cnt-mcp.container" \
+    > "$WORK/lab-cnt-mcp.container"
+qga_push "$WORK/lab-cnt-mcp.container" /tmp/lab-cnt-mcp.container
 qga "install -d -m 0755 -o mcp -g mcp /home/mcp/.config/containers/systemd && \
-     install -m 0644 -o mcp -g mcp \
-         /srv/lab/workspace/ml-labloop/deploy/quadlets/lab-cnt-mcp.container \
-         /home/mcp/.config/containers/systemd/"
+     install -m 0644 -o mcp -g mcp /tmp/lab-cnt-mcp.container \
+         /home/mcp/.config/containers/systemd/ && \
+     rm -f /tmp/lab-cnt-mcp.container"
 qga "su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
      systemctl --user daemon-reload && systemctl --user start lab-cnt-mcp'"
+
+# Trusted-zone liveness watchdog (rc-11): exit-based recovery
+# (entrypoint wait -n, quadlet Restart=) cannot see a HANG — a wedged
+# event loop listens forever. This timer probes /health and restarts
+# the zone on sustained failure. mcp-owned deliberately: `lab` must not
+# gain the ability to touch the trusted zone. Its probe ports come from
+# ports.env (~mcp/.config/labloop/ports.env) — never hardcoded.
+qga_push "$ML_SCIENTIST/ports.env" /tmp/labloop-ports.env
+qga "command -v curl >/dev/null && command -v ss >/dev/null || \
+     echo 'WARN: watchdog deps (curl/ss) missing on guest' >&2; \
+     install -d -m 0755 -o mcp -g mcp /home/mcp/.local/sbin \
+     /home/mcp/.local/state/labloop /home/mcp/.config/systemd/user \
+     /home/mcp/.config/labloop && \
+     install -m 0644 -o mcp -g mcp /tmp/labloop-ports.env \
+         /home/mcp/.config/labloop/ports.env && \
+     rm -f /tmp/labloop-ports.env && \
+     install -m 0755 -o mcp -g mcp \
+         /srv/lab/workspace/ml-labloop/deploy/labloop-mcp-watchdog \
+         /home/mcp/.local/sbin/ && \
+     install -m 0644 -o mcp -g mcp \
+         /srv/lab/workspace/ml-labloop/deploy/quadlets/labloop-mcp-watchdog.service \
+         /srv/lab/workspace/ml-labloop/deploy/quadlets/labloop-mcp-watchdog.timer \
+         /home/mcp/.config/systemd/user/"
+qga "su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
+     systemctl --user daemon-reload && \
+     systemctl --user enable --now labloop-mcp-watchdog.timer'"
 # render the hostile-zone ceiling (@EXP_CPUS@/@EXP_MEM_MIB@) for this
 # guest's size — the payload copy keeps the placeholders
 sed -e "s/@EXP_CPUS@/$EXP_CPUS/g" -e "s/@EXP_MEM_MIB@/$EXP_MEM_MIB/g" \

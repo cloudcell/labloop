@@ -55,6 +55,9 @@ class RefType(str, Enum):
     candidate = "candidate"
     contract = "contract"
     decision = "decision"
+    bundle = "bundle"
+    dataref = "dataref"
+    reference = "reference"
     external = "external"
 
 
@@ -71,6 +74,7 @@ class Relation(str, Enum):
     specializes = "specializes"
     similar_to = "similar_to"
     failed_because = "failed_because"
+    cites = "cites"
 
 
 # Relations that count as evidence for the evidence requirement
@@ -83,6 +87,38 @@ EVIDENCE_RELATIONS = frozenset(
         Relation.valid_under.value,
     }
 )
+
+# ID prefix → the RefType(s) that honestly describe an internal id.
+# 'external' is for refs no internal family owns; an id carrying one
+# of these prefixes filed as 'external' is a mislabel — the caller had
+# no better choice before bundle/dataref/reference joined the enum,
+# or is guessing. Families without a RefType member (hyp-,
+# eref-, camp-, spawn-, …) are deliberately absent — there is no
+# honest type to name for them yet; extending this map means extending
+# RefType first.
+INTERNAL_REF_PREFIXES: dict[str, tuple[str, ...]] = {
+    "claim-": ("claim",),
+    "trial-": ("trial",),
+    "obs-": ("observation",),
+    "conc-": ("conclusion",),
+    "prog-": ("programme",),
+    "inv-": ("investigation",),
+    "find-": ("finding",),
+    "archive-": ("archive",),
+    "imp-": ("improver",),
+    "tourn-": ("tournament",),
+    "tres-": ("tournament_result",),
+    "mcp-": ("proposal",),
+    "mcontract-": ("meta_contract",),
+    "mdec-": ("meta_decision",),
+    "pol-": ("policy_version",),
+    "canary-": ("canary_deployment",),
+    "cand-": ("candidate",),
+    "contract-": ("contract",),
+    "decision-": ("decision",),
+    "bundle-": ("bundle",),
+    "data-ref-": ("dataref", "reference"),
+}
 
 
 class Claim(BaseModel):

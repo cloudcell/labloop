@@ -86,6 +86,7 @@ def coerce_json(value: Any, expected: type, name: str) -> Any:
 class AssertClaimOut(TypedDict, total=False):
     claim_id: str | None
     edge_ids: list | None
+    edges_added: int | None
     valid_until: str | None
     deduplicated: bool | None
     status: str | None

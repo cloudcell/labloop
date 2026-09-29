@@ -25,7 +25,7 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
     async def prepare_data(
         split: Annotated[Literal['train', 'validation', 'test'], Field(description='Dataset split: train | validation | test.')],
         regime: Annotated[Literal['generated', 'captured'], Field(description='generated (run generator via executor; needs generator_code_ref + generator_seed) | captured (register external URI; needs source_uri).')],
-        generator_code_ref: Annotated[str | None, Field(description="Path/ref to generator code — required for regime='generated'.")] = None,
+        generator_code_ref: Annotated[str | None, Field(description="Path/ref to generator code — required for regime='generated'. The file must expose generate_data(config, output_path) — two positional args; see the tool description for the full contract.")] = None,
         generator_seed: Annotated[int | None, Field(description="Generator seed — required for regime='generated'.")] = None,
         generator_params: Annotated[dict | str | None, Field(description='Generator parameters; object or JSON-encoded.')] = None,
         source_uri: Annotated[str | None, Field(description="External data URI — required for regime='captured'.")] = None,

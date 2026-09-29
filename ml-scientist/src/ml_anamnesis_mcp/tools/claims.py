@@ -18,6 +18,7 @@ from ..enforcement.checks import (
     check_edge_valid,
     check_evidence_requirement,
     check_ref_type_valid,
+    check_ref_type_consistent,
     check_relation_valid,
     check_supersedes_exists,
 )
@@ -64,8 +65,13 @@ def register(
         existing claim this one replaces; the supersedes edge is
         recorded automatically. Claims are deduplicated by normalized
         content — re-asserting identical content returns the existing
-        claim_id. valid_until is the agent-reachable expiry: claims
-        past it leave the default list view but are never deleted.
+        claim_id, and any evidence edges supplied with the
+        re-assertion are still recorded on it (edges_added reports
+        how many were new). supersedes_id and valid_until are
+        mint-time fields — on a dedup hit the existing claim keeps
+        its own values. valid_until is the agent-reachable expiry:
+        claims past it leave the default list view but are never
+        deleted.
         """
         try:
             if evidence is not None:
@@ -89,15 +95,68 @@ def register(
                 # lexicographically against +00:00-suffixed now().
                 valid_until = _dt.astimezone(timezone.utc).isoformat()
 
-            # Dedup first: re-asserting existing content is a lookup,
-            # not a new claim — idempotent retries must not be gated
-            # by the evidence rule.
+            # Validate every evidence edge spec before writing
+            # anything — same rules on the mint path and the
+            # dedup-attach path; a malformed edge is a named error,
+            # never silently dropped.
+            evidence = evidence or []
+            for e in evidence:
+                for err in (
+                    check_ref_type_valid(e.get("ref_type", "")),
+                    check_relation_valid(e.get("relation", "")),
+                    check_ref_type_consistent(
+                        e.get("to_ref", ""), e.get("ref_type", "")
+                    ),
+                ):
+                    if err:
+                        return fail(json.dumps({"error": err}))
+                # claim-typed refs are verified (same rule as relate);
+                # other ref types are trusted opaque IDs
+                if (
+                    e.get("ref_type") == "claim"
+                    and store.get_claim(e.get("to_ref", "")) is None
+                ):
+                    return fail(json.dumps({
+                        "error": f"Claim-typed to_ref not found: {e.get('to_ref')}"
+                    }))
+
+            # Dedup: re-asserting existing content finds the claim —
+            # a lookup, not a new claim — but the caller's evidence
+            # edges still land on it. The evidence-requirement and
+            # confidence gates stay mint-time-only: accruing evidence
+            # on an existing claim cannot lower its standing, and
+            # idempotent retries must not be gated.
             chash = content_hash(content)
             existing = store.get_claim_by_hash(chash)
             if existing is not None:
+                edge_ids = []
+                edges_added = 0
+                with store.transaction():
+                    for e in evidence:
+                        dup = store.find_edge(
+                            existing.id, e["to_ref"],
+                            e["ref_type"], e["relation"],
+                        )
+                        if dup is not None:
+                            edge_ids.append(dup.id)
+                            continue
+                        edge = ClaimEdge(
+                            id=f"edge-{uuid.uuid4().hex[:8]}",
+                            from_claim=existing.id,
+                            to_ref=e["to_ref"],
+                            ref_type=RefType(e["ref_type"]),
+                            relation=Relation(e["relation"]),
+                            weight=e.get("weight", 1.0),
+                            source_id=e.get("source_id", source_id),
+                        )
+                        store.create_edge(edge)
+                        edge_ids.append(edge.id)
+                        edges_added += 1
                 return ok({
                     "claim_id": existing.id,
                     "deduplicated": True,
+                    "edge_ids": edge_ids,
+                    "edges_added": edges_added,
                     "valid_until": existing.valid_until,
                     "status": "exists",
                 })
@@ -111,25 +170,6 @@ def register(
             ):
                 if err:
                     return fail(json.dumps({"error": err}))
-
-            # Validate every evidence edge spec before inserting anything
-            evidence = evidence or []
-            for e in evidence:
-                for err in (
-                    check_ref_type_valid(e.get("ref_type", "")),
-                    check_relation_valid(e.get("relation", "")),
-                ):
-                    if err:
-                        return fail(json.dumps({"error": err}))
-                # claim-typed refs are verified (same rule as relate);
-                # other ref types are trusted opaque IDs
-                if (
-                    e.get("ref_type") == "claim"
-                    and store.get_claim(e.get("to_ref", "")) is None
-                ):
-                    return fail(json.dumps({
-                        "error": f"Claim-typed to_ref not found: {e.get('to_ref')}"
-                    }))
 
             claim = Claim(
                 id=f"claim-{uuid.uuid4().hex[:8]}",
@@ -182,8 +222,8 @@ def register(
     def relate(
         from_claim: Annotated[str, Field(description='ID of the claim the edge starts from.')],
         to_ref: Annotated[str, Field(description='Edge target — claim-typed IDs are verified; other ref types are trusted opaque IDs.')],
-        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | external.")],
-        relation: Annotated[Literal['supports', 'contradicts', 'derived_from', 'tested_by', 'valid_under', 'supersedes', 'generalizes', 'specializes', 'similar_to', 'failed_because'], Field(description='Edge type: supports | contradicts | derived_from | tested_by | valid_under | supersedes | generalizes | specializes | similar_to | failed_because.')],
+        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'bundle', 'dataref', 'reference', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | bundle | dataref | reference | external.")],
+        relation: Annotated[Literal['supports', 'contradicts', 'derived_from', 'tested_by', 'valid_under', 'supersedes', 'generalizes', 'specializes', 'similar_to', 'failed_because', 'cites'], Field(description='Edge type: supports | contradicts | derived_from | tested_by | valid_under | supersedes | generalizes | specializes | similar_to | failed_because | cites.')],
         weight: Annotated[float, Field(description='Edge strength (default 1.0).')] = 1.0,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity that recorded this edge.')] = None,
     ) -> Annotated[CallToolResult, RelateOut]:
@@ -191,21 +231,24 @@ def register(
 
         relation (closed vocabulary): supports | contradicts |
         derived_from | tested_by | valid_under | supersedes |
-        generalizes | specializes | similar_to | failed_because.
+        generalizes | specializes | similar_to | failed_because |
+        cites.
         ref_type: the closed RefType vocabulary — claim | trial |
         observation | conclusion | programme | investigation | finding |
         archive | improver | tournament | tournament_result | proposal |
         meta_contract | meta_decision | policy_version |
-        canary_deployment | candidate | contract | decision |
-        external. claim-typed to_ref values are
+        canary_deployment | candidate | contract | decision | bundle |
+        dataref | reference | external. claim-typed to_ref values are
         verified; other ref types are trusted opaque IDs across the
-        protocol boundary.
+        protocol boundary. 'external' is refused when to_ref carries a
+        known internal prefix — internal ids take their own type.
         Exact duplicate edges return the existing edge_id.
         """
         try:
             for err in (
                 check_relation_valid(relation),
                 check_ref_type_valid(ref_type),
+                check_ref_type_consistent(to_ref, ref_type),
                 check_edge_valid(from_claim, to_ref, ref_type, store),
             ):
                 if err:

@@ -69,7 +69,8 @@ class MockExecutor(ExecutorRole):
 
     async def execute_code(self, code: str, artifact_dir=None, trial_id=None, programme_id=None, bundle_id=None, extra_ro_paths=None, extra_rw_paths=None, python_exe=None, overlay_ro=None, timeout_seconds=None) -> str:
         self.calls.append(code)
-        return json.dumps({"status": "completed", "output": "mock execution"})
+        return json.dumps({"status": "completed", "exit_code": 0,
+                           "stdout": "mock execution", "stderr": ""})
 
     async def read_cell_output(self, cell_id: str) -> str:
         return json.dumps({"cell_id": cell_id, "output": "mock output"})

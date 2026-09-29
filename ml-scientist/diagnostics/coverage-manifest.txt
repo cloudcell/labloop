@@ -1,0 +1,158 @@
+# Diagnostics coverage manifest — every registered MCP surface and
+# the prompt slug(s) that exercise it. Maintained alongside the
+# prompts; the sentinel test fails if a @mcp.tool name or
+# @mcp.resource URI is registered in src/ but absent here. Format:
+#   <tool-or-uri>  ->  <prompt-slug>[, <prompt-slug>, ...]
+# A slug is the prompt filename minus its UTC-Z timestamp and .md.
+# Mention = the prompt instructs the agent to call/read it, not
+# merely that the string occurs — when adding a line, check the
+# prompt actually exercises the surface.
+
+## ml_agora_mcp
+lab://status -> channel-current-fields, connectivity-fault-observability, connectivity-live-gating, resource-surface, state-machine-coverage
+lab://topology -> channel-current-fields, channel-lasterror-heals, connectivity-fault-observability, connectivity-live-gating, rc7-surface-verification, resource-surface, state-machine-coverage
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
+
+## ml_anamnesis_mcp
+claims://graph -> resource-surface
+claims://by-relation/{relation} -> resource-surface
+claims://session -> resource-surface
+claims://status -> connectivity-fault-observability, deadline-exceeded, rc7-surface-verification, resource-surface
+assert_claim -> claim-valid-until-expiry, rc11-extraction-findings, rc9-findings, state-machine-coverage
+relate -> rc11-extraction-findings, rc9-findings, state-machine-coverage
+get_claim -> claim-mint-loop2-reftypes, claim-valid-until-expiry, rc11-extraction-findings, rc9-findings, read-paths-and-registries
+get_claims -> read-paths-and-registries
+list_claims -> claim-mint-loop2-reftypes, claim-valid-until-expiry, read-paths-and-registries, resource-surface, write-boundary-gates
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
+read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
+
+## ml_arete_mcp
+improver://classes -> claim-mint-loop2-reftypes, integrity-report-honesty, rc7-surface-verification
+improver://graph -> resource-surface
+improver://session -> resource-surface
+improver://status -> arm-campaign-verbs, connectivity-fault-observability
+record_meta_decision -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings, state-machine-coverage, write-boundary-gates
+list_decisions -> canary-and-correction, rc9-findings, write-boundary-gates
+promote_policy -> arm-campaign-verbs, canary-and-correction, state-machine-coverage, write-boundary-gates
+rollback -> boundary-class-registry, canary-and-correction, orphan-rollback-derivation, rc9-findings, roster-rollback-derivation, state-machine-coverage
+record_canary -> canary-and-correction, state-machine-coverage
+close_canary -> canary-and-correction, state-machine-coverage
+pull_evidence -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings, state-machine-coverage, write-boundary-gates
+register_improver -> boundary-class-registry, read-paths-and-registries, state-machine-coverage, write-boundary-gates
+get_improver -> read-paths-and-registries
+list_improvers -> rc9-findings, read-paths-and-registries
+get_improver_lineage -> read-paths-and-registries
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
+read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
+open_arm_campaign -> arm-campaign-verbs, campaign-orchestration, rc9-findings, spawn-guard-ordering
+spawn_arm_programme -> arm-campaign-verbs, rc9-findings
+pull_arm_evidence -> arm-campaign-verbs
+record_arm_result -> arm-campaign-verbs
+close_arm_campaign -> arm-campaign-verbs
+record_arm_verdict -> arm-campaign-verbs
+create_meta_contract -> read-paths-and-registries
+propose_meta_change -> arm-campaign-verbs, boundary-class-registry, canary-and-correction, claim-mint-loop2-reftypes, integrity-report-honesty, state-machine-coverage, stderr-elision-and-schema-docs, write-boundary-gates
+get_proposal -> read-paths-and-registries
+list_proposals -> read-paths-and-registries
+open_tournament -> arm-campaign-verbs, campaign-orchestration, canary-and-correction, state-machine-coverage, write-boundary-gates
+record_tournament_result -> canary-and-correction, state-machine-coverage
+correct_tournament_result -> canary-and-correction
+close_tournament -> canary-and-correction, state-machine-coverage, write-boundary-gates
+void_tournament -> state-machine-coverage
+get_tournament -> arm-campaign-verbs, canary-and-correction, read-paths-and-registries
+list_tournaments -> read-paths-and-registries
+
+## ml_episteme_mcp
+protocol://graph -> resource-surface
+executor://contract -> resource-surface
+programme://{id} -> resource-surface
+programme://{id}/hypotheses -> resource-surface
+programme://{id}/trials -> resource-surface
+programme://{id}/belief -> resource-surface
+programme://{id}/budget -> resource-surface
+trial://{trial_id}/artifacts -> resource-surface
+artifact://{content_hash} -> resource-surface, sealed-provenance-honesty
+dataref://{data_ref_id} -> resource-surface
+code://{code_hash} -> resource-surface
+protocol://session -> resource-surface
+protocol://status -> connectivity-fault-observability, rc7-surface-verification, resource-surface, sandbox-env-scrub
+list_archives -> claim-mint-loop2-reftypes
+get_archive -> read-paths-and-registries
+get_archived_programme -> read-paths-and-registries
+verify_archive -> read-paths-and-registries
+archive_pending_programmes -> read-paths-and-registries, state-machine-coverage
+capture_pending_artifacts -> read-paths-and-registries
+assess_programme -> read-paths-and-registries
+get_next_experiment -> read-paths-and-registries
+update_belief -> write-boundary-gates
+register_candidate -> arm-campaign-verbs, campaign-orchestration, claim-mint-loop2-reftypes, connectivity-live-gating, orphan-rollback-derivation, retry-reason-ordering, roster-rollback-derivation, state-machine-coverage
+list_candidates -> claim-mint-loop2-reftypes, roster-rollback-derivation
+get_candidate -> read-paths-and-registries
+get_incumbent -> orphan-rollback-derivation, read-paths-and-registries, roster-rollback-derivation, state-machine-coverage
+list_promotion_decisions -> read-paths-and-registries
+get_candidate_scorecard -> read-paths-and-registries
+get_candidate_lineage -> read-paths-and-registries
+create_evaluation_contract -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, state-machine-coverage
+get_evaluation_contract -> read-paths-and-registries
+record_promotion_decision -> campaign-metric-write-gate, campaign-value-gate-abandon, claim-mint-loop2-reftypes, connectivity-live-gating, orphan-rollback-derivation, roster-rollback-derivation, state-machine-coverage
+prepare_data -> blob-retrieval-and-input-digests, rc7-surface-verification, read-paths-and-registries, recurrent-protocol-smoke, resource-surface, sealed-path-runtime-deny, stderr-elision-and-schema-docs, trial-terminal-precedence
+verify_data -> read-paths-and-registries
+formulate_hypothesis -> state-machine-coverage
+abandon_hypothesis -> read-paths-and-registries
+list_hypotheses -> read-paths-and-registries
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
+describe_blob -> blob-retrieval-and-input-digests
+get_blob -> blob-retrieval-and-input-digests, sealed-path-runtime-deny
+read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
+record_observation -> arm-campaign-verbs, blob-retrieval-and-input-digests, recurrent-protocol-smoke, sealed-path-runtime-deny, sealed-provenance-honesty, state-machine-coverage, trial-terminal-precedence
+create_programme -> cancel-spawn-window-kill, deadline-exceeded, rc11-extraction-findings, retry-reason-ordering, sandbox-env-scrub, state-machine-coverage
+list_active_programmes -> claim-mint-loop2-reftypes
+list_programmes -> arm-campaign-verbs, campaign-orchestration, deadline-exceeded, resource-surface, sealed-provenance-honesty
+update_metric_direction -> read-paths-and-registries
+conclude_hypothesis -> blob-retrieval-and-input-digests, rc9-findings, recurrent-protocol-smoke, sealed-path-runtime-deny, state-machine-coverage, write-boundary-gates
+close_programme -> state-machine-coverage, write-boundary-gates
+design_experiment -> arm-campaign-verbs, blob-retrieval-and-input-digests, cancel-spawn-window-kill, deadline-exceeded, rc11-extraction-findings, recurrent-protocol-smoke, sealed-path-runtime-deny, state-machine-coverage
+capture_bundle -> blob-retrieval-and-input-digests, cancel-spawn-window-kill, read-paths-and-registries, recurrent-protocol-smoke, resource-surface, sealed-path-runtime-deny, sealed-provenance-honesty, state-machine-coverage, trial-terminal-precedence
+capture_bundle_from_code_hash -> read-paths-and-registries
+run_trial -> arm-campaign-verbs, blob-retrieval-and-input-digests, cancel-spawn-window-kill, connectivity-fault-observability, deadline-exceeded, rc11-extraction-findings, recurrent-protocol-smoke, resource-surface, retry-reason-ordering, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence
+get_trial_status -> cancel-spawn-window-kill, deadline-exceeded, rc7-surface-verification, retry-reason-ordering, sandbox-env-scrub, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+wait_trial -> deadline-exceeded, read-paths-and-registries, state-machine-coverage
+cancel_trial -> cancel-spawn-window-kill, rc11-extraction-findings, state-machine-coverage, write-boundary-gates
+mark_retryable -> cancel-spawn-window-kill, rc7-surface-verification, retry-reason-ordering, state-machine-coverage, trial-terminal-precedence
+correct_trial_status -> rc11-extraction-findings, retry-reason-ordering, state-machine-coverage
+list_trials -> rc7-surface-verification, retry-reason-ordering
+
+## ml_zetesis_mcp
+search://graph -> resource-surface
+search://session -> resource-surface
+search://status -> connectivity-fault-observability
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
+read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
+open_investigation -> read-paths-and-registries, state-machine-coverage
+pull_evidence -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings, state-machine-coverage, write-boundary-gates
+record_finding -> read-paths-and-registries, state-machine-coverage
+drop_finding -> state-machine-coverage
+conclude_investigation -> read-paths-and-registries, state-machine-coverage
+abandon_investigation -> state-machine-coverage
+get_investigation -> read-paths-and-registries
+list_investigations -> read-paths-and-registries
+refresh_roster -> campaign-metric-write-gate, campaign-value-gate-abandon, channel-current-fields, orphan-rollback-derivation, roster-rollback-derivation, state-machine-coverage, stderr-elision-and-schema-docs
+register_challenger -> arm-campaign-verbs, state-machine-coverage
+register_search_policy -> read-paths-and-registries
+list_search_policies -> read-paths-and-registries
+list_candidates -> claim-mint-loop2-reftypes, roster-rollback-derivation
+get_incumbent -> orphan-rollback-derivation, read-paths-and-registries, roster-rollback-derivation, state-machine-coverage
+open_campaign -> campaign-metric-write-gate, campaign-value-gate-abandon, rc7-surface-verification, rc9-findings, state-machine-coverage
+spawn_campaign_programme -> campaign-orchestration, campaign-value-gate-abandon, spawn-guard-ordering, state-machine-coverage
+record_campaign_result -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs
+pull_campaign_evidence -> campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification
+close_campaign -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification, state-machine-coverage, stderr-elision-and-schema-docs
+abandon_campaign -> campaign-value-gate-abandon, rc7-surface-verification, rc9-findings
+record_promotion_verdict -> campaign-orchestration, state-machine-coverage, stderr-elision-and-schema-docs
+get_campaign -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification, rc9-findings, spawn-guard-ordering
+list_campaigns -> campaign-value-gate-abandon, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings

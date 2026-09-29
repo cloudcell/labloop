@@ -28,17 +28,11 @@ AddCapability=SYS_ADMIN
 # profile allows the nested-namespace syscalls unconditionally.
 SeccompProfile=/srv/lab/workspace/ml-labloop/deploy/seccomp-labloop.json
 NoNewPrivileges=true
-PublishPort=127.0.0.1:38050:38050
-PublishPort=127.0.0.1:38051:38051
-PublishPort=127.0.0.1:38060:38060
-PublishPort=127.0.0.1:38061:38061
-PublishPort=127.0.0.1:38070:38070
-PublishPort=127.0.0.1:38071:38071
-PublishPort=127.0.0.1:38080:38080
-PublishPort=127.0.0.1:38081:38081
-PublishPort=127.0.0.1:38090:38090
-PublishPort=127.0.0.1:38091:38091
-PublishPort=127.0.0.1:38082:38082
+# Ports are rendered from ml-scientist/ports.env at install time
+# (create-lab-template / 30-ensure expand @MCP_PORTS_PUBLISH@ — one
+# 127.0.0.1-bound PublishPort per *_PORT var). Never hardcode a port
+# here; the servers read the same file inside the image.
+@MCP_PORTS_PUBLISH@
 # episteme ingest surface (38082): token-gated writes to the state
 # store. The token lives in an env file OUTSIDE the repo — generated
 # per-deployment, never committed (see create-lab-template).
@@ -63,6 +57,16 @@ Volume=/srv/lab/trial-env:/opt/trial-env
 # entrypoint from the repo payload, not the baked image copy — lets
 # supervisor fixes land without an image rebuild
 Volume=/srv/lab/workspace/ml-labloop/containers/mcp/entrypoint.sh:/usr/local/bin/labloop-mcp:ro
+# Liveness visibility (rc-11): marks the container unhealthy in
+# `podman ps` when episteme's loop stops answering. Quadlets do NOT
+# restart on unhealthy — the labloop-mcp-watchdog timer is the
+# operative recovery; this is signal, not remedy. The port is read
+# from the image's own ports.env at probe time so a port move can't
+# desync the check.
+HealthCmd=/bin/sh -c '. /opt/ml-scientist/ports.env; exec /usr/bin/curl -m 5 -sf http://127.0.0.1:${ML_EPISTEME_PORT}/health'
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=120s
 
 [Service]
 Restart=always

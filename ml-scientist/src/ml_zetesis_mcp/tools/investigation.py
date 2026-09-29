@@ -48,6 +48,9 @@ _REF_ID_RE = re.compile(
 
 # Prefix → claim_edges ref_type for minted derived_from edges.
 # Unrecognized prefixes are external by honesty, not by guesswork.
+# Covers every internal family anamnesis's RefType can name —
+# emitting 'external' for a known-prefix id is refused at write time
+# (misfiled_external_refs), so a prefix missing here breaks minting.
 _REF_TYPE_BY_PREFIX = {
     "trial-": "trial",
     "obs-": "observation",
@@ -57,6 +60,19 @@ _REF_TYPE_BY_PREFIX = {
     "cand-": "candidate",
     "contract-": "contract",
     "decision-": "decision",
+    "inv-": "investigation",
+    "find-": "finding",
+    "archive-": "archive",
+    "imp-": "improver",
+    "tourn-": "tournament",
+    "tres-": "tournament_result",
+    "mcp-": "proposal",
+    "mcontract-": "meta_contract",
+    "mdec-": "meta_decision",
+    "pol-": "policy_version",
+    "canary-": "canary_deployment",
+    "bundle-": "bundle",
+    "data-ref-": "dataref",
 }
 
 

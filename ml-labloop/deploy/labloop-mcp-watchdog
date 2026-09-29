@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# labloop-mcp-watchdog — restart the trusted zone when a server HANGS.
+#
+# Why this exists (incident 2026-09-29, episteme freeze):
+#   entrypoint.sh's fail-closed guard is `wait -n`, which fires only when a
+#   server *exits*; the quadlet's `Restart=always` likewise fires only on exit.
+#   A live-but-wedged process is therefore invisible to both, forever. On
+#   2026-09-29 episteme wedged on a non-terminating digest read of /dev/urandom,
+#   stopped answering on :38080/:38081/:38082, and stayed frozen ~55 min with
+#   no alarm. This closes that gap: it probes liveness, which exit-based
+#   recovery cannot do.
+#
+# WHO RUNS IT: the `mcp` service account, from its own systemd user manager --
+# the same manager that owns the lab-cnt-mcp quadlet. It can therefore restart
+# the unit.
+#
+# WHO MUST NOT RUN IT: `lab`. This is deliberate. The trusted zone is fenced
+# from the driver on purpose (see the quadlet header and SECURITY-MANUAL.md):
+# lab cannot exec into lab-cnt-mcp, cannot read /srv/lab/mcp-state, and cannot
+# kill the services. This watchdog does NOT relax that. The trusted zone gains
+# the ability to heal itself; the driver gains nothing. `labloop-exec` still
+# reaches only the hostile zone, and scientific state is still write-through-
+# MCP only.
+#
+# Install (as mcp, with linger enabled):
+#   install -m 0755 labloop-mcp-watchdog ~mcp/.local/sbin/
+#   install -m 0644 labloop-mcp-watchdog.{service,timer} \
+#           ~mcp/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now labloop-mcp-watchdog.timer
+
+set -uo pipefail
+
+# --- tunables -------------------------------------------------------------
+PROBE_TIMEOUT=5          # seconds per /health probe
+FAIL_THRESHOLD=3         # consecutive FAILED PROBES before acting
+RESTART_COOLDOWN=180     # seconds to wait after a restart (anti-thrash)
+BOOT_GRACE=180           # seconds to ignore after start (legit cold start is slow)
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/labloop"
+STAMP="$STATE_DIR/last-restart"
+
+now() { date +%s; }
+log() { printf '%s watchdog: %s\n' "$(date -u +%FT%TZ)" "$*"; }
+
+# Servers and their health ports — read from ports.env, the single source
+# of truth the container's own entrypoint.sh sources. A copy is installed
+# beside this script's config (see create-lab-template / 30-ensure); the
+# defaults below mirror today's ports.env so a missing file degrades to
+# the current layout, loudly.
+PORTS_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/labloop/ports.env"
+if [ -f "$PORTS_ENV" ]; then
+    set -a; . "$PORTS_ENV"; set +a
+    log "ports from $PORTS_ENV"
+else
+    log "NOTE: $PORTS_ENV absent — using built-in defaults"
+fi
+# The ingest port is episteme's ingest surface: a separate published port
+# served by the same process, so a wedged event loop takes it down too --
+# and if it alone is stuck the zone is not trustworthy.
+PORTS=(
+    "${ML_AGORA_PORT:-38050}"
+    "${ML_ARETE_PORT:-38060}"
+    "${ML_ZETESIS_PORT:-38070}"
+    "${ML_EPISTEME_PORT:-38080}"
+    "${ML_EPISTEME_INGEST_PORT:-38082}"
+    "${ML_ANAMNESIS_PORT:-38090}"
+)
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+# --- boot grace -----------------------------------------------------------
+# Do not second-guess a container that is still coming up. entrypoint.sh gates
+# on up to 60s of /health per upstream, and the image pull alone can take
+# minutes, so a cold start legitimately looks like a total outage.
+uptime_s=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+if [ "${uptime_s:-0}" -lt "$BOOT_GRACE" ]; then
+    log "within boot grace (uptime ${uptime_s}s < ${BOOT_GRACE}s) — not acting"
+    exit 0
+fi
+
+# --- cooldown -------------------------------------------------------------
+if [ -f "$STAMP" ]; then
+    last=$(cat "$STAMP" 2>/dev/null || echo 0)
+    age=$(( $(now) - last ))
+    if [ "$age" -lt "$RESTART_COOLDOWN" ]; then
+        log "restarted ${age}s ago (cooldown ${RESTART_COOLDOWN}s) — not acting"
+        exit 0
+    fi
+fi
+
+# --- probe ----------------------------------------------------------------
+# Record failures in a counter file so the threshold spans separate runs. This
+# is what makes it robust against a single slow probe: the decision needs
+# FAIL_THRESHOLD consecutive bad observations, not one bad one.
+COUNTER="$STATE_DIR/consecutive-failures"
+
+dead=()
+for p in "${PORTS[@]}"; do
+    if curl -m "$PROBE_TIMEOUT" -sf -o /dev/null "http://127.0.0.1:${p}/health"; then
+        printf '%-6s ok\n' "$p" >&2
+    elif ss -ltn "sport = :$p" 2>/dev/null | grep -q LISTEN; then
+        # Distinguish "wedged" from "gone": a closed port means the container is
+        # down (exit-based recovery already handles that); a port that is still
+        # LISTENing but never replies is the hang this script exists to catch.
+        # One probe only -- a second curl would just burn another full timeout.
+        printf '%-6s FAIL %s\n' "$p" "wedged (listening, no reply)" >&2
+        dead+=("$p:wedged")
+    else
+        printf '%-6s FAIL %s\n' "$p" "not listening" >&2
+        dead+=("$p:gone")
+    fi
+done
+
+if [ "${#dead[@]}" -eq 0 ]; then
+    rm -f "$COUNTER"
+    log "all ${#PORTS[@]} servers healthy — counter cleared"
+    exit 0
+fi
+
+fails=0
+[ -f "$COUNTER" ] && fails=$(cat "$COUNTER" 2>/dev/null || echo 0)
+fails=$(( fails + 1 ))
+echo "$fails" > "$COUNTER"
+
+if [ "$fails" -lt "$FAIL_THRESHOLD" ]; then
+    log "unhealthy (${#dead[@]}/${#PORTS[@]}: ${dead[*]}) — failure ${fails}/${FAIL_THRESHOLD}, not acting yet"
+    exit 0
+fi
+
+# --- act ------------------------------------------------------------------
+log "unhealthy ${fails}/${FAIL_THRESHOLD} consecutive rounds: ${dead[*]}"
+log "no server process exited, so entrypoint.sh's 'wait -n' guard and the
+quadlet's Restart=always never fired — this is the hang case. Restarting zone."
+
+date +%s > "$STAMP" 2>/dev/null || true
+if systemctl --user restart lab-cnt-mcp; then
+    log "restart issued; clearing counter"
+    rm -f "$COUNTER"
+else
+    log "RESTART FAILED — leaving counter armed so the next round retries"
+    exit 1
+fi

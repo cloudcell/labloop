@@ -8,6 +8,12 @@
 #   ./30-ensure-lab-tools.sh <vm>     one VM
 #   ./30-ensure-lab-tools.sh all      every running lab-vm-*
 #
+#   --rebuild-mcp-image   also restage the ml-scientist build context
+#                         and `podman build` lab-img-mcp as mcp on the
+#                         VM, then restart lab-cnt-mcp — the roll path
+#                         for server-code fixes (the image is local,
+#                         restart alone does NOT pick up new code)
+#
 # Why this exists: clones made from a template built BEFORE a tooling
 # change carry the old stack (no labloop-export, no /incoming mount).
 # New templates bake everything in via create-lab-template; this is the
@@ -19,7 +25,11 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 die()  { echo "30-ensure: $*" >&2; exit 1; }
 note() { echo "  ==> $*"; }
 
-TARGET=${1:?"usage: ./30-ensure-lab-tools.sh <vm>|all"}
+REBUILD_IMAGE=0
+for a in "$@"; do
+    [ "$a" = "--rebuild-mcp-image" ] && REBUILD_IMAGE=1
+done
+TARGET=${1:?"usage: ./30-ensure-lab-tools.sh <vm>|all [--rebuild-mcp-image]"}
 id -nG | grep -qw libvirt || exec sg libvirt -c "$0 $*"
 
 # labloop.conf carries the display target too — the ensure path renders
@@ -94,6 +104,45 @@ qga_push() {
     return 2
 }
 
+rebuild_mcp_image() {
+    local vm=$1
+    # Same sanitize+stage as create-lab-template's $WORK/mcp context:
+    # .git/docs/*.md stay host-side; README.md is re-stubbed because
+    # pyproject declares it. Image=lab-img-mcp is a LOCAL image in
+    # mcp's rootless podman — the only way new server code reaches the
+    # zone is an in-place build + container restart here.
+    local ML_SCIENTIST="${ML_SCIENTIST:-$REPO/../ml-scientist}"
+    [ -f "$ML_SCIENTIST/pyproject.toml" ] && [ -d "$ML_SCIENTIST/src" ] \
+        || { echo "  FAIL: ML_SCIENTIST=$ML_SCIENTIST is not a checkout"; return 1; }
+    note "staging sanitized ml-scientist build context"
+    rm -rf "$WORK/mcp"; mkdir -p "$WORK/mcp/ml-scientist"
+    tar -C "$ML_SCIENTIST" --exclude='./.git' --exclude='./docs' -cf - . \
+        | tar -xf - -C "$WORK/mcp/ml-scientist"
+    find "$WORK/mcp/ml-scientist" -name '*.md' -delete
+    printf '# ml-scientist\n\nMCP runtime sources (documentation stripped).\n' \
+        > "$WORK/mcp/ml-scientist/README.md"
+    cp "$REPO/containers/mcp/Containerfile" \
+       "$REPO/containers/mcp/entrypoint.sh" "$WORK/mcp/"
+    tar -C "$WORK/mcp" -cf "$WORK/mcp-ctx.tar" .
+    note "pushing context + building lab-img-mcp as mcp (minutes)"
+    qga_push "$vm" "$WORK/mcp-ctx.tar" /tmp/mcp-ctx.tar \
+        || { echo "  FAIL: context push"; return 1; }
+    qga_exec "$vm" "
+        mkdir -p /home/mcp/build/mcp &&
+        tar -xf /tmp/mcp-ctx.tar -C /home/mcp/build/mcp &&
+        rm -f /tmp/mcp-ctx.tar &&
+        chown -R mcp:mcp /home/mcp/build &&
+        su - mcp -c 'podman build -t lab-img-mcp \
+            -f /home/mcp/build/mcp/Containerfile /home/mcp/build/mcp' &&
+        rm -rf /home/mcp/build" \
+        || { echo "  FAIL: image build"; return 1; }
+    note "restarting lab-cnt-mcp on rebuilt image"
+    qga_exec "$vm" "su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+        systemctl --user restart lab-cnt-mcp'" \
+        || { echo "  FAIL: restart"; return 1; }
+    echo "  image rebuilt + zone restarted"
+}
+
 ensure_vm() {
     local vm=$1
     echo; echo "### $vm"
@@ -129,10 +178,33 @@ ensure_vm() {
         "$REPO/deploy/quadlets/lab-cnt-exp.container" \
         > "$WORK/lab-cnt-exp.container"
     qga_push "$vm" "$WORK/lab-cnt-exp.container" /tmp/ensure-lab-cnt-exp.container
+    # render the mcp quadlet's publish block from ports.env — the file
+    # is a template (@MCP_PORTS_PUBLISH@); pushing it verbatim would
+    # leave an unexpanded placeholder in the guest's quadlet.
+    local ML_SCIENTIST="${ML_SCIENTIST:-$REPO/../ml-scientist}"
+    ( set -a; . "$ML_SCIENTIST/ports.env"; set +a
+      grep -oE '^ML_[A-Z_]+_PORT' "$ML_SCIENTIST/ports.env" \
+          | while read -r v; do
+                printf 'PublishPort=127.0.0.1:%s:%s\n' "${!v}" "${!v}"
+            done ) > "$WORK/mcp-ports.publish"
+    sed -e "/^@MCP_PORTS_PUBLISH@\$/r $WORK/mcp-ports.publish" \
+        -e "/^@MCP_PORTS_PUBLISH@\$/d" \
+        "$REPO/deploy/quadlets/lab-cnt-mcp.container" \
+        > "$WORK/lab-cnt-mcp.container"
     qga_push "$vm" \
-        "$REPO/deploy/quadlets/lab-cnt-mcp.container" /tmp/ensure-lab-cnt-mcp.container
+        "$WORK/lab-cnt-mcp.container" /tmp/ensure-lab-cnt-mcp.container
     qga_push "$vm" \
         "$REPO/containers/mcp/entrypoint.sh" /tmp/ensure-entrypoint.sh
+    qga_push "$vm" \
+        "$REPO/deploy/labloop-mcp-watchdog" /tmp/ensure-watchdog
+    qga_push "$vm" \
+        "$REPO/deploy/quadlets/labloop-mcp-watchdog.service" \
+        /tmp/ensure-watchdog.service
+    qga_push "$vm" \
+        "$REPO/deploy/quadlets/labloop-mcp-watchdog.timer" \
+        /tmp/ensure-watchdog.timer
+    qga_push "$vm" \
+        "$ML_SCIENTIST/ports.env" /tmp/ensure-ports.env
 
     # diagnostics reports from the sibling ml-scientist checkout ->
     # ~/Desktop/diagnostics (they are *.md — the workspace payload's
@@ -202,10 +274,21 @@ ensure_vm() {
         test -d /var/lib/labloop-export/user &&
         test -d /var/lib/labloop-export/root &&
         test -d /srv/lab/incoming &&
+        cmp -s /tmp/ensure-watchdog /home/mcp/.local/sbin/labloop-mcp-watchdog &&
+        cmp -s /tmp/ensure-watchdog.service \
+               /home/mcp/.config/systemd/user/labloop-mcp-watchdog.service &&
+        cmp -s /tmp/ensure-watchdog.timer \
+               /home/mcp/.config/systemd/user/labloop-mcp-watchdog.timer &&
+        cmp -s /tmp/ensure-ports.env \
+               /home/mcp/.config/labloop/ports.env &&
+        su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+            systemctl --user is-enabled --quiet labloop-mcp-watchdog.timer' \
+            >/dev/null 2>&1 &&
         su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
             podman exec lab-cnt-mcp /opt/trial-env/bin/python -c \"import numpy\"' \
             >/dev/null 2>&1$diag_cmp" >/dev/null 2>&1 || need=1
-    [ "$need" = 0 ] && { echo "  already current"; return 0; }
+    [ "$need" = 0 ] && [ "$REBUILD_IMAGE" = 0 ] \
+        && { echo "  already current"; return 0; }
 
     note "installing (root side)"
     qga_exec "$vm" "
@@ -328,6 +411,54 @@ ensure_vm() {
             || echo "  warn: mcp quadlet install/restart failed"
     else
         echo "  mcp quadlet already current"
+    fi
+
+    # trusted-zone liveness watchdog (rc-11): exit-based recovery cannot
+    # see a hang — this timer probes /health and restarts the zone on
+    # sustained failure. mcp-owned; `lab` must not reach it.
+    changed=$(qga_exec "$vm" "
+        if cmp -s /tmp/ensure-watchdog \
+                  /home/mcp/.local/sbin/labloop-mcp-watchdog 2>/dev/null &&
+           cmp -s /tmp/ensure-watchdog.service \
+                  /home/mcp/.config/systemd/user/labloop-mcp-watchdog.service \
+                  2>/dev/null &&
+           cmp -s /tmp/ensure-watchdog.timer \
+                  /home/mcp/.config/systemd/user/labloop-mcp-watchdog.timer \
+                  2>/dev/null &&
+           cmp -s /tmp/ensure-ports.env \
+                  /home/mcp/.config/labloop/ports.env 2>/dev/null &&
+           su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+               systemctl --user is-enabled --quiet labloop-mcp-watchdog.timer' \
+               >/dev/null 2>&1; then
+            echo same
+        else echo changed; fi" | tr -d '[:space:]')
+    if [ "$changed" = changed ]; then
+        note "watchdog missing/drifted — installing + enabling as mcp"
+        qga_exec "$vm" "
+            install -d -m 0755 -o mcp -g mcp /home/mcp/.local/sbin \
+                /home/mcp/.local/state/labloop \
+                /home/mcp/.config/systemd/user /home/mcp/.config/labloop &&
+            install -m 0644 -o mcp -g mcp /tmp/ensure-ports.env \
+                /home/mcp/.config/labloop/ports.env &&
+            install -m 0755 -o mcp -g mcp /tmp/ensure-watchdog \
+                /home/mcp/.local/sbin/labloop-mcp-watchdog &&
+            install -m 0644 -o mcp -g mcp /tmp/ensure-watchdog.service \
+                /home/mcp/.config/systemd/user/labloop-mcp-watchdog.service &&
+            install -m 0644 -o mcp -g mcp /tmp/ensure-watchdog.timer \
+                /home/mcp/.config/systemd/user/labloop-mcp-watchdog.timer &&
+            su - mcp -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u);
+                systemctl --user daemon-reload &&
+                systemctl --user enable --now labloop-mcp-watchdog.timer'" \
+            || echo "  warn: watchdog install/enable failed"
+    else
+        echo "  watchdog already current + enabled"
+    fi
+
+    # --rebuild-mcp-image: restage + build + restart. Runs BEFORE the
+    # trial-env check so that block's `podman exec` targets the new
+    # container (and its restart is not duplicated).
+    if [ "$REBUILD_IMAGE" = 1 ]; then
+        rebuild_mcp_image "$vm" || echo "  warn: image rebuild failed"
     fi
 
     # trial interpreter env: /srv/lab/trial-env is volume-mounted at

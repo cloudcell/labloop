@@ -91,12 +91,17 @@ PART D — close ordering and the frozen trail
 15. close_campaign on a campaign missing one arm's score result →
     refused ("both arms must run"). Then close each campaign after
     both results recorded → promotion_score reported.
-16. After close: pull_campaign_evidence → refused, the campaign's
-    promotion_score and evidence trail are frozen. Report verbatim.
+16. After close: pull_campaign_evidence → ACCEPTED. Close freezes
+    results and score, not consultation — pulls stay legal while the
+    verdict is pending (the erefs are what the verdict cites). A
+    refusal here contradicts the documented contract; a refusal only
+    becomes correct after step 17's verdict lands. Report verbatim.
 17. record_promotion_verdict WITHOUT a campaign-scoped eref →
     refused. With the erefs from step 14 → decision + minted claim.
     Report the claim_id.
 18. spawn_campaign_programme on the now-closed campaign → refused.
+18b. Post-verdict pull_campaign_evidence → refused (decision_id set —
+    consultation ended with the verdict). Report verbatim.
 
 PART E — honest bookkeeping
 
