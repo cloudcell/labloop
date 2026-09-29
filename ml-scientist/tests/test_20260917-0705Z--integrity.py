@@ -656,14 +656,18 @@ def test_finalize_empty_output_marks_failed(store):
 
     _seed(store)
     store.update_trial_status("trial-t1", "running")
-    res = _finalize_trial(store, "trial-t1", "").structured_content
+    res = asyncio.run(
+        _finalize_trial(store, "trial-t1", "")
+    ).structured_content
     assert res["status"] == "failed"
     assert store.get_trial("trial-t1").status.value == "failed"
 
     # Same for a payload with no execution verdict
     store.create_trial(_trial("prog-t1", "hyp-t1", "trial-t2"))
     store.update_trial_status("trial-t2", "running")
-    res = _finalize_trial(store, "trial-t2", "{}").structured_content
+    res = asyncio.run(
+        _finalize_trial(store, "trial-t2", "{}")
+    ).structured_content
     assert res["status"] == "failed"
 
 

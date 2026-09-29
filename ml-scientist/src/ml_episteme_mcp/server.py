@@ -21,6 +21,8 @@ depends on roles; the adaptor maps roles to concrete MCP servers.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 
 from mcp.server.mcpserver import MCPServer
@@ -44,6 +46,7 @@ def create_server(
     claims_config: dict | None = None,
     session_config: dict | None = None,
     enforcement_config: dict | None = None,
+    server_config: dict | None = None,
 ) -> MCPServer:
     """Create an MCPServer instance with all tools, resources, and prompts
     registered against the given state store and adaptor.
@@ -76,6 +79,40 @@ def create_server(
                 raise
 
         mcp.call_tool = _logged_call_tool
+
+    # Per-call response deadline ([server] tool_deadline_seconds,
+    # default 120; <=0 disables). A wedged tool once froze the whole
+    # loop — every port listened, nothing answered. The deadline is a
+    # response bound, not an abort: the handler runs under
+    # asyncio.shield because cancelling it could unwind mid-write and
+    # leave the store's implicit transaction dangling (and a pure-sync
+    # spin ignores cancellation anyway — the VM watchdog is the floor
+    # for that). What the client gets on expiry is a named error it
+    # can reason about: deadline_exceeded.
+    tool_deadline = float(
+        (server_config or {}).get("tool_deadline_seconds", 120.0)
+    )
+    if tool_deadline > 0:
+        _inner_call_tool = mcp.call_tool
+
+        async def _deadlined_call_tool(name, arguments, context=None):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(
+                        _inner_call_tool(name, arguments, context)
+                    ),
+                    tool_deadline,
+                )
+            except TimeoutError:
+                from .tools.schemas import fail
+                return fail(json.dumps({
+                    "error": (
+                        f"deadline_exceeded — {name} exceeded "
+                        f"{tool_deadline:g}s"
+                    )
+                }))
+
+        mcp.call_tool = _deadlined_call_tool
 
     # Register tools — one module per entity group
     from .tools import assessment, belief, candidate, data, hypothesis, observation, programme, trial

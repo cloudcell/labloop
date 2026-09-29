@@ -148,13 +148,15 @@ class TestFinalizeTerminalProjection:
         store.update_trial_status(
             tid, "retryable", reason="superseded mid-run"
         )
-        res = _finalize_trial(
-            store,
-            tid,
-            json.dumps({
-                "status": "completed", "exit_code": 0,
-                "duration_seconds": 120.073,
-            }),
+        res = asyncio.run(
+            _finalize_trial(
+                store,
+                tid,
+                json.dumps({
+                    "status": "completed", "exit_code": 0,
+                    "duration_seconds": 120.073,
+                }),
+            )
         ).structured_content
 
         for key in (
@@ -179,8 +181,10 @@ class TestFinalizeTerminalProjection:
             tid, "retryable", reason="infra flake"
         )
         out = json.dumps({"status": "completed", "exit_code": 0})
-        _finalize_trial(store, tid, out)
-        res = _finalize_trial(store, tid, out).structured_content
+        asyncio.run(_finalize_trial(store, tid, out))
+        res = asyncio.run(
+            _finalize_trial(store, tid, out)
+        ).structured_content
         assert res["status"] == "retryable"
         assert res["retry_reason"] == "infra flake"
 

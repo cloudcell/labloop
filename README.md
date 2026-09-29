@@ -1,4 +1,4 @@
-# LabLoop™: your AI scientist
+# LabLoop: your AI scientist
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
 

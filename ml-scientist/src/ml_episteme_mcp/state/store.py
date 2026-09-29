@@ -32,6 +32,12 @@ from .models import (
 
 T = TypeVar("T")
 
+# finalize capture digests every path a trial opened — an unbounded
+# read on a non-regular file once froze the loop for ~55 min. The cap
+# plus the regularity check in _digest_or_reason make a pathological
+# path a manifest row with a reason, never a hang.
+MAX_DIGEST_BYTES = 64 * 1024 * 1024
+
 
 def _find_local_imports(
     tree: "ast.AST", base_dir: Path, roots: "tuple[Path, ...]" = ()
@@ -2792,12 +2798,81 @@ class StateStore:
                         if s.endswith(".py"):
                             observed.setdefault(s, {"write": False})
 
-        def _digest_file(rp: Path) -> str:
+        def _digest_or_reason(
+            rp: Path,
+        ) -> tuple[str | None, int | None, str | None]:
+            """Bounded digest — returns (sha256, size_bytes, reason).
+
+            A trial can name any path it opened — including
+            non-regular files. Unconditionally streaming the path
+            here once froze the loop for ~55 min on /dev/urandom
+            (a character device never yields EOF). The digest is
+            therefore fail-honest, never partial:
+
+            - non-regular (device, FIFO, socket, directory) →
+              ``(None, None, "not a regular file …")`` — the
+              ``.py``/overlay rows check regularity elsewhere; this
+              check is for input_data/other rows where a device is
+              legitimate to name but impossible to digest;
+            - ``st_size`` over the cap, or the file grows past the
+              cap mid-read → ``(None, None, "exceeds digest cap …")``
+              — a truncated hash looks real and matches nothing;
+              ``null + reason`` is the honest row;
+            - unreadable → the pre-existing
+              "not readable at finalize" reason shape.
+            """
+            import os
+            import stat as _stat
+
+            try:
+                st = os.stat(rp)  # follows symlinks
+            except OSError as e:
+                return (
+                    None, None,
+                    f"not readable at finalize: "
+                    f"{e.__class__.__name__}",
+                )
+            if not _stat.S_ISREG(st.st_mode):
+                return (
+                    None, None,
+                    f"not a regular file "
+                    f"({_stat.filemode(st.st_mode)}) — not digested",
+                )
+            if st.st_size > MAX_DIGEST_BYTES:
+                return (
+                    None, None,
+                    f"exceeds digest cap "
+                    f"({MAX_DIGEST_BYTES // (1024 * 1024)} MiB) — "
+                    "not digested",
+                )
             h = hashlib.sha256()
-            with open(rp, "rb") as fh:
-                for chunk in iter(lambda: fh.read(65536), b""):
-                    h.update(chunk)
-            return "sha256:" + h.hexdigest()
+            read = 0
+            try:
+                with open(rp, "rb") as fh:
+                    while True:
+                        chunk = fh.read(
+                            min(65536, MAX_DIGEST_BYTES + 1 - read)
+                        )
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                        read += len(chunk)
+                        if read > MAX_DIGEST_BYTES:
+                            # Grew past the stat'd size mid-read —
+                            # a truncated hash is worse than none.
+                            return (
+                                None, None,
+                                f"exceeds digest cap "
+                                f"({MAX_DIGEST_BYTES // (1024 * 1024)}"
+                                " MiB) — not digested",
+                            )
+            except OSError as e:
+                return (
+                    None, None,
+                    f"not readable at finalize: "
+                    f"{e.__class__.__name__}",
+                )
+            return "sha256:" + h.hexdigest(), st.st_size, None
 
         captured = []
         for raw_path, flags in sorted(observed.items()):
@@ -2863,12 +2938,13 @@ class StateStore:
                         "sha256": cs.code_hash,
                         "size_bytes": cs.size_bytes,
                     }
-                    try:
-                        host_hash = _digest_file(rp)
-                    except OSError:
-                        host_hash = None
+                    host_hash, _host_size, host_reason = (
+                        _digest_or_reason(rp)
+                    )
                     if host_hash is not None and host_hash != cs.code_hash:
                         entry["host_sha256"] = host_hash
+                    if host_reason is not None:
+                        entry["host_reason"] = host_reason
                     captured.append(entry)
                     continue
                 if not rp.is_file():
@@ -2901,16 +2977,11 @@ class StateStore:
                 entry["size_bytes"] = None
                 entry["reason"] = "directory — not digested"
             else:
-                try:
-                    entry["sha256"] = _digest_file(rp)
-                    entry["size_bytes"] = rp.stat().st_size
-                except OSError as e:
-                    entry["sha256"] = None
-                    entry["size_bytes"] = None
-                    entry["reason"] = (
-                        f"not readable at finalize: "
-                        f"{e.__class__.__name__}"
-                    )
+                sha, size, reason = _digest_or_reason(rp)
+                entry["sha256"] = sha
+                entry["size_bytes"] = size
+                if reason is not None:
+                    entry["reason"] = reason
             captured.append(entry)
 
         manifest = {
@@ -2946,16 +3017,20 @@ class StateStore:
             for fp in [*logs, manifest_path]:
                 if fp.name in listed or not fp.is_file():
                     continue
-                arts.append({
+                art_entry = {
                     "id": f"art-{uuid.uuid4().hex[:8]}",
                     "type": (
                         "read_trace" if fp.name.endswith(".strace")
                         else "executed_code"
                     ),
                     "filename": fp.name,
-                    "sha256": _digest_file(fp),
-                    "size_bytes": fp.stat().st_size,
-                })
+                }
+                sha, size, reason = _digest_or_reason(fp)
+                art_entry["sha256"] = sha
+                art_entry["size_bytes"] = size
+                if reason is not None:
+                    art_entry["reason"] = reason
+                arts.append(art_entry)
             mdata["input_files"] = [
                 f for f in captured
                 if f["role"] in ("input_data", "sealed")

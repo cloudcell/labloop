@@ -329,7 +329,7 @@ def _last_json_line(text: str) -> dict | None:
     return None
 
 
-def _finalize_trial(
+async def _finalize_trial(
     store: StateStore,
     trial_id: str,
     output: str,
@@ -408,15 +408,21 @@ def _finalize_trial(
         # Capture artifacts even for failed trials (logs are evidence of failure)
         artifact_result = None
         if trial is not None and trial.artifact_path:
+            # Off the event loop: the capture digests and gzips real
+            # files — a sync call here once froze the loop for ~55 min.
+            # One to_thread per capture keeps each capture a single
+            # unit — no await can interleave inside it.
             try:
-                store.capture_executed_code(
+                await asyncio.to_thread(
+                    store.capture_executed_code,
                     trial_id, trial.artifact_path,
                     sealed_patterns=sealed_patterns,
                 )
             except Exception:
                 pass  # evidence capture must never mask finalization
             try:
-                artifact_result = store.capture_artifacts_from_dir(
+                artifact_result = await asyncio.to_thread(
+                    store.capture_artifacts_from_dir,
                     trial_id, trial.artifact_path
                 )
             except Exception as e:
@@ -461,15 +467,19 @@ def _finalize_trial(
     # manifest it writes is captured as a trial artifact too.
     artifact_result = None
     if trial is not None and trial.artifact_path:
+        # Off the event loop, one capture per thread — see the
+        # failed branch above for why sync capture is unsafe here.
         try:
-            store.capture_executed_code(
+            await asyncio.to_thread(
+                store.capture_executed_code,
                 trial_id, trial.artifact_path,
                 sealed_patterns=sealed_patterns,
             )
         except Exception:
             pass
         try:
-            artifact_result = store.capture_artifacts_from_dir(
+            artifact_result = await asyncio.to_thread(
+                store.capture_artifacts_from_dir,
                 trial_id, trial.artifact_path
             )
         except Exception as e:
@@ -512,7 +522,7 @@ async def _auto_finalize(
             async_output = adaptor.executor.get_async_status(trial_id)
             async_data = _parse_executor_output(async_output)
             if async_data.get("status") in ("completed", "failed", "timeout"):
-                _finalize_trial(
+                await _finalize_trial(
                     store, trial_id, async_output,
                     sealed_patterns=sealed_patterns,
                 )
@@ -1224,7 +1234,7 @@ def register(
                     "trial_id": trial_id,
                     "status": fresh.status.value,
                 })
-            return _finalize_trial(
+            return await _finalize_trial(
                 store, trial_id, output,
                 sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
             )
@@ -1265,7 +1275,7 @@ def register(
             if async_data.get("status") in ("completed", "failed", "timeout"):
                 # Trial finished in background — finalize it (persists
                 # executor_output, captures artifacts)
-                return _finalize_trial(
+                return await _finalize_trial(
                     store, trial_id, async_output,
                     sealed_patterns=_exec_cfg.get("sealed_path_patterns"),
                 )

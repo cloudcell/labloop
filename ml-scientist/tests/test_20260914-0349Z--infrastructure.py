@@ -261,7 +261,7 @@ class TestAutoFinalization:
         store.update_trial_status("trial-infra1", "completed")
         # Calling _finalize_trial again should not raise
         output = json.dumps({"status": "completed", "exit_code": 0})
-        result = _finalize_trial(store, "trial-infra1", output)
+        result = await _finalize_trial(store, "trial-infra1", output)
         data = result.structured_content
         assert data["status"] == "completed"
 
@@ -317,7 +317,7 @@ class TestAutoFinalization:
         store.update_trial_status("trial-infra1", "completed")
         # Try to finalize again — should be idempotent, not raise
         output = json.dumps({"status": "completed", "exit_code": 0})
-        result = _finalize_trial(store, "trial-infra1", output)
+        result = await _finalize_trial(store, "trial-infra1", output)
         data = result.structured_content
         assert data["status"] == "completed"
 

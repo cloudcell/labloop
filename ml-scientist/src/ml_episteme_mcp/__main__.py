@@ -282,6 +282,7 @@ Examples:
         claims_config=config.get("claims", {}),
         session_config=config.get("session", {}),
         enforcement_config=config.get("enforcement", {}),
+        server_config=config.get("server", {}),
     )
 
     async def _run_server(coro):

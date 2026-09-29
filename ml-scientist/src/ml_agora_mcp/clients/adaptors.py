@@ -221,7 +221,20 @@ async def run_connectivity_supervisor(
                 continue
             spec.attempts += 1
             try:
-                await spec.adaptor.connect()
+                # The handshake must be deadline-bounded: a peer that
+                # listens but never answers (a wedged event loop looks
+                # exactly like this) would park the supervisor mid-
+                # connect forever — 'down' never reached, recovery
+                # never noticed.
+                await asyncio.wait_for(
+                    spec.adaptor.connect(), probe_timeout_seconds
+                )
+            except TimeoutError:
+                spec.mark_down(
+                    "connect timed out — upstream listening but "
+                    "not answering"
+                )
+                continue
             except Exception as e:
                 spec.mark_down(describe_error(e))
                 continue
