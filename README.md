@@ -1,4 +1,4 @@
-# LabLoop™: a research automation environment for empirical work
+# LabLoop™: your AI scientist that learns from experiments
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
 
