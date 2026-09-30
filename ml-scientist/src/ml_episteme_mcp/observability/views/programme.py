@@ -358,7 +358,7 @@ def render_hypothesis_detail(
     programme {escape(h.programme_id)}</a></p>
     <h1>Hypothesis {escape(h.id)}</h1>
     <p>{render_status_badge(h.status.value)}
-    &nbsp;·&nbsp; created {escape(format_timestamp(h.created_at))}</p>
+    &nbsp;·&nbsp; created {format_timestamp(h.created_at)}</p>
     <h2>Statement</h2>
     <p style="white-space: pre-wrap">{escape(statement)}</p>
     {trunc_note if stmt_trunc else ""}

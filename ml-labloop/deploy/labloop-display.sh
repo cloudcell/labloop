@@ -29,10 +29,15 @@ mode="${X}x${Y}"
 # leave the X screen's panning region at the OLD geometry — the display
 # flips to the new resolution but the pointer stays clamped inside the
 # old box ("mouse acts as if it's in the old resolution").
+# 1% tolerance: EDID timings for a nominal rate are fractional (74.94
+# for "75", 59.94 for "60"). Match the injected modeline name too so a
+# re-run after a previous injection still resolves instead of
+# needlessly re-adding a duplicate mode.
 match=""
-for r in $(xrandr 2>/dev/null | awk -v m="$mode" \
-        '$1==m {for (i=2;i<=NF;i++){gsub(/[*+]/,"",$i); print $i}}'); do
-    if awk -v a="$r" -v b="$HZ" 'BEGIN{exit !(a-b<0.5 && b-a<0.5)}'; then
+for r in $(xrandr 2>/dev/null | awk -v m="$mode" -v n="${mode}_${HZ}" \
+        '($1==m || $1==n) {for (i=2;i<=NF;i++){gsub(/[*+]/,"",$i); print $i}}'); do
+    if awk -v a="$r" -v b="$HZ" \
+            'BEGIN{d=a-b; if(d<0)d=-d; exit !(d <= b*0.01)}'; then
         match="$r"; break
     fi
 done
