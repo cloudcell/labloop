@@ -727,7 +727,9 @@ fi
 if [ -n "$vsix_list" ]; then
     for v in $vsix_list; do
         qga "curl -fsS -o '/tmp/$v' '$CACHE_URL/pkgs/$v'"
-        qga_lab "codium --install-extension '/tmp/$v' && rm -f '/tmp/$v'"
+        # the rm must run as root — /tmp is sticky (1777), so lab cannot
+        # delete a root-owned file: 'Operation not permitted'
+        qga_lab "codium --install-extension '/tmp/$v'" && qga "rm -f '/tmp/$v'"
     done
 else
     qga_lab "codium --install-extension ZooCodeOrganization.zoo-code && \
