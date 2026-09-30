@@ -579,7 +579,7 @@ if [ "$CACHE_UP" = 1 ] && compgen -G "$CACHE_ROOT/wheels/trial-env/*.whl" >/dev/
     whl_list="$(ls "$CACHE_ROOT"/wheels/trial-env | tr '\n' ' ')"
     qga "install -d -m 0755 -o mcp -g mcp /srv/lab/trial-env /srv/lab/wheelhouse && \
          cd /srv/lab/wheelhouse && \
-         for w in $whl_list; do curl -fsS -o \"\$w\" '$CACHE_URL/wheels/trial-env/\$w' || exit 1; done && \
+         for w in $whl_list; do curl -fsS -o \"\$w\" \"$CACHE_URL/wheels/trial-env/\$w\" || exit 1; done && \
          chown -R mcp:mcp /srv/lab/wheelhouse && \
          su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
              -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
@@ -772,7 +772,7 @@ note "uv system-wide + duckduckgo-search deps warmed"
 if [ "$CACHE_UP" = 1 ] && compgen -G "$CACHE_ROOT/wheels/uvx/uv-*.whl" >/dev/null; then
     uvx_list="$(ls "$CACHE_ROOT"/wheels/uvx | tr '\n' ' ')"
     qga "mkdir -p /tmp/uvx-wheels && cd /tmp/uvx-wheels && \
-         for w in $uvx_list; do curl -fsS -o \"\$w\" '$CACHE_URL/wheels/uvx/\$w' || exit 1; done && \
+         for w in $uvx_list; do curl -fsS -o \"\$w\" \"$CACHE_URL/wheels/uvx/\$w\" || exit 1; done && \
          chown -R lab:lab /tmp/uvx-wheels"
     qga_lab "pipx install /tmp/uvx-wheels/uv-*.whl"
     qga_lab "timeout 120 ~/.local/bin/uvx --no-index --find-links /tmp/uvx-wheels \
