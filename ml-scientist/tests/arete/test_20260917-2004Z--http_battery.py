@@ -116,7 +116,7 @@ async def test_gate_walk_over_http(arete_http_server):
         "rationale": "gain 1.5 over the paired parent arm",
         "decided_by": "human:operator",
         "tournament_id": tourn, "contract_id": contract,
-        "claimed_rung": "positive",
+        "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
     })
     assert dec["claim_status"] == "minted", dec
     assert dec["claim_id"].startswith("claim-")

@@ -22,7 +22,7 @@ from ..enforcement.checks import (
     check_relation_valid,
     check_supersedes_exists,
 )
-from ..state.models import Claim, ClaimEdge, ClaimType, RefType, Relation
+from ..state.models import Claim, ClaimEdge, ClaimType, RefType, Relation, _utc_now
 from ..state.store import MemoryStore, content_hash
 from .. import _grounded_constants as _gc
 from .schemas import coerce_json, fail, ok, AssertClaimOut, GetClaimOut, GetClaimsOut, ListClaimsOut, RelateOut
@@ -51,6 +51,7 @@ def register(
         evidence: Annotated[list | str | None, Field(description='List of {to_ref, ref_type, relation} dicts linking the claim to its support (e.g. {"to_ref": "trial-abc", "ref_type": "trial", "relation": "tested_by"}); may be JSON-encoded. Without ≥1 evidence-bearing edge, confidence is capped at 0.3.')] = None,
         supersedes_id: Annotated[str | None, Field(description='ID of an existing claim this one replaces — the supersedes edge is recorded automatically.')] = None,
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity (decision/investigation) that minted this claim.')] = None,
+        valid_from: Annotated[str | None, Field(description="Optional ISO-8601 UTC validity start (e.g. '2026-01-01T00:00:00Z') — defaults to mint time. Use it to date the claim to when its evidence holds, not when the row was written. Must be ≤ valid_until when both are given.")] = None,
         valid_until: Annotated[str | None, Field(description="Optional ISO-8601 UTC expiry (e.g. '2026-12-31T00:00:00Z') — the claim's live→expired transition. Claims past valid_until are hidden from list_claims unless include_expired=true; the row is never deleted. A past timestamp mints an already-expired claim — allowed, the record says so.")] = None,
     ) -> Annotated[CallToolResult, AssertClaimOut]:
         """Assert a claim into the memory graph.
@@ -68,11 +69,11 @@ def register(
         content — re-asserting identical content returns the existing
         claim_id, and any evidence edges supplied with the
         re-assertion are still recorded on it (edges_added reports
-        how many were new). supersedes_id and valid_until are
-        mint-time fields — on a dedup hit the existing claim keeps
-        its own values. valid_until is the agent-reachable expiry:
-        claims past it leave the default list view but are never
-        deleted.
+        how many were new). supersedes_id, valid_from and
+        valid_until are mint-time fields — on a dedup hit the
+        existing claim keeps its own values. valid_until is the
+        agent-reachable expiry: claims past it leave the default
+        list view but are never deleted.
         """
         try:
             if confidence_basis is not None and (
@@ -86,23 +87,38 @@ def register(
             if evidence is not None:
                 evidence = coerce_json(evidence, list, "evidence")
 
-            if valid_until is not None:
+            for _name in ("valid_from", "valid_until"):
+                _raw = locals()[_name]
+                if _raw is None:
+                    continue
                 try:
                     _dt = datetime.fromisoformat(
-                        valid_until.replace("Z", "+00:00")
+                        _raw.replace("Z", "+00:00")
                     )
                 except (ValueError, AttributeError):
                     return fail(json.dumps({
-                        "error": f"valid_until is not ISO-8601: {valid_until!r}"
+                        "error": f"{_name} is not ISO-8601: {_raw!r}"
                     }))
                 if _dt.tzinfo is None:
                     return fail(json.dumps({
-                        "error": "valid_until must be timezone-aware "
+                        "error": f"{_name} must be timezone-aware "
                                  "(ISO-8601 UTC — e.g. 2026-12-31T00:00:00Z)"
                     }))
                 # Normalize to UTC ISO — the expiry filter compares
                 # lexicographically against +00:00-suffixed now().
-                valid_until = _dt.astimezone(timezone.utc).isoformat()
+                if _name == "valid_from":
+                    valid_from = _dt.astimezone(timezone.utc).isoformat()
+                else:
+                    valid_until = _dt.astimezone(timezone.utc).isoformat()
+            if (
+                valid_from is not None
+                and valid_until is not None
+                and valid_from > valid_until
+            ):
+                return fail(json.dumps({
+                    "error": "valid_from is after valid_until — an "
+                             "empty validity interval"
+                }))
 
             # Validate every evidence edge spec before writing
             # anything — same rules on the mint path and the
@@ -188,6 +204,7 @@ def register(
                 content_hash=chash,
                 source_id=source_id,
                 confidence_basis=confidence_basis,
+                valid_from=valid_from if valid_from is not None else _utc_now(),
                 valid_until=valid_until,
             )
 
@@ -229,7 +246,7 @@ def register(
     def relate(
         from_claim: Annotated[str, Field(description='ID of the claim the edge starts from.')],
         to_ref: Annotated[str, Field(description='Edge target — claim-typed IDs are verified; other ref types are trusted opaque IDs.')],
-        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'bundle', 'dataref', 'reference', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | bundle | dataref | reference | external.")],
+        ref_type: Annotated[Literal['claim', 'trial', 'observation', 'conclusion', 'programme', 'hypothesis', 'investigation', 'finding', 'archive', 'improver', 'tournament', 'tournament_result', 'proposal', 'meta_contract', 'meta_decision', 'policy_version', 'canary_deployment', 'candidate', 'contract', 'decision', 'bundle', 'dataref', 'reference', 'evidence_ref', 'campaign', 'campaign_spawn', 'external'], Field(description="Type of to_ref — the closed RefType vocabulary: claim | trial | observation | conclusion | programme | hypothesis | investigation | finding | archive | improver | tournament | tournament_result | proposal | meta_contract | meta_decision | policy_version | canary_deployment | candidate | contract | decision | bundle | dataref | reference | evidence_ref | campaign | campaign_spawn | external.")],
         relation: Annotated[Literal['supports', 'contradicts', 'derived_from', 'tested_by', 'valid_under', 'supersedes', 'generalizes', 'specializes', 'similar_to', 'failed_because', 'cites'], Field(description='Edge type: supports | contradicts | derived_from | tested_by | valid_under | supersedes | generalizes | specializes | similar_to | failed_because | cites.')],
         source_id: Annotated[str | None, Field(description='Provenance tag — the entity that recorded this edge.')] = None,
     ) -> Annotated[CallToolResult, RelateOut]:
@@ -240,11 +257,12 @@ def register(
         generalizes | specializes | similar_to | failed_because |
         cites.
         ref_type: the closed RefType vocabulary — claim | trial |
-        observation | conclusion | programme | investigation | finding |
-        archive | improver | tournament | tournament_result | proposal |
-        meta_contract | meta_decision | policy_version |
-        canary_deployment | candidate | contract | decision | bundle |
-        dataref | reference | external. claim-typed to_ref values are
+        observation | conclusion | programme | hypothesis |
+        investigation | finding | archive | improver | tournament |
+        tournament_result | proposal | meta_contract | meta_decision |
+        policy_version | canary_deployment | candidate | contract |
+        decision | bundle | dataref | reference | evidence_ref |
+        campaign | campaign_spawn | external. claim-typed to_ref values are
         verified; other ref types are trusted opaque IDs across the
         protocol boundary. 'external' is refused when to_ref carries a
         known internal prefix — internal ids take their own type.
@@ -417,6 +435,7 @@ def register(
                         "content": c.content,
                         "type": c.type.value,
                         "confidence": c.confidence,
+                        "confidence_basis": c.confidence_basis,
                         "valid_until": c.valid_until,
                         "supersedes_id": c.supersedes_id,
                         "created_at": c.created_at,

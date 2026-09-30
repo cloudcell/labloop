@@ -134,6 +134,11 @@ Order within the standing set matters less; group by blast radius:
   `confidence_basis` labels (requires the posterior build — a
   pre-1642Z server has no statistic at close and mints flat
   confidence literals)
+- `20260930-0032Z-rc12-regressions` — the rc-12 fix battery:
+  read-path debt exemption, null-statistic ceiling, strict-extra
+  refusal, `X://constants` parity, `valid_from`, hypothesis detail
+  view (requires the rc-12 build — a pre-fix server drops undeclared
+  args, gates `read_resource`, and has no constants resource)
 
 **Long-running / deadline-dependent**:
 - `20260929-0925Z-deadline-exceeded` — needs a ~150 s trial to cross

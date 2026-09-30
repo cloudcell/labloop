@@ -195,6 +195,40 @@ async def test_remedy_map_carries_full_discharge_path():
     } <= remedies
 
 
+async def test_read_paths_never_gated(gated_server):
+    """rc-12: read_resource sits behind the 'read_' prefix exemption —
+    debt may gate writes, never the reads that report it."""
+    from ml_arete_mcp.enforcement.recurrence import READ_PREFIXES
+
+    assert "read_" in READ_PREFIXES
+    tourn, _ = await _close_paired_tournament(gated_server)
+
+    r = await call_tool(gated_server, "read_resource", {
+        "uri": "improver://status"})
+    assert "error" not in r, r
+    r = await call_tool(gated_server, "read_resource", {
+        "uri": "improver://constants"})
+    assert "error" not in r, r
+
+
+async def test_strict_extra_args_refused(gated_server):
+    """rc-12 W6: an argument the signature does not declare is
+    refused at the dispatch boundary, not silently dropped by the
+    framework's extra=ignore argument model."""
+    r = await call_tool(gated_server, "create_meta_contract", {
+        "metrics": {"primary_metric": "g", "direction": "max"},
+        "promotion_policy": {"sesoi_d": 4.0, "target_power": 0.8,
+                             "min_evidence_rung": "not_worth"},
+        "prior": 0.5,  # belongs inside promotion_policy
+    })
+    assert "error" in r, r
+    assert "prior" in r["error"] and "undeclared" in r["error"]
+    # Reads refuse extras the same way — the check precedes gates.
+    r = await call_tool(gated_server, "list_decisions", {
+        "bogus": 1})
+    assert "error" in r and "bogus" in r["error"]
+
+
 class _NoDebt:
     """Minimal store stub — undecided_tournaments returns []"""
 

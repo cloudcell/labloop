@@ -176,15 +176,14 @@ def create_observability_app(
         return None
 
     def hypothesis_shortcut(request: Request) -> Response:
-        """Redirect /hypothesis/{id} → the programme page's hyp- anchor."""
+        """Detail page for live hypotheses; archived programmes still
+        redirect to the archive copy's hyp- anchor."""
         hid = request.path_params["hypothesis_id"]
         hyp = store.get_hypothesis(hid)
         if hyp is not None:
             if url := _archived_programme_url(hyp.programme_id):
                 return RedirectResponse(f"{url}#hyp-{hid}")
-            return RedirectResponse(
-                f"/programme/{hyp.programme_id}#hyp-{hid}"
-            )
+            return programme_views.render_hypothesis_detail(store, hid)
         return HTMLResponse(
             render_error(f"Hypothesis not found: {hid}", 404),
             status_code=404,

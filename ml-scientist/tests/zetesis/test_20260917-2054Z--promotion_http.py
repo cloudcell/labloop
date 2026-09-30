@@ -189,7 +189,7 @@ class TestCampaignOverRealLoop0:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:battery",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
-            "claimed_rung": "positive",
+            "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
         })
         assert "error" not in r, r
         assert r["decision_id"].startswith("decision-")

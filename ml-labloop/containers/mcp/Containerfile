@@ -26,6 +26,25 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /opt/ml-scientist
 COPY ml-scientist/ /opt/ml-scientist/
+
+# Build stamp — record the vendored source revision so a server's
+# status digest can prove its internals, not just its surface
+# (rc-12: a dirty working tree fingerprinted identical on tool/check
+# counts while gate internals diverged). Absent when the context is
+# not a checkout (a tarball export) — status digests then report
+# build: null, which the fingerprint step flags as its own finding.
+# NB: RUN is /bin/sh (dash).
+RUN if [ -d /opt/ml-scientist/.git ]; then \
+        rev=$(git -C /opt/ml-scientist rev-parse HEAD 2>/dev/null || echo unknown); \
+        if [ -n "$(git -C /opt/ml-scientist status --porcelain 2>/dev/null | head -1)" ]; then \
+            dirty=true; \
+        else \
+            dirty=false; \
+        fi; \
+        printf '{"rev": "%s", "dirty": %s}\n' "$rev" "$dirty" \
+            > /opt/ml-scientist/BUILD_REV; \
+    fi
+
 RUN uv sync --frozen --no-dev
 
 # git does not carry empty dirs: episteme's observability app mounts

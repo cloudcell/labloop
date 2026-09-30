@@ -13,6 +13,7 @@ emits the same shape.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 
 from ..enforcement.recurrence import TRACKER, open_violations
@@ -60,6 +61,25 @@ def _integrity_summary(store: MemoryStore) -> dict:
     }
 
 
+def _build_stamp() -> dict | None:
+    """Read BUILD_REV beside the vendored source tree — written into
+    the deployment image at build time so a status digest can prove
+    which source revision it runs (rc-12: surface fingerprints cannot
+    see gate internals). None when absent — a dev checkout is
+    unpackaged source, honestly unprovable."""
+    for parent in Path(__file__).resolve().parents:
+        f = parent / "BUILD_REV"
+        if f.is_file():
+            try:
+                d = json.loads(f.read_text())
+            except (OSError, ValueError):
+                return None
+            if isinstance(d, dict) and isinstance(d.get("rev"), str):
+                return {"rev": d["rev"],
+                        "dirty": bool(d.get("dirty", False))}
+            return None
+    return None
+
 def status_digest(store: MemoryStore) -> dict:
     """The claims-role status digest — the cross-server contract
     shape, emitted in capability posture."""
@@ -100,6 +120,7 @@ def status_digest(store: MemoryStore) -> dict:
         },
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        "build": _build_stamp(),
         "claims": {
             "total": total,
             "superseded": superseded,
@@ -117,3 +138,9 @@ def register(mcp, store: MemoryStore) -> None:
     def get_status() -> str:
         """Capability status digest — claim counts, integrity."""
         return json.dumps(status_digest(store), indent=2)
+
+    @mcp.resource("claims://constants")
+    def get_constants() -> str:
+        """Live grounded-constants registry — disclosed from the
+        running module so the audit surface is the code, not a file."""
+        return json.dumps(_gc.disclosure(), indent=2)

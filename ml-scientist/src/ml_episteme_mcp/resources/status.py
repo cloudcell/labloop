@@ -402,6 +402,25 @@ def _unsealed_archives(
     return out
 
 
+def _build_stamp() -> dict | None:
+    """Read BUILD_REV beside the vendored source tree — written into
+    the deployment image at build time so a status digest can prove
+    which source revision it runs (rc-12: surface fingerprints cannot
+    see gate internals). None when absent — a dev checkout is
+    unpackaged source, honestly unprovable."""
+    for parent in Path(__file__).resolve().parents:
+        f = parent / "BUILD_REV"
+        if f.is_file():
+            try:
+                d = json.loads(f.read_text())
+            except (OSError, ValueError):
+                return None
+            if isinstance(d, dict) and isinstance(d.get("rev"), str):
+                return {"rev": d["rev"],
+                        "dirty": bool(d.get("dirty", False))}
+            return None
+    return None
+
 def status_digest(
     store: StateStore, adaptor=None,
     stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value,
@@ -435,6 +454,7 @@ def status_digest(
         "upstream_summary": _upstream_summary(adaptor),
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        "build": _build_stamp(),
     }
     # Consultation-duty watermark — every digest consumer (status
     # resource, session resource, status_report prompt) stamps it.
@@ -459,3 +479,9 @@ def register(
             ),
             indent=2,
         )
+
+    @mcp.resource("protocol://constants")
+    def get_constants() -> str:
+        """Live grounded-constants registry — disclosed from the
+        running module so the audit surface is the code, not a file."""
+        return json.dumps(_gc.disclosure(), indent=2)

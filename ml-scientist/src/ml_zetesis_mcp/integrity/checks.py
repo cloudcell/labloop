@@ -439,28 +439,48 @@ def _check_results_spawned(store) -> dict:
     recorded result must name a programme spawned under the same
     campaign and arm — spawn-scoped attribution audited after the
     fact."""
+    # programme_id is UNIQUE in campaign_spawns — one programme can be
+    # bound to at most one campaign. The invariant is: a result's
+    # programme must be spawned under THIS campaign (arm matches), or —
+    # for campaigns with no spawns at all — never spawned anywhere.
+    # rc-12: the spawn lookup used to ignore campaign_id, so a
+    # programme bound to another campaign passed as an alibi, and
+    # spawn-less campaigns were never examined at all.
     rows = store._fetchall(
         """SELECT r.id, r.campaign_id, r.arm, r.programme_id
-           FROM campaign_results r
-           WHERE EXISTS (
-               SELECT 1 FROM campaign_spawns s
-               WHERE s.campaign_id = r.campaign_id
-           )"""
+           FROM campaign_results r"""
     )
     violations = []
     for r in rows:
         spawn = store._fetchone(
-            "SELECT arm FROM campaign_spawns WHERE programme_id = ?",
+            "SELECT campaign_id, arm FROM campaign_spawns "
+            "WHERE programme_id = ?",
             (r["programme_id"],),
         )
-        if spawn is None:
+        if spawn is not None and spawn["campaign_id"] != r["campaign_id"]:
             violations.append({
                 "result_id": r["id"],
                 "campaign_id": r["campaign_id"],
                 "programme_id": r["programme_id"],
-                "problem": "programme not spawned under this campaign",
+                "problem": f"programme is spawn-bound to campaign "
+                           f"{spawn['campaign_id']}, not this campaign",
             })
-        elif spawn["arm"] != r["arm"]:
+            continue
+        if spawn is None:
+            camp_has_spawns = store._fetchone(
+                "SELECT 1 FROM campaign_spawns WHERE campaign_id = ? "
+                "LIMIT 1",
+                (r["campaign_id"],),
+            )
+            if camp_has_spawns is not None:
+                violations.append({
+                    "result_id": r["id"],
+                    "campaign_id": r["campaign_id"],
+                    "programme_id": r["programme_id"],
+                    "problem": "programme not spawned under this campaign",
+                })
+            continue
+        if spawn["arm"] != r["arm"]:
             violations.append({
                 "result_id": r["id"],
                 "campaign_id": r["campaign_id"],

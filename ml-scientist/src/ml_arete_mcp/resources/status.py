@@ -13,6 +13,7 @@ emits the same shape.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 
 from ..enforcement import recurrence
@@ -329,6 +330,25 @@ def _improvement_due_rec(store: ImproverStore) -> dict | None:
     }
 
 
+def _build_stamp() -> dict | None:
+    """Read BUILD_REV beside the vendored source tree — written into
+    the deployment image at build time so a status digest can prove
+    which source revision it runs (rc-12: surface fingerprints cannot
+    see gate internals). None when absent — a dev checkout is
+    unpackaged source, honestly unprovable."""
+    for parent in Path(__file__).resolve().parents:
+        f = parent / "BUILD_REV"
+        if f.is_file():
+            try:
+                d = json.loads(f.read_text())
+            except (OSError, ValueError):
+                return None
+            if isinstance(d, dict) and isinstance(d.get("rev"), str):
+                return {"rev": d["rev"],
+                        "dirty": bool(d.get("dirty", False))}
+            return None
+    return None
+
 def status_digest(
     store: ImproverStore, adaptors=None, stale_seconds: int | None = None
 ) -> dict:
@@ -359,6 +379,7 @@ def status_digest(
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        "build": _build_stamp(),
     }
     TRACKER.mark_status_read(digest)
     return digest
@@ -376,3 +397,9 @@ def register(
         return json.dumps(
             status_digest(store, adaptors, stale_seconds), indent=2
         )
+
+    @mcp.resource("improver://constants")
+    def get_constants() -> str:
+        """Live grounded-constants registry — disclosed from the
+        running module so the audit surface is the code, not a file."""
+        return json.dumps(_gc.disclosure(), indent=2)

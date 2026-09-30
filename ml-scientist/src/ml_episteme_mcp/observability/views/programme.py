@@ -307,6 +307,73 @@ def render_programme_list(
     return HTMLResponse(render_base("Programmes", body, refresh_interval))
 
 
+# Display bound on the hypothesis detail page — cosmetic, not a
+# decision constant (view-local by design, not registry-eligible).
+HYPOTHESIS_DISPLAY_MAX = 8192
+
+
+def _display_truncate(text: str) -> tuple[str, bool]:
+    """Cap rendered text at HYPOTHESIS_DISPLAY_MAX with an explicit marker."""
+    if len(text) <= HYPOTHESIS_DISPLAY_MAX:
+        return text, False
+    return text[:HYPOTHESIS_DISPLAY_MAX], True
+
+
+def render_hypothesis_detail(
+    store: StateStore, hypothesis_id: str,
+) -> HTMLResponse:
+    """Render the hypothesis detail page — the full falsifiable
+    statement (the programme table truncates it at 200 chars)."""
+    h = store.get_hypothesis(hypothesis_id)
+    if h is None:
+        return HTMLResponse(
+            render_base(
+                "Not Found",
+                f'<h1 style="color: var(--status-failed)">Hypothesis '
+                f'not found: {escape(hypothesis_id)}</h1>',
+            ),
+            status_code=404,
+        )
+
+    statement, stmt_trunc = _display_truncate(h.statement)
+    criterion, crit_trunc = _display_truncate(h.failure_criterion)
+    trunc_note = (
+        '<p class="muted">… [truncated at '
+        f'{HYPOTHESIS_DISPLAY_MAX} characters]</p>'
+    )
+    variables = (
+        ", ".join(escape(v) for v in h.variables_involved)
+        if h.variables_involved else "—"
+    )
+    abandon_block = ""
+    if h.status.value == "abandoned" or h.abandoned_at:
+        abandon_block = f"""
+        <p><strong>Abandoned:</strong> {escape(h.abandoned_at or '—')}
+        by {escape(h.abandoned_by or '—')}</p>
+        <p><strong>Abandon rationale:</strong>
+        {escape(h.abandon_rationale or '—')}</p>"""
+
+    body = f"""
+    <p><a href="/programme/{escape(h.programme_id)}">&larr; back to
+    programme {escape(h.programme_id)}</a></p>
+    <h1>Hypothesis {escape(h.id)}</h1>
+    <p>{render_status_badge(h.status.value)}
+    &nbsp;·&nbsp; created {escape(format_timestamp(h.created_at))}</p>
+    <h2>Statement</h2>
+    <p style="white-space: pre-wrap">{escape(statement)}</p>
+    {trunc_note if stmt_trunc else ""}
+    <h2>Failure criterion</h2>
+    <p style="white-space: pre-wrap">{escape(criterion)}</p>
+    {trunc_note if crit_trunc else ""}
+    <h2>Variables involved</h2>
+    <p>{variables}</p>
+    {abandon_block}
+    """
+    return HTMLResponse(
+        render_base(f"Hypothesis {h.id}", body), status_code=200
+    )
+
+
 def render_programme_detail(
     store: StateStore,
     programme_id: str,
@@ -374,7 +441,7 @@ def render_programme_detail(
     for h in hypotheses:
         hyp_rows.append(f"""
         <tr id="hyp-{escape(h.id)}">
-            <td><a href="/programme/{escape(programme_id)}#hyp-{escape(h.id)}">{escape(h.id)}</a></td>
+            <td><a href="/hypothesis/{escape(h.id)}">{escape(h.id)}</a></td>
             <td>{escape(h.statement[:200])}{'...' if len(h.statement) > 200 else ''}</td>
             <td>{render_status_badge(h.status.value)}</td>
         </tr>""")

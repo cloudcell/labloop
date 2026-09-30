@@ -441,11 +441,21 @@ def check_spawn_scoped_result(
     spawned for this campaign and this arm — no reporting on a
     programme that was never part of the orchestrated run. Campaigns
     with no spawns at all keep the client-driven behaviour (the
-    client names its own programmes)."""
+    client names its own programmes) — unless the named programme is
+    spawn-bound to a *different* campaign, which is orchestrated
+    elsewhere and may not be reported here (rc-12: the early exit
+    let a cross-campaign result through)."""
     spawns = store.list_campaign_spawns(campaign_id)
-    if not spawns:
-        return None
     spawn = store.get_spawn_for_programme(programme_id)
+    if not spawns:
+        if spawn is not None and spawn.campaign_id != campaign_id:
+            return (
+                f"programme {programme_id} is spawn-bound to campaign "
+                f"{spawn.campaign_id}, not {campaign_id} — a "
+                "client-driven campaign may not report on another "
+                "campaign's orchestrated programme."
+            )
+        return None
     if spawn is None or spawn.campaign_id != campaign_id:
         return (
             f"programme {programme_id} was not spawned under campaign "

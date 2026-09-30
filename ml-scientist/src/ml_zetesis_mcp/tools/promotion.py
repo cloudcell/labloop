@@ -842,6 +842,18 @@ def register(
                     f"got: {arm}"
                 }))
             constraints = coerce_json(constraints, dict, "constraints")
+            # Budget keys in `constraints` are silently inert — the
+            # carried campaign budget wins (rc-12). Refuse them with
+            # the channel named; other extras pass through to the
+            # upstream constraints record, which preserves them.
+            for k in constraints:
+                if k in ("max_trials", "max_wall_time_hours"):
+                    return fail(json.dumps({
+                        "error": f"constraints key '{k}' is a budget "
+                        "field — the carried budget is set at campaign "
+                        "open; per-programme shrinking goes in the "
+                        "'budget' argument, not 'constraints'."
+                    }))
             allowed_variables = coerce_json(
                 allowed_variables, list, "allowed_variables"
             )
@@ -1469,19 +1481,43 @@ def register(
                         "— a promote cannot assert less evidence than "
                         "the contract requires."
                     }))
+            # The ceiling is the measured bound when one exists; when
+            # no statistic could be computed (n_achieved < 2, or a
+            # legacy campaign), it falls back to the contract's
+            # declared minimum — a verdict on unmeasured work may
+            # assert exactly the declared rung and no more (rc-12:
+            # the null guard made the ceiling vanish entirely).
+            ceiling_rung = (
+                computed_rung if computed_rung is not None
+                else declared_rung
+            )
             if (
                 verdict == "promote"
                 and claimed_rung is not None
-                and computed_rung is not None
-                and not _gc.rung_at_least(computed_rung, claimed_rung)
+                and ceiling_rung is not None
+                and not _gc.rung_at_least(ceiling_rung, claimed_rung)
             ):
+                if computed_rung is not None:
+                    msg = (
+                        f"claimed_rung '{claimed_rung}' exceeds "
+                        f"the evidence — close measured "
+                        f"2 ln BF = {campaign.bf_2ln:.2f}, reaching "
+                        f"'{computed_rung}' (the oracle bound); claiming "
+                        f"'{claimed_rung}' asserts more than the data's "
+                        "own bound. Claim what the evidence reaches."
+                    )
+                else:
+                    msg = (
+                        f"claimed_rung '{claimed_rung}' exceeds the "
+                        "ceiling on unmeasured work — no statistic was "
+                        f"computed (n_achieved={campaign.n_achieved}), "
+                        f"so the bound is the contract's declared "
+                        f"minimum '{declared_rung}'. Claiming "
+                        f"'{claimed_rung}' asserts evidence that does "
+                        "not exist."
+                    )
                 return fail(json.dumps({
-                    "error": f"claimed_rung '{claimed_rung}' exceeds "
-                    f"the evidence — close measured "
-                    f"2 ln BF = {campaign.bf_2ln:.2f}, reaching "
-                    f"'{computed_rung}' (the oracle bound); claiming "
-                    f"'{claimed_rung}' asserts more than the data's "
-                    "own bound. Claim what the evidence reaches.",
+                    "error": msg,
                     "computed_rung": computed_rung,
                     "bf_2ln": campaign.bf_2ln,
                 }))

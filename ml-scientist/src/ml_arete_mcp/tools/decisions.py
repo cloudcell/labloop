@@ -65,6 +65,10 @@ _REF_TYPE_BY_PREFIX = {
     "decision-": "decision",
     "bundle-": "bundle",
     "data-ref-": "dataref",
+    "hyp-": "hypothesis",
+    "eref-": "evidence_ref",
+    "camp-": "campaign",
+    "spawn-": "campaign_spawn",
 }
 
 # Anamnesis's RefType vocabulary, mirrored locally (ADR-0001/0002: no
@@ -77,6 +81,7 @@ _CLAIM_REF_TYPES = frozenset({
     "tournament_result", "proposal", "meta_contract", "meta_decision",
     "policy_version", "canary_deployment", "candidate", "contract",
     "decision", "bundle", "dataref", "reference", "external",
+    "hypothesis", "evidence_ref", "campaign", "campaign_spawn",
 })
 
 
@@ -306,26 +311,52 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             # Evidence-vs-ladder ceiling (plan-20260929-1642Z): when
             # the cited tournament closed with a measured bound, a
             # promote may not claim past it — declared ≤ claimed ≤
-            # computed.
+            # computed. When no statistic could be computed
+            # (n_achieved < 2) the ceiling falls back to the cited
+            # contract's declared minimum: a verdict on unmeasured
+            # work asserts the declared rung and no more (rc-12).
             computed_rung = None
             if tournament is not None and tournament.bf_2ln is not None:
                 computed_rung = _gc.rung_for_2lnbf(tournament.bf_2ln)
+            ceiling_rung = (
+                computed_rung if computed_rung is not None
+                else declared_rung
+            )
             if (
                 verdict == "promote"
                 and claimed_rung is not None
-                and computed_rung is not None
-                and not _gc.rung_at_least(computed_rung, claimed_rung)
+                and ceiling_rung is not None
+                and not _gc.rung_at_least(ceiling_rung, claimed_rung)
             ):
+                if computed_rung is not None:
+                    msg = (
+                        f"claimed_rung '{claimed_rung}' exceeds "
+                        f"the evidence — tournament {tournament_id} "
+                        f"measured 2 ln BF = {tournament.bf_2ln:.2f}, "
+                        f"reaching '{computed_rung}' (the oracle bound); "
+                        f"claiming '{claimed_rung}' asserts more than "
+                        "the data's own bound. Claim what the evidence "
+                        "reaches."
+                    )
+                else:
+                    measured_state = (
+                        f"computed (n_achieved={tournament.n_achieved})"
+                        if tournament is not None
+                        else "computed for this decision"
+                    )
+                    msg = (
+                        f"claimed_rung '{claimed_rung}' exceeds the "
+                        "ceiling on unmeasured work — no statistic was "
+                        f"{measured_state}, "
+                        f"so the bound is the contract's declared "
+                        f"minimum '{declared_rung}'. Claiming "
+                        f"'{claimed_rung}' asserts evidence that does "
+                        "not exist."
+                    )
                 return fail(json.dumps({
-                    "error": f"claimed_rung '{claimed_rung}' exceeds "
-                    f"the evidence — tournament {tournament_id} "
-                    f"measured 2 ln BF = {tournament.bf_2ln:.2f}, "
-                    f"reaching '{computed_rung}' (the oracle bound); "
-                    f"claiming '{claimed_rung}' asserts more than "
-                    "the data's own bound. Claim what the evidence "
-                    "reaches.",
+                    "error": msg,
                     "computed_rung": computed_rung,
-                    "bf_2ln": tournament.bf_2ln,
+                    "bf_2ln": tournament.bf_2ln if tournament else None,
                 }))
 
             decision = MetaDecision(

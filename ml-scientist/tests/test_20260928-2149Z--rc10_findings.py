@@ -390,7 +390,7 @@ class TestVerdictWedge:
                 "campaign_id": cid, "verdict": "promote",
                 "decided_by": "human:tester",
                 "evidence_ref_ids": [eref],
-                "claimed_rung": "positive",
+                "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
             })
             assert "error" not in verdict, verdict
             assert verdict["decision_id"] == "decision-9"

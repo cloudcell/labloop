@@ -212,7 +212,7 @@ async def test_full_lifecycle_gate_walk(arete_server, adaptors):
         "decided_by": "arete:protocol",
         "tournament_id": tourn,
         "contract_id": contract,
-        "claimed_rung": "positive",
+        "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
     })
     assert "error" not in dec, dec
     assert dec["claim_status"] == "minted"

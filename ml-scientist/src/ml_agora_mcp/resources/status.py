@@ -18,6 +18,29 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..clients.adaptors import CHANNEL_ORDER, CHANNEL_STATUS_URIS
+from .. import _grounded_constants as _gc
+
+from pathlib import Path
+
+
+def _build_stamp() -> dict | None:
+    """Read BUILD_REV beside the vendored source tree — written into
+    the deployment image at build time so a status digest can prove
+    which source revision it runs (rc-12: surface fingerprints cannot
+    see gate internals). None when absent — a dev checkout is
+    unpackaged source, honestly unprovable."""
+    for parent in Path(__file__).resolve().parents:
+        f = parent / "BUILD_REV"
+        if f.is_file():
+            try:
+                d = json.loads(f.read_text())
+            except (OSError, ValueError):
+                return None
+            if isinstance(d, dict) and isinstance(d.get("rev"), str):
+                return {"rev": d["rev"],
+                        "dirty": bool(d.get("dirty", False))}
+            return None
+    return None
 
 # Loop order for tie-breaking inside a rank — foundation before meta.
 _LOOP_ORDER = {"claims": 0, "loop0": 1, "loop1": 2, "loop2": 3}
@@ -205,6 +228,19 @@ async def lab_status(adaptors) -> dict:
         servers[name] = await _fetch_digest(adaptors, name)
 
     ok = sum(1 for s in servers.values() if s["status"] == "ok")
+    own = _build_stamp()
+    upstream_builds = {
+        name: (s.get("digest") or {}).get("build")
+        for name, s in servers.items()
+        if s.get("status") == "ok"
+    }
+    stamped = {
+        n: b for n, b in upstream_builds.items()
+        if isinstance(b, dict) and b.get("rev")
+    }
+    revs = {b["rev"] for b in stamped.values()}
+    if own and own.get("rev"):
+        revs.add(own["rev"])
     return {
         "server": "ml-agora-mcp",
         "role": "status",
@@ -215,6 +251,17 @@ async def lab_status(adaptors) -> dict:
             if s["status"] != "not_configured"
         ),
         "servers": servers,
+        # Build-parity block: all five services must stamp the same
+        # source rev — a mixed or missing stamp means the image
+        # vendored divergent internals (rc-12: the decision_debt gate
+        # diverged invisibly under an identical surface fingerprint).
+        "build": {
+            "self": own,
+            "servers": upstream_builds,
+            "all_stamped": len(stamped) == len(upstream_builds)
+            and own is not None,
+            "revs_match": len(revs) <= 1,
+        },
         "lab_next_actions": _lab_next_actions(servers),
     }
 
@@ -227,3 +274,9 @@ def register(mcp, adaptors) -> None:
         """The lab status aggregate — per-server digests plus the
         ranked next-action list. Computed live on every read."""
         return json.dumps(await lab_status(adaptors), indent=2)
+
+    @mcp.resource("lab://constants")
+    def get_constants() -> str:
+        """Live grounded-constants registry — disclosed from the
+        running module so the audit surface is the code, not a file."""
+        return json.dumps(_gc.disclosure(), indent=2)

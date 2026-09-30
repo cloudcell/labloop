@@ -215,8 +215,12 @@ def render_campaign_detail(
             f"type M ratio <b>{c.type_m_ratio:.2f}</b>"
         )
     if c.bf_2ln is not None:
+        p_str = (
+            f"{c.p_value:.4f}" if c.p_value is not None
+            else "&lt;1e-16 (underflowed)"
+        )
         power_bits.append(
-            f"p <b>{c.p_value:.4f}</b> · 2 ln BF "
+            f"p <b>{p_str}</b> · 2 ln BF "
             f"<b>{c.bf_2ln:.2f}</b> (oracle bound) · reaches "
             f"<b>{_gc.rung_for_2lnbf(c.bf_2ln)}</b>"
         )

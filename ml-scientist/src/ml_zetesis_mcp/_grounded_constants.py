@@ -429,6 +429,42 @@ def scoring_violations() -> list[str]:
     return bad
 
 
+def disclosure() -> dict:
+    """The live registry as a servable dict — the `X://constants`
+    resources embed this so the disclosed truth is the running module,
+    not a copied file (rc-12: the VM could not audit the registry)."""
+    return {
+        "constants": [
+            {
+                "name": c.name,
+                "value": c.value,
+                "class": c.cls,
+                "status": c.status,
+                "scoring_path": c.scoring_path,
+                "decision_load": c.decision_load,
+                "transitional": c.transitional,
+                "pending": c.pending,
+                "source_key": c.source_key,
+                "citation": c.citation,
+                "locator": c.locator,
+                "procedure": c.procedure,
+                "rationale": c.rationale,
+            }
+            for c in REGISTRY.values()
+        ],
+        "sources": {
+            k: {
+                "citation": s.citation,
+                "filename": s.filename,
+                "sha256": s.sha256,
+            }
+            for k, s in SOURCES.items()
+        },
+        "corpus": _CORPUS,
+        "scoring_violations": scoring_violations(),
+    }
+
+
 # --------------------------------------------------------------------------
 # Grounded procedures — the DERIVED entries' computations, live. A caller
 # does not read SEED_COUNT_DEFAULT.value or PROMOTION_THRESHOLD.value (both
@@ -531,9 +567,14 @@ def arm_evidence(
     z = (m_l - m_c) / (sd_pooled * math.sqrt(1 / nc + 1 / nl))
     bf_2ln = max(z, 0.0) ** 2
     std = NormalDist()
+    p = 1.0 - std.cdf(z)
+    # p = 0.0 is float underflow on 1 − Φ(z) at extreme z — not a
+    # measured zero. Persist NULL; bf_2ln retains the statistic.
+    if p == 0.0:
+        p = None
     return {
         "z": z,
-        "p": 1.0 - std.cdf(z),
+        "p": p,
         "bf_2ln": bf_2ln,
         "computed_rung": rung_for_2lnbf(bf_2ln),
         "n_champion": nc,

@@ -399,7 +399,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm the verdict closes out: 'parent' | 'candidate'.")],
         verdict: Annotated[Literal['promote', 'retain', 'rollback'], Field(description="promote | retain | rollback — the descendant candidate's promotion verdict (Loop-1 lineage).")],
         decided_by: Annotated[str, Field(description="Attributable decider (e.g. 'human:<name>' or a protocol/improver id).")],
-        evidence_ref_ids: Annotated[list | str | None, Field(description='Evidence_ref IDs minted by pull_evidence/pull_arm_evidence calls; list or JSON-encoded.')] = None,
+        evidence_ref_ids: Annotated[list | str | None, Field(description="Upstream campaign-scoped evidence_ref IDs — the ref_ids / upstream_evidence_ref_id returned by pull_arm_evidence, NOT the local evidence_ref_id (a tournament-scoped ref in this store, which the upstream campaign check will refuse). List or JSON-encoded.")] = None,
         rationale: Annotated[str | None, Field(description='Non-empty justification — accountability is first-class.')] = None,
         claimed_rung: Annotated[str | None, Field(description="Evidence rung this verdict claims (not_worth|positive|strong|very_strong — the Kass–Raftery ladder). Forwarded to the campaign's contract gate on 'promote'.")] = None,
     ) -> Annotated[CallToolResult, RecordArmVerdictOut]:
@@ -410,8 +410,12 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         (Loop-1 lineage), NOT this tournament's improver. Arete
         improver promotion stays governed by record_meta_decision /
         promote_policy; this verb closes out the descendant side.
-        evidence_ref_ids are the campaign-scoped erefs minted
-        upstream by pull_arm_evidence calls.
+        evidence_ref_ids must be the upstream campaign-scoped erefs
+        (the ref_ids / upstream_evidence_ref_id in a pull_arm_evidence
+        response) — they are resolved against the campaign store. The
+        local evidence_ref_id minted alongside them is tournament-
+        scoped here and will not resolve upstream; cite it in
+        record_meta_decision instead.
         """
         try:
             if e := check_arm_valid(arm):

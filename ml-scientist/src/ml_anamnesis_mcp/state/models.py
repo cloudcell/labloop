@@ -59,6 +59,10 @@ class RefType(str, Enum):
     bundle = "bundle"
     dataref = "dataref"
     reference = "reference"
+    hypothesis = "hypothesis"
+    evidence_ref = "evidence_ref"
+    campaign = "campaign"
+    campaign_spawn = "campaign_spawn"
     external = "external"
 
 
@@ -93,16 +97,14 @@ EVIDENCE_RELATIONS = frozenset(
 # 'external' is for refs no internal family owns; an id carrying one
 # of these prefixes filed as 'external' is a mislabel — the caller had
 # no better choice before bundle/dataref/reference joined the enum,
-# or is guessing. Families without a RefType member (hyp-,
-# eref-, camp-, spawn-, …) are deliberately absent — there is no
-# honest type to name for them yet; extending this map means extending
-# RefType first.
+# or is guessing. Extending this map means extending RefType first.
 INTERNAL_REF_PREFIXES: dict[str, tuple[str, ...]] = {
     "claim-": ("claim",),
     "trial-": ("trial",),
     "obs-": ("observation",),
     "conc-": ("conclusion",),
     "prog-": ("programme",),
+    "hyp-": ("hypothesis",),
     "inv-": ("investigation",),
     "find-": ("finding",),
     "archive-": ("archive",),
@@ -119,6 +121,9 @@ INTERNAL_REF_PREFIXES: dict[str, tuple[str, ...]] = {
     "decision-": ("decision",),
     "bundle-": ("bundle",),
     "data-ref-": ("dataref", "reference"),
+    "eref-": ("evidence_ref",),
+    "camp-": ("campaign",),
+    "spawn-": ("campaign_spawn",),
 }
 
 

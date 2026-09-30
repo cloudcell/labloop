@@ -585,7 +585,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
-            "claimed_rung": "positive",
+            "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
         })
         assert r["decision_id"].startswith("decision-")
         assert r["claim_status"] == "minted"
@@ -645,7 +645,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
-            "claimed_rung": "positive",
+            "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
         })
         assert "error" not in r
         champions = [
@@ -723,7 +723,7 @@ class TestCampaignLifecycle:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [ev["evidence_ref_id"]],
-            "claimed_rung": "positive",
+            "claimed_rung": "not_worth",  # null statistic: ceiling = declared min (rc-12 W3)
         })
         assert "error" in r and "promotion adaptor" in r["error"]
 

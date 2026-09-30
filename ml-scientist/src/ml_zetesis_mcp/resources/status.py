@@ -13,6 +13,7 @@ emits the same shape.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 
 from ..enforcement.recurrence import TRACKER, open_violations
@@ -232,6 +233,25 @@ def _workflow_position(recs: list[dict]) -> str:
     return tool or "campaign lifecycle"
 
 
+def _build_stamp() -> dict | None:
+    """Read BUILD_REV beside the vendored source tree — written into
+    the deployment image at build time so a status digest can prove
+    which source revision it runs (rc-12: surface fingerprints cannot
+    see gate internals). None when absent — a dev checkout is
+    unpackaged source, honestly unprovable."""
+    for parent in Path(__file__).resolve().parents:
+        f = parent / "BUILD_REV"
+        if f.is_file():
+            try:
+                d = json.loads(f.read_text())
+            except (OSError, ValueError):
+                return None
+            if isinstance(d, dict) and isinstance(d.get("rev"), str):
+                return {"rev": d["rev"],
+                        "dirty": bool(d.get("dirty", False))}
+            return None
+    return None
+
 def status_digest(store: SearchStore, adaptors=None) -> dict:
     """The Loop-1 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(store)
@@ -248,6 +268,7 @@ def status_digest(store: SearchStore, adaptors=None) -> dict:
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        "build": _build_stamp(),
     }
     TRACKER.mark_status_read(digest)
     return digest
@@ -260,3 +281,9 @@ def register(mcp, store: SearchStore, adaptors=None) -> None:
     def get_status() -> str:
         """Compact status digest — open work, blockers, next action."""
         return json.dumps(status_digest(store, adaptors), indent=2)
+
+    @mcp.resource("search://constants")
+    def get_constants() -> str:
+        """Live grounded-constants registry — disclosed from the
+        running module so the audit surface is the code, not a file."""
+        return json.dumps(_gc.disclosure(), indent=2)

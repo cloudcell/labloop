@@ -380,6 +380,11 @@ def register(
                                     "ref_type": "conclusion",
                                     "relation": "derived_from",
                                 },
+                                {
+                                    "to_ref": hypothesis.id,
+                                    "ref_type": "hypothesis",
+                                    "relation": "derived_from",
+                                },
                                 *[
                                     {
                                         "to_ref": t.id,

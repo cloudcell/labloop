@@ -73,6 +73,10 @@ _REF_TYPE_BY_PREFIX = {
     "canary-": "canary_deployment",
     "bundle-": "bundle",
     "data-ref-": "dataref",
+    "hyp-": "hypothesis",
+    "eref-": "evidence_ref",
+    "camp-": "campaign",
+    "spawn-": "campaign_spawn",
 }
 
 

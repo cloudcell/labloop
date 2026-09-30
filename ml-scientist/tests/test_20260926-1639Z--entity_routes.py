@@ -95,20 +95,22 @@ def episteme_client(tmp_path):
 class TestEpistemeEntityRoutes:
     """Resolve-and-redirect routes for context-bound entity ids.
 
-    hyp-/obs-/conc-/belief- ids carry no context in the id itself —
-    each route resolves the record, then redirects to the parent
-    page's anchor so claim-graph references land somewhere real.
+    obs-/conc-/belief- ids carry no context in the id itself — each
+    route resolves the record, then redirects to the parent page's
+    anchor so claim-graph references land somewhere real. hyp- is the
+    exception: it renders a detail page (rc-12 W11), redirecting only
+    when the owning programme is archived.
     """
 
-    def test_hypothesis_redirects_to_programme_anchor(
-        self, episteme_client
-    ):
+    def test_hypothesis_renders_detail_page(self, episteme_client):
+        """Live hypotheses render a detail page with the full
+        statement (rc-12 W11) — no redirect to a truncated row."""
         r = episteme_client.get(
             "/hypothesis/hyp-test1", follow_redirects=False)
-        assert r.status_code == 307
-        assert (
-            r.headers["location"]
-            == "/programme/prog-test1#hyp-hyp-test1")
+        assert r.status_code == 200
+        assert "depth improves generalization" in r.text
+        assert "val perplexity does not decrease" in r.text
+        assert "/programme/prog-test1" in r.text
 
     def test_hypothesis_anchor_exists_on_programme(self, episteme_client):
         r = episteme_client.get("/programme/prog-test1")

@@ -78,8 +78,12 @@ def _power_block(t: Tournament) -> str:
             f"type M ratio <b>{t.type_m_ratio:.2f}</b>"
         )
     if t.bf_2ln is not None:
+        p_str = (
+            f"{t.p_value:.4f}" if t.p_value is not None
+            else "&lt;1e-16 (underflowed)"
+        )
         bits.append(
-            f"p <b>{t.p_value:.4f}</b> · 2 ln BF "
+            f"p <b>{p_str}</b> · 2 ln BF "
             f"<b>{t.bf_2ln:.2f}</b> (oracle bound) · reaches "
             f"<b>{_gc.rung_for_2lnbf(t.bf_2ln)}</b>"
         )

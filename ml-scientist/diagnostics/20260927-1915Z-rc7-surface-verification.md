@@ -66,6 +66,25 @@ PART C — read surfaces (Q1, Q2, Q9, Q11)
    list_trials → the retryable row carries `retry_reason` verbatim
    (the queue surface — get_trial_status already had it; the list
    did not). Report the row.
+
+3b. BUILD STAMP (rc-12): each server's X://status digest now carries
+   `build` — `{"rev": <git sha>, "dirty": bool}` stamped into the
+   image from the vendored checkout, or null on unpackaged source.
+   Read all five digests (or lab://status's `build` block, which
+   aggregates them) and assert: every server's `build.rev` is equal,
+   `build.dirty` is false on all five, and `revs_match`/`all_stamped`
+   are true in the aggregate. Report the shared rev verbatim — it is
+   the deployment's claim about which source it runs. A missing
+   stamp, a mixed rev set, or a dirty flag is itself a finding:
+   surface fingerprints compare signatures, this compares internals —
+   a stale or dirty image is exactly what this step exists to catch.
+   Then read all five `X://constants` resources
+   (`claims://constants`, `protocol://constants`,
+   `search://constants`, `improver://constants`,
+   `lab://constants`): the registries must be byte-identical in
+   content across servers — the vendored `_grounded_constants` mirror
+   is itself an internals fingerprint — and `scoring_violations`
+   must be `[]` on every server.
 9. prepare_data with a generator whose `generate_data` prints a
    single-line `{"error": "diag-rc7 SENTINEL"}` JSON to stdout and
    exits 1 → the failure payload must surface that structured error

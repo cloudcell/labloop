@@ -121,6 +121,19 @@ rebuild_mcp_image() {
     find "$WORK/mcp/ml-scientist" -name '*.md' -delete
     printf '# ml-scientist\n\nMCP runtime sources (documentation stripped).\n' \
         > "$WORK/mcp/ml-scientist/README.md"
+    # Build stamp — the context drops .git on purpose, so record the
+    # source checkout's revision here; each server's status digest
+    # discloses it (rc-12: a divergent working tree fingerprinted
+    # identical on surface). "unknown"/dirty=true when the source is
+    # not a clean checkout.
+    rev=$(git -C "$ML_SCIENTIST" rev-parse HEAD 2>/dev/null || echo unknown)
+    if [ -n "$(git -C "$ML_SCIENTIST" status --porcelain 2>/dev/null | head -1)" ]; then
+        dirty=true
+    else
+        dirty=false
+    fi
+    printf '{"rev": "%s", "dirty": %s}\n' "$rev" "$dirty" \
+        > "$WORK/mcp/ml-scientist/BUILD_REV"
     cp "$REPO/containers/mcp/Containerfile" \
        "$REPO/containers/mcp/entrypoint.sh" "$WORK/mcp/"
     tar -C "$WORK/mcp" -cf "$WORK/mcp-ctx.tar" .

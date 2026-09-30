@@ -492,7 +492,8 @@ class TestRungGate:
             "claimed_rung": "positive",
         })
         assert "error" in r and "below" in r["error"]
-        # Meeting the declared rung → records.
+        # Claiming above the declared rung on unmeasured work is
+        # refused (null computed → ceiling = declared, rc-12 W3).
         r = await _call(mcp, "record_meta_decision", {
             "candidate_improver_id": "imp-c",
             "verdict": "promote",
@@ -502,9 +503,20 @@ class TestRungGate:
             "contract_id": cid,
             "claimed_rung": "very_strong",
         })
+        assert "error" in r and "ceiling" in r["error"]
+        # Meeting the declared rung exactly → records.
+        r = await _call(mcp, "record_meta_decision", {
+            "candidate_improver_id": "imp-c",
+            "verdict": "promote",
+            "evidence_refs": [eref],
+            "rationale": "gain clears the bar",
+            "decided_by": "human:x",
+            "contract_id": cid,
+            "claimed_rung": "strong",
+        })
         assert "error" not in r, r
         assert r["declared_rung"] == "strong"
-        assert r["claimed_rung"] == "very_strong"
+        assert r["claimed_rung"] == "strong"
 
     async def test_meta_decision_legacy_contract_ungated(self, arete):
         """No declared rung on the contract → promote proceeds."""

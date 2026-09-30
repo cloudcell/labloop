@@ -9,6 +9,7 @@
 # prompt actually exercises the surface.
 
 ## ml_agora_mcp
+lab://constants -> rc12-regressions, rc7-surface-verification
 lab://status -> channel-current-fields, connectivity-fault-observability, connectivity-live-gating, resource-surface, state-machine-coverage, grounded-constants
 lab://topology -> channel-current-fields, channel-lasterror-heals, connectivity-fault-observability, connectivity-live-gating, rc7-surface-verification, resource-surface, state-machine-coverage
 check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
@@ -18,6 +19,7 @@ read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-sur
 claims://graph -> resource-surface
 claims://by-relation/{relation} -> resource-surface
 claims://session -> resource-surface
+claims://constants -> rc12-regressions, rc7-surface-verification
 claims://status -> connectivity-fault-observability, deadline-exceeded, rc7-surface-verification, resource-surface, grounded-constants
 assert_claim -> claim-valid-until-expiry, rc11-extraction-findings, rc9-findings, state-machine-coverage, grounded-constants
 relate -> rc11-extraction-findings, rc9-findings, state-machine-coverage, grounded-constants
@@ -32,6 +34,7 @@ read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-sur
 improver://classes -> claim-mint-loop2-reftypes, integrity-report-honesty, rc7-surface-verification
 improver://graph -> resource-surface
 improver://session -> resource-surface
+improver://constants -> rc12-regressions, rc7-surface-verification
 improver://status -> arm-campaign-verbs, connectivity-fault-observability, grounded-constants
 record_meta_decision -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings, state-machine-coverage, write-boundary-gates, contract-declared-power
 list_decisions -> canary-and-correction, rc9-findings, write-boundary-gates
@@ -78,6 +81,7 @@ artifact://{content_hash} -> resource-surface, sealed-provenance-honesty
 dataref://{data_ref_id} -> resource-surface
 code://{code_hash} -> resource-surface
 protocol://session -> resource-surface
+protocol://constants -> rc12-regressions, rc7-surface-verification
 protocol://status -> connectivity-fault-observability, rc7-surface-verification, resource-surface, sandbox-env-scrub, grounded-constants
 list_archives -> claim-mint-loop2-reftypes
 get_archive -> read-paths-and-registries
@@ -129,6 +133,7 @@ list_trials -> rc7-surface-verification, retry-reason-ordering
 ## ml_zetesis_mcp
 search://graph -> resource-surface
 search://session -> resource-surface
+search://constants -> rc12-regressions, rc7-surface-verification
 search://status -> connectivity-fault-observability, grounded-constants
 check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
 acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty

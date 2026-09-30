@@ -36,9 +36,13 @@ from ..integrity.log import list_check_logs, read_run
 STATUS_RESOURCE = "search://status"
 STATUS_SESSION = "search://session"
 
+# Tool-name prefixes exempt from every gate — reads can never be
+# gated by the debts they report on (rc-12: read_resource was gated
+# because "read_" was missing). Load-bearing: any future read_*
+# tool must never mutate, or this prefix has to go.
 READ_PREFIXES = (
     "get_", "list_", "check_", "verify_", "assess_", "describe_",
-    "wait_",
+    "wait_", "read_",
 )
 
 ALWAYS_EXEMPT = {
@@ -299,7 +303,33 @@ def install(
 
     original = mcp.call_tool
 
+    # Lazy snapshot of each tool's declared parameters (public
+    # surface). The framework's argument models run extra=ignore —
+    # an undeclared argument is silently dropped before the tool body
+    # runs (rc-12: `prior`, `constraints`, `valid_from` all vanished
+    # this way). A call naming args the signature does not declare is
+    # refused here instead of falsifying a record.
+    declared_args: dict[str, frozenset] | None = None
+
     async def _guarded_call_tool(name, arguments, context=None):
+        nonlocal declared_args
+        if declared_args is None:
+            declared_args = {
+                t.name: frozenset(
+                    (t.input_schema or {}).get("properties", {})
+                )
+                for t in await mcp.list_tools()
+            }
+        declared = declared_args.get(name)
+        if declared is not None and isinstance(arguments, dict):
+            unknown = sorted(set(arguments) - declared)
+            if unknown:
+                return _refusal(
+                    f"{name} received undeclared argument(s): "
+                    f"{', '.join(unknown)} — refused; undeclared "
+                    "arguments are silently dropped by the argument "
+                    "model"
+                )
         if not _is_exempt(name):
             if err := tracker.check_fresh():
                 return _refusal(err)

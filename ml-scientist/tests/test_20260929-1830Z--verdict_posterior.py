@@ -132,7 +132,9 @@ class TestVerdictPosterior:
 class TestArmEvidence:
     def test_clear_win(self):
         ev = _gc.arm_evidence([80, 82, 78], [120, 118, 122])
-        assert ev["z"] > 0 and ev["p"] < 0.001
+        # z≈24 → p underflows to 0.0, recorded honestly as None;
+        # bf_2ln retains the statistic (rc-12 W8).
+        assert ev["z"] > 0 and ev["p"] is None
         assert ev["bf_2ln"] == ev["z"] ** 2
         assert ev["computed_rung"] == "very_strong"
 
@@ -348,7 +350,7 @@ class TestCloseStatistic:
         assert closed["bf_2ln"] == 600.0
         assert closed["computed_rung"] == "very_strong"
         c = store.get_campaign(cid)
-        assert c.p_value == 0.0          # float underflow at z≈24
+        assert c.p_value is None       # underflow at z≈24 → honest NULL
         assert c.bf_2ln == 600.0
 
     async def test_close_null_statistic_on_single_result(
@@ -447,11 +449,29 @@ class TestComputedRungGate:
             1 - _gc.PRIOR_CONFIDENCE_MAX.value
         )
 
+    async def test_no_statistic_claim_above_declared_refused(
+        self, zetesis
+    ):
+        """computed_rung null (n<2): the ceiling falls back to the
+        declared minimum — claiming past it is refused (rc-12 W3)."""
+        _, mcp, _ = zetesis
+        cid, eref, _ = await _open_and_close_campaign(
+            mcp, [80], [120]  # n=1/arm → no statistic
+        )
+        r = await _call(mcp, "record_promotion_verdict", {
+            "campaign_id": cid, "verdict": "promote",
+            "decided_by": "human:x",
+            "evidence_ref_ids": [eref],
+            "claimed_rung": "positive",
+        })
+        assert "error" in r, r
+        assert "ceiling" in r["error"]
+
     async def test_no_statistic_mints_ceiling_weakly_grounded(
         self, zetesis
     ):
-        """Legacy-shaped campaign (bf_2ln null): gate degrades to
-        declared-vs-claimed; the mint is the prior ceiling, labelled
+        """Null computed rung: claiming exactly the declared minimum
+        still passes — the mint is the prior ceiling, labelled
         weakly_grounded."""
         _, mcp, adaptors = zetesis
         cid, eref, _ = await _open_and_close_campaign(
@@ -461,7 +481,7 @@ class TestComputedRungGate:
             "campaign_id": cid, "verdict": "promote",
             "decided_by": "human:x",
             "evidence_ref_ids": [eref],
-            "claimed_rung": "positive",
+            "claimed_rung": "not_worth",
         })
         assert "error" not in r, r
         assert r["computed_rung"] is None
