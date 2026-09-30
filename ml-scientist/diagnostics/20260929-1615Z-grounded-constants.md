@@ -44,17 +44,17 @@ PART B — zero-divisor refusal on close_campaign
    → succeeds; get_campaign → status `abandoned`, rationale stored.
    This is the honest terminal path the refusal names.
 
-PART C — the prior ceiling is still enforced through the registry
+PART C — caller-originated numbers are refused; the registry computes
 
-7. anamnesis assert_claim with no evidence and confidence 0.9 →
-   must be refused or capped at the 0.3 prior ceiling (IN-RANGE,
-   NAP 2019 Table D-1). Record the outcome verbatim — either a
-   refusal naming the ceiling, or a minted claim whose stored
-   confidence is 0.3.
-8. assert_claim with confidence 0.9 AND a well-formed
-   evidence-bearing edge (mint a claim first, then relate or pass
-   evidence at assert) → confirm the higher confidence sticks. The
-   ceiling is evidence-gated, not a flat cap.
+7. anamnesis assert_claim with a `confidence` argument (any value)
+   → refused as an undeclared argument (numeric provenance
+   invariant, plan-20260930-0240Z). A bare mint — no computation —
+   stores confidence NULL with basis ungrounded. Record verbatim.
+8. assert_claim with confidence_computation {"procedure":
+   "posterior_from_2lnbf", "inputs": {"prior": 0.3, "bf_2ln":
+   2.7055}} AND an evidence-bearing edge → mints confidence ≈0.624 —
+   the NAP D-1 row recomputed by the registry, basis grounded. The
+   number is the registry's output, never the caller's.
 
 PART D — the disclosure surface
 

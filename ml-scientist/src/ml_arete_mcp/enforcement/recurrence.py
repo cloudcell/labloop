@@ -372,6 +372,49 @@ class RecurrenceTracker:
 TRACKER = RecurrenceTracker()
 
 
+def install_strict_args(mcp) -> None:
+    """Wrap ``mcp.call_tool`` with the undeclared-argument refusal.
+
+    Argument hygiene, not a protocol feature — installed
+    unconditionally by ``create_server``, independent of
+    ``recurrent_protocol`` (ML_RECURRENT_PROTOCOL=0 must not re-open
+    the hole). Installed outermost: a malformed call refuses by name
+    before freshness/debt gates run.
+
+    Lazy snapshot of each tool's declared parameters (public
+    surface). The framework's argument models run extra=ignore —
+    an undeclared argument is silently dropped before the tool body
+    runs (rc-12: `prior`, `constraints`, `valid_from` all vanished
+    this way). A call naming args the signature does not declare is
+    refused here instead of falsifying a record.
+    """
+    original = mcp.call_tool
+    declared_args: dict[str, frozenset] | None = None
+
+    async def _strict_call_tool(name, arguments, context=None):
+        nonlocal declared_args
+        if declared_args is None:
+            declared_args = {
+                t.name: frozenset(
+                    (t.input_schema or {}).get("properties", {})
+                )
+                for t in await mcp.list_tools()
+            }
+        declared = declared_args.get(name)
+        if declared is not None and isinstance(arguments, dict):
+            unknown = sorted(set(arguments) - declared)
+            if unknown:
+                return _refusal(
+                    f"{name} received undeclared argument(s): "
+                    f"{', '.join(unknown)} — refused; undeclared "
+                    "arguments are silently dropped by the argument "
+                    "model"
+                )
+        return await original(name, arguments, context)
+
+    mcp.call_tool = _strict_call_tool
+
+
 def install(
     mcp,
     store,
@@ -408,33 +451,10 @@ def install(
 
     original = mcp.call_tool
 
-    # Lazy snapshot of each tool's declared parameters (public
-    # surface). The framework's argument models run extra=ignore —
-    # an undeclared argument is silently dropped before the tool body
-    # runs (rc-12: `prior`, `constraints`, `valid_from` all vanished
-    # this way). A call naming args the signature does not declare is
-    # refused here instead of falsifying a record.
-    declared_args: dict[str, frozenset] | None = None
+    # Undeclared-argument refusal lives in install_strict_args —
+    # always-on, outermost, orthogonal to this protocol wrapper.
 
     async def _guarded_call_tool(name, arguments, context=None):
-        nonlocal declared_args
-        if declared_args is None:
-            declared_args = {
-                t.name: frozenset(
-                    (t.input_schema or {}).get("properties", {})
-                )
-                for t in await mcp.list_tools()
-            }
-        declared = declared_args.get(name)
-        if declared is not None and isinstance(arguments, dict):
-            unknown = sorted(set(arguments) - declared)
-            if unknown:
-                return _refusal(
-                    f"{name} received undeclared argument(s): "
-                    f"{', '.join(unknown)} — refused; undeclared "
-                    "arguments are silently dropped by the argument "
-                    "model"
-                )
         if not _is_exempt(name):
             if err := tracker.check_fresh():
                 return _refusal(err)

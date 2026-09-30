@@ -18,7 +18,10 @@ async def assert_claim_http(url, content, **overrides):
     args = {
         "content": content,
         "type": "empirical",
-        "confidence": 0.8,
+        "confidence_computation": {
+            "procedure": "posterior_from_2lnbf",
+            "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+        },
         "evidence": [
             {"to_ref": "trial-seed", "ref_type": "trial",
              "relation": "tested_by"}
@@ -85,20 +88,31 @@ class TestAnamnesisHTTP:
         assert cid in {c["id"] for c in listed["claims"]}
 
     @pytest.mark.asyncio
-    async def test_evidence_rule_over_http(self, anamnesis_url):
+    async def test_provenance_rule_over_http(self, anamnesis_url):
+        """The numeric provenance invariant over real transport: a
+        computation without an evidence edge is refused; a bare mint
+        stores NULL."""
+        r = await call_tool_http(anamnesis_url, "assert_claim", {
+            "content": "floating posterior over http",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            },
+        })
+        assert "evidence" in r["error"]
         r = await call_tool_http(anamnesis_url, "assert_claim", {
             "content": "unsupported over http",
             "type": "empirical",
-            "confidence": 0.95,
         })
-        assert "prior ceiling" in r["error"]
+        assert r["confidence"] is None
+        assert r["confidence_basis"] == "ungrounded"
 
     @pytest.mark.asyncio
     async def test_json_string_evidence_over_http(self, anamnesis_url):
         r = await call_tool_http(anamnesis_url, "assert_claim", {
             "content": "json-string evidence over http",
             "type": "empirical",
-            "confidence": 0.8,
             "evidence": '[{"to_ref": "trial-x", "ref_type": "trial",'
                         ' "relation": "tested_by"}]',
         })

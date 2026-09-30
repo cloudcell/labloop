@@ -102,7 +102,10 @@ class Finding(BaseModel):
     id: str
     investigation_id: str
     content: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    # Numeric provenance (plan-20260930-0240Z): a finding is a
+    # proto-claim, not a measurement — no caller-declared scalar.
+    # NULL on all post-cutover rows; non-NULL only on legacy rows.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     status: FindingStatus = FindingStatus.provisional
     claim_id: str | None = None
     created_at: str = Field(default_factory=_utc_now)
@@ -162,7 +165,8 @@ class PromotionCampaign(BaseModel):
     min_evidence_rung: str | None = None
     alpha: float | None = None
     # Declared prior P[H₁] (plan-20260929-1642Z) — snapshotted like
-    # the other policy fields; None → PRIOR_CONFIDENCE_MAX at mint.
+    # the other policy fields; None → PRIOR_CONFIDENCE_MAX fed into
+    # the mint's computation inputs.
     prior: float | None = None
     # Close-time accounting — set by close_campaign.
     n_achieved: int | None = None

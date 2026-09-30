@@ -75,8 +75,11 @@ PART C — R2: refused close mutates nothing
     each entity: H1 still under_test, H2 still proposed, the trial
     still designed, P1 still active. Any change = the bug.
 11. Programme P2: H3 with a RUNNING trial (run a trial whose code
-    sleeps — `import time; time.sleep(90); print({"m": 1})` — so
-    get_trial_status reads "running"), H4 under_test with a designed
+    exposes `def run_training(config):` with body `import time;
+    time.sleep(90); return {"metrics": {"m": 1}, "variance": {}}` —
+    run_trial imports the file and calls run_training(config), and
+    returns quickly with `status: "running"`, so get_trial_status
+    reads "running"), H4 under_test with a designed
     trial, H5 proposed.
     close_programme(P2, "abandoned") → refused (running trial). GET
     each entity: H3/H4 under_test, H5 proposed, the designed trial

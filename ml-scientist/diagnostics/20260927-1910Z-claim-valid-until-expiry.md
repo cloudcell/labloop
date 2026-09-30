@@ -20,7 +20,7 @@ calling. All work is on anamnesis (:38090).
 PART A — minting with expiry
 
 1. assert_claim: content "diag-expiry: future-dated claim",
-   type "empirical", confidence 0.5, valid_until = an ISO-8601 UTC
+   type "empirical", valid_until = an ISO-8601 UTC
    timestamp ~30 days out in `Z` form. Response must carry
    `claim_id` AND echo `valid_until` — and the echoed/stored value
    must be normalized to `+00:00` form (the expiry filter compares

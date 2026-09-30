@@ -139,6 +139,26 @@ Order within the standing set matters less; group by blast radius:
   refusal, `X://constants` parity, `valid_from`, hypothesis detail
   view (requires the rc-12 build — a pre-fix server drops undeclared
   args, gates `read_resource`, and has no constants resource)
+- `20260930-0516Z-numeric-provenance` — the numeric-provenance
+  invariant: no caller-supplied `confidence`/`confidence_basis`
+  survives `assert_claim`, `confidence_computation` is the only path
+  to a number, NULL is the honest value, `record_finding` dropped
+  its scalar, `unverifiable_confidence` replaced
+  `unsupported_high_confidence` (requires the numeric-provenance
+  build — a pre-invariant server accepts caller confidence and mints
+  ceiling literals)
+- `20260930-0713Z-rc13-findings` — the rc-13 extraction fixes: the
+  correction-path metric gate, required `campaign_arm`, the
+  `pull_arm_evidence` enum/field rename (`evidence_ref_id` is the
+  upstream-usable ref, `wrapper_ref_id` the local handle),
+  linked-campaign projection on `get_tournament`, `prior` in the
+  powered-policy teaching message, the lineage `depth` cap,
+  `corrections_count`, `list_claims` provenance fields,
+  meta-contract dedup, the episteme metrics mint-gate, wrong-loop id
+  errors, and the typed `reconciled` shape (requires the rc-13 build —
+  a pre-fix server still lets a correction drop the primary metric,
+  defaults `campaign_arm`, and returns an unusable eref under the
+  prominent field name)
 
 **Long-running / deadline-dependent**:
 - `20260929-0925Z-deadline-exceeded` — needs a ~150 s trial to cross

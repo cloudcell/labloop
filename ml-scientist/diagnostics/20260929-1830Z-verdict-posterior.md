@@ -54,30 +54,33 @@ PART B — the computed-rung ceiling
 PART C — the minted confidence
 
 7. After the passing promote (PART B step 5): anamnesis get_claim on
-   the minted claim_id → `confidence_basis` = "grounded" and
-   `confidence` = the posterior bound (prior-odds × BF form — at
-   bf_2ln ≈ 600 the bound saturates at 1.0; at weaker evidence it is
-   the NAP D-1 value, e.g. prior 0.3 / p 0.05 → 0.624). The claim's
-   float is a named bound, not a bare label.
+   the minted claim_id → `confidence_basis` = "grounded", `confidence`
+   = the recomputed posterior bound (prior-odds × BF form — at
+   bf_2ln ≈ 600 the bound saturates at 1.0), and
+   `confidence_computation` naming the procedure and inputs
+   (plan-20260930-0240Z: zetesis names the derivation, anamnesis
+   computes it — no number crosses the wire).
 8. A verdict on a campaign with no statistic (bf_2ln null) → the
-   minted claim carries confidence = 0.3 (the prior ceiling) and
-   `confidence_basis` = "weakly_grounded". Same on arete: a
-   meta-decision citing no tournament mints ceiling +
-   weakly_grounded.
+   minted claim carries confidence NULL and `confidence_basis` =
+   "weakly_grounded" — no computation, no number. Same on arete: a
+   meta-decision citing no tournament mints NULL + weakly_grounded.
 9. conclude_hypothesis (episteme) → the minted claim carries
-   confidence = 0.3, `confidence_basis` = "weakly_grounded" —
+   confidence NULL, `confidence_basis` = "weakly_grounded" —
    single-arm verdicts have no comparative likelihood; inconclusive
    still mints nothing.
 10. conclude_investigation (zetesis): a finding recorded WITH
     evidence_ref_ids mints `weakly_grounded`; a finding with none
-    (confidence ≤ 0.3) mints `ungrounded`. Both labels must appear on
-    the claim rows.
+    mints `ungrounded`. Both carry confidence NULL — the label must
+    appear beside an explicit null, never a number.
 
 PART D — the audit surface
 
-11. anamnesis assert_claim with confidence_basis="sorta" → refused;
-    the enum is closed. get_claim/list_claims echo the stored basis;
-    the observability claim page renders it beside the bar.
+11. anamnesis assert_claim with a `confidence_basis` argument →
+    refused as undeclared (callers cannot self-label; the basis is
+    server-derived). get_claim/list_claims echo the stored basis;
+    the observability claim page renders "—" (or equivalent explicit
+    null) beside the label for NULL confidence — never a 0% bar or
+    a fabricated fraction.
 12. constants/disclosure.md — `VERDICT_POSTERIOR` is present as a
     DERIVED procedure; `VERDICT_CONFIDENCE_*` and
     `METADECISION_CONFIDENCE` are absent entirely (deleted, not

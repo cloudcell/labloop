@@ -71,14 +71,16 @@ _CHECK_HELP: list[tuple[str, str]] = [
         "reason is on the record.",
     ),
     (
-        "unsupported_high_confidence",
-        "Live claims above <code>[integrity] prior_confidence_max</code> "
-        "with no evidence-bearing edge — the write-time evidence rule "
-        "audited, not just enforced. The audit reads the same "
-        "configured ceiling as the <code>assert_claim</code> gate, so "
-        "a violation means a high-confidence claim exists with "
-        "nothing supporting it (bypassed write path or deleted "
-        "support).",
+        "unverifiable_confidence",
+        "Live claims carrying a numeric confidence that does not "
+        "verify: no stored <code>confidence_computation</code>, a "
+        "derivation that fails to recompute, a recomputed value that "
+        "differs from the stored one, or no evidence-bearing edge "
+        "(numeric provenance invariant, plan-20260930-0240Z). NULL "
+        "confidence is honest — absence of a computation is absence "
+        "of a number. Legacy rows minted before the invariant flag "
+        "<code>legacy: true</code>; the remedy is supersession, not "
+        "silent rewrite.",
     ),
     (
         "dangling_claim_refs",

@@ -26,9 +26,6 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
-[project.urls]
-Documentation = "https://github.com/ml-scientist/ml-episteme-mcp/docs"
-Source = "https://github.com/ml-scientist/ml-episteme-mcp"
 
 [project.optional-dependencies]
 dev = [

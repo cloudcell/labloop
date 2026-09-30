@@ -268,12 +268,19 @@ class ClaimsRole(ABC):
         self,
         content: str,
         type: str,
-        confidence: float,
         evidence: list[dict[str, Any]] | None = None,
         source_id: str | None = None,
-        confidence_basis: str | None = None,
-    ) -> str:
-        """Assert a claim into semantic memory. Returns a claim_id.
+        confidence_computation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Assert a claim into semantic memory. Returns the server
+        response dict — {claim_id, confidence, confidence_basis,
+        confidence_computation, ...}.
+
+        No confidence crosses the wire (numeric provenance invariant,
+        plan-20260930-0240Z): an LLM never originates a numeric
+        confidence. To mint a number, name a registered derivation in
+        confidence_computation {procedure, inputs, evidence_refs?};
+        the claims server recomputes and stores it.
 
         Idempotent — asserting the same content again returns the
         existing claim's id (dedup by content+type).

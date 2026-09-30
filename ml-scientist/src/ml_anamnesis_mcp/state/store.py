@@ -22,13 +22,14 @@ CREATE TABLE IF NOT EXISTS claims (
     id            TEXT PRIMARY KEY,
     content       TEXT NOT NULL,
     type          TEXT NOT NULL,
-    confidence    REAL NOT NULL,
+    confidence    REAL,
     valid_from    TEXT NOT NULL,
     valid_until   TEXT,
     supersedes_id TEXT REFERENCES claims(id),
     content_hash  TEXT NOT NULL UNIQUE,
     source_id     TEXT,
     confidence_basis TEXT,
+    confidence_computation TEXT,
     created_at    TEXT NOT NULL
 );
 
@@ -87,7 +88,12 @@ class MemoryStore:
         readable, null where the field postdates them); drops remove
         fields whose presence itself was a falsehood
         (plan-20260929-1643Z). Adds run before drops so a DB needing
-        both upgrades gets each independently."""
+        both upgrades gets each independently.
+
+        The NOT NULL relaxation on claims.confidence needs a table
+        rebuild — SQLite cannot drop a NOT NULL in place. Rebuild
+        precedent: zetesis's evidence_refs migration (create → copy
+        → drop → rename under foreign_keys=OFF)."""
         cols = {
             r["name"] for r in self._fetchall("PRAGMA table_info(claims)")
         }
@@ -114,6 +120,59 @@ class MemoryStore:
                     table, col, n,
                 )
                 self._execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+        # claims.confidence NOT NULL → nullable (plan-20260930-0240Z):
+        # a claim without a registered derivation stores NULL, not a
+        # policy constant. Rebuild preserves existing confidence values
+        # verbatim — legacy rows keep their numbers and are flagged by
+        # the audit, never silently rewritten.
+        info = self._fetchall("PRAGMA table_info(claims)")
+        confidence_notnull = any(
+            r["name"] == "confidence" and r["notnull"] for r in info
+        )
+        if confidence_notnull:
+            logger.info(
+                "migrating claims: rebuilding table — confidence "
+                "becomes nullable, confidence_computation added"
+            )
+            self._execute("PRAGMA foreign_keys = OFF")
+            self._execute(
+                """CREATE TABLE claims_new (
+                    id            TEXT PRIMARY KEY,
+                    content       TEXT NOT NULL,
+                    type          TEXT NOT NULL,
+                    confidence    REAL,
+                    valid_from    TEXT NOT NULL,
+                    valid_until   TEXT,
+                    supersedes_id TEXT REFERENCES claims(id),
+                    content_hash  TEXT NOT NULL UNIQUE,
+                    source_id     TEXT,
+                    confidence_basis TEXT,
+                    confidence_computation TEXT,
+                    created_at    TEXT NOT NULL
+                )"""
+            )
+            self._execute(
+                """INSERT INTO claims_new (
+                    id, content, type, confidence, valid_from,
+                    valid_until, supersedes_id, content_hash,
+                    source_id, confidence_basis,
+                    confidence_computation, created_at
+                )
+                SELECT id, content, type, confidence, valid_from,
+                    valid_until, supersedes_id, content_hash,
+                    source_id, confidence_basis, NULL, created_at
+                FROM claims"""
+            )
+            self._execute("DROP TABLE claims")
+            self._execute("ALTER TABLE claims_new RENAME TO claims")
+            self._execute("PRAGMA foreign_keys = ON")
+        cols = {
+            r["name"] for r in self._fetchall("PRAGMA table_info(claims)")
+        }
+        if "confidence_computation" not in cols:
+            self._execute(
+                "ALTER TABLE claims ADD COLUMN confidence_computation TEXT"
+            )
         self.conn.commit()
 
     def _retype_misfiled_external_edges(self) -> None:
@@ -179,14 +238,17 @@ class MemoryStore:
             """INSERT INTO claims
                (id, content, type, confidence, valid_from,
                 valid_until, supersedes_id, content_hash, source_id,
-                confidence_basis, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence_basis, confidence_computation, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 claim.id, claim.content, claim.type.value,
                 claim.confidence, claim.valid_from,
                 claim.valid_until, claim.supersedes_id,
                 claim.content_hash, claim.source_id,
-                claim.confidence_basis, claim.created_at,
+                claim.confidence_basis,
+                json.dumps(claim.confidence_computation)
+                if claim.confidence_computation is not None else None,
+                claim.created_at,
             ),
         )
 
@@ -309,6 +371,12 @@ class MemoryStore:
             confidence_basis=(
                 row["confidence_basis"]
                 if "confidence_basis" in cols else None
+            ),
+            confidence_computation=(
+                json.loads(row["confidence_computation"])
+                if "confidence_computation" in cols
+                and row["confidence_computation"] is not None
+                else None
             ),
             created_at=row["created_at"],
         )

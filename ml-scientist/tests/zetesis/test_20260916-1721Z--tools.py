@@ -28,7 +28,6 @@ async def test_full_lifecycle_mints_claims(zetesis_server, adaptors):
     find = await call_tool(zetesis_server, "record_finding", {
         "investigation_id": inv_id,
         "content": "strategy X beats Y under budget B",
-        "confidence": 0.7,
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     assert "error" not in find
@@ -45,7 +44,10 @@ async def test_full_lifecycle_mints_claims(zetesis_server, adaptors):
     minted = adaptors.claims.minted
     assert len(minted) == 1
     assert minted[0]["type"] == "methodological"
-    assert minted[0]["confidence"] == 0.7
+    # No caller scalar crosses the wire — the evidence edges carry the
+    # support and anamnesis derives weakly_grounded + NULL confidence.
+    assert minted[0]["confidence_computation"] is None
+    assert minted[0]["confidence_basis"] == "weakly_grounded"
     assert minted[0]["source_id"] == inv_id
 
 
@@ -111,7 +113,7 @@ async def test_conclusion_mints_derived_from_edges(
         "args": {"programme_id": "prog-aaaa1111"},
     })
     await call_tool(zetesis_server, "record_finding", {
-        "investigation_id": inv_id, "content": "f", "confidence": 0.6,
+        "investigation_id": inv_id, "content": "f",
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     conc = await call_tool(zetesis_server, "conclude_investigation", {
@@ -138,7 +140,6 @@ async def test_null_result_mints_nothing(zetesis_server, adaptors):
     # a provisional finding exists but the verdict is honest
     await call_tool(zetesis_server, "record_finding", {
         "investigation_id": inv_id, "content": "weak signal",
-        "confidence": 0.4,
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     conc = await call_tool(zetesis_server, "conclude_investigation", {
@@ -174,8 +175,7 @@ async def test_conclude_without_claims_adaptor_reports_disabled(
         "tool": "list_active_programmes",
     })
     await call_tool(mcp, "record_finding", {
-        "investigation_id": inv_id, "content": "f", "confidence": 0.5,
-        "evidence_ref_ids": [pull["evidence_ref_id"]],
+        "investigation_id": inv_id, "content": "f",         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     conc = await call_tool(mcp, "conclude_investigation", {
         "investigation_id": inv_id, "verdict": "findings",
@@ -208,8 +208,7 @@ async def test_mint_failure_reports_failed(search_store):
         "tool": "list_active_programmes",
     })
     await call_tool(mcp, "record_finding", {
-        "investigation_id": inv_id, "content": "f", "confidence": 0.5,
-        "evidence_ref_ids": [pull["evidence_ref_id"]],
+        "investigation_id": inv_id, "content": "f",         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     conc = await call_tool(mcp, "conclude_investigation", {
         "investigation_id": inv_id, "verdict": "findings",
@@ -221,8 +220,7 @@ async def test_mint_failure_reports_failed(search_store):
 async def test_drop_finding(zetesis_server, adaptors):
     inv_id = await open_inv(zetesis_server)
     find = await call_tool(zetesis_server, "record_finding", {
-        "investigation_id": inv_id, "content": "maybe", "confidence": 0.2,
-    })
+        "investigation_id": inv_id, "content": "maybe",     })
     r = await call_tool(zetesis_server, "drop_finding",
                         {"finding_id": find["finding_id"]})
     assert r["status"] == "dropped"
@@ -237,8 +235,7 @@ async def test_drop_finding(zetesis_server, adaptors):
 async def test_drop_asserted_finding_rejected(zetesis_server, adaptors):
     inv_id = await open_inv(zetesis_server)
     find = await call_tool(zetesis_server, "record_finding", {
-        "investigation_id": inv_id, "content": "f", "confidence": 0.2,
-    })
+        "investigation_id": inv_id, "content": "f",     })
     await call_tool(zetesis_server, "conclude_investigation", {
         "investigation_id": inv_id, "verdict": "findings",
         "summary": "s",

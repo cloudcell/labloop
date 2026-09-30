@@ -105,7 +105,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         tournament_id: Annotated[str, Field(description='ID of the target tournament.')],
         arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm to scope the campaign to: 'parent' | 'candidate'. The opened campaign is still a complete two-arm (champion vs challenger) campaign — arm names WHICH tournament context it evaluates, not a single campaign arm.")],
         upstream_contract_id: Annotated[str, Field(description="The upstream evaluation contract the arm's campaign is scored under.")],
-        challenger_id: Annotated[str, Field(description="Roster ID of the challenger arm's candidate.")],
+        challenger_id: Annotated[str, Field(description="Roster ID of the challenger arm's candidate. The champion side is the upstream roster incumbent — this tool does not take it.")],
         seeds: Annotated[list | str | None, Field(description='Seed set for the arm (list of ints); may be JSON-encoded.')] = None,
         allow_underpowered: Annotated[bool, Field(description='Forwarded to upstream open_campaign — records power_acknowledged when the declared n is below the contract\'s required_n.')] = False,
     ) -> Annotated[CallToolResult, OpenArmCampaignOut]:
@@ -124,6 +124,13 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         twice on the same arm's link. A retry on an already-linked
         arm returns the existing link rather than multiplying
         campaigns upstream.
+
+        Naming: arete's 'parent'/'candidate' arms select WHICH
+        campaign (each arm links to its own); zetesis's
+        'champion'/'challenger' name the sides WITHIN a campaign —
+        champion is the upstream roster incumbent, challenger is the
+        descendant under test. They are different axes, not a
+        translation.
         """
         try:
             if e := check_arm_valid(arm):
@@ -193,7 +200,7 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         goal: Annotated[str, Field(description='Research goal for the spawned programme.')],
         constraints: Annotated[dict | str, Field(description='Typed constraint fields {gpu_memory_gb, max_training_hours_per_trial, max_parameter_count} for the spawned programme; may be JSON-encoded.')],
         allowed_variables: Annotated[list | str, Field(description='Variables the programme may search/vary; list or JSON-encoded list.')],
-        campaign_arm: Annotated[Literal['champion', 'challenger'], Field(description="Which side of the upstream campaign the programme spawns for (default challenger — the arm's descendant).")] = "challenger",
+        campaign_arm: Annotated[Literal['champion', 'challenger'], Field(description="Which side of the arm's linked upstream campaign the programme spawns for: 'champion' | 'challenger' (required — a spawn is a binding decision; there is no default). 'arm' selects which campaign; 'campaign_arm' selects the side within it.")],
     ) -> Annotated[CallToolResult, SpawnArmProgrammeOut]:
         """Spawn a descendant Loop-0 programme for a tournament arm.
 
@@ -202,8 +209,9 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         programmes_per_arm cap, resolves metric_direction from the
         campaign's evaluation contract (never caller-supplied), and
         records the durable campaign_spawns row. campaign_arm selects
-        which side of the upstream campaign the programme spawns for
-        (default challenger — the arm's descendant).
+        which side of the arm's linked upstream campaign the
+        programme spawns for — it is required, not defaulted: 'arm'
+        picks the campaign, 'campaign_arm' picks the side within it.
         """
         try:
             if e := check_arm_valid(arm):
@@ -247,8 +255,8 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
     async def pull_arm_evidence(
         tournament_id: Annotated[str, Field(description='ID of the target tournament.')],
         arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm the pull is scoped to: 'parent' | 'candidate'.")],
-        source: Annotated[Literal['loop0', 'loop1', 'anamnesis'], Field(description='Evidence source — the upstream read surface to pull through.')],
-        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_campaign', 'get_candidate_lineage', 'get_claim', 'get_incumbent', 'get_investigation', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_campaigns', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_investigations', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — must be on the source's read whitelist (the evidence channel is read-only).")],
+        source: Annotated[Literal['loop0', 'anamnesis'], Field(description="Evidence source — the upstream read surface to pull through. Mirrors pull_campaign_evidence's accepted set (loop1 is not reachable through the campaign-scoped pull).")],
+        tool: Annotated[Literal['assess_programme', 'get_archive', 'get_archived_programme', 'get_candidate', 'get_candidate_lineage', 'get_candidate_scorecard', 'get_claim', 'get_evaluation_contract', 'get_incumbent', 'get_trial_status', 'list_active_programmes', 'list_archives', 'list_candidates', 'list_claims', 'list_hypotheses', 'list_programmes', 'list_promotion_decisions', 'list_trials', 'recall'], Field(description="Upstream read tool to call — validity is per-source: loop0 allows list_active_programmes|list_hypotheses|list_trials|get_trial_status|assess_programme|get_candidate_lineage|list_archives|get_archive|get_archived_programme|list_candidates|get_candidate|list_promotion_decisions|get_incumbent|get_candidate_scorecard|list_programmes|get_evaluation_contract; anamnesis allows get_claim|list_claims|recall.")],
         args: Annotated[dict | str | None, Field(description='Arguments forwarded to the upstream tool; object or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, PullArmEvidenceOut]:
         """Campaign-scoped evidence pull for a tournament arm.
@@ -257,7 +265,9 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         channel — the upstream call is logged as a campaign-scoped
         evidence ref in Loop 1, and this tool additionally logs a
         tournament-scoped evidence_ref locally so meta-decisions can
-        cite the consultation.
+        cite the consultation. The response names which is which:
+        `evidence_ref_id` is the upstream ref `record_arm_verdict`
+        accepts; `wrapper_ref_id` is the local ref meta-decisions cite.
         """
         try:
             if e := check_arm_valid(arm):
@@ -298,8 +308,13 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             )
             store.create_evidence_ref(ref)
             return ok({
-                "evidence_ref_id": ref.id,
-                "upstream_evidence_ref_id": upstream_ref,
+                # The prominent field carries the id the downstream
+                # write (record_arm_verdict) accepts — the upstream
+                # campaign-scoped ref. The wrapper-local tournament-
+                # scoped ref is a citation handle for
+                # record_meta_decision, not a verdict input.
+                "evidence_ref_id": upstream_ref,
+                "wrapper_ref_id": ref.id,
                 "ref_ids": ref_ids,
                 "result": (data or {}).get("result"),
             })
@@ -312,14 +327,16 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         arm: Annotated[Literal['parent', 'candidate'], Field(description="Tournament arm the result belongs to: 'parent' | 'candidate'.")],
         programme_id: Annotated[str, Field(description='ID of the target research programme.')],
         metrics: Annotated[dict | str, Field(description="Result metrics pushed to the arm's campaign — must carry the contract's primary_metric; may be JSON-encoded.")],
-        campaign_arm: Annotated[Literal['champion', 'challenger'], Field(description="Which side of the upstream campaign the programme spawns for (default challenger — the arm's descendant).")] = "challenger",
+        campaign_arm: Annotated[Literal['champion', 'challenger'], Field(description="Which side of the arm's linked upstream campaign the programme spawned under: 'champion' | 'challenger' (required — must name the side explicitly; 'arm' selects the campaign, 'campaign_arm' the side within it).")],
     ) -> Annotated[CallToolResult, RecordArmResultOut]:
         """Report an executed descendant programme to the arm's campaign.
 
         Pushes record_campaign_result upstream — Loop 1 rejects any
         programme that was not spawned under this campaign (and this
         campaign-side arm), so a result can only ever count for the
-        programme the orchestrated campaign created.
+        programme the orchestrated campaign created. campaign_arm is
+        required: the side a result counts for is a binding decision,
+        not a default.
         """
         try:
             if e := check_arm_valid(arm):
@@ -411,10 +428,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         improver promotion stays governed by record_meta_decision /
         promote_policy; this verb closes out the descendant side.
         evidence_ref_ids must be the upstream campaign-scoped erefs
-        (the ref_ids / upstream_evidence_ref_id in a pull_arm_evidence
+        (the `evidence_ref_id` / `ref_ids` in a pull_arm_evidence
         response) — they are resolved against the campaign store. The
-        local evidence_ref_id minted alongside them is tournament-
-        scoped here and will not resolve upstream; cite it in
+        local `wrapper_ref_id` minted alongside is tournament-scoped
+        here and will not resolve upstream; cite it in
         record_meta_decision instead.
         """
         try:

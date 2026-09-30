@@ -64,9 +64,15 @@ async def _call(mcp, name, args):
 async def test_list_claims_projects_confidence_basis(claims_server):
     r = await _call(claims_server, "assert_claim", {
         "content": "grounded probe", "type": "empirical",
-        "confidence": 0.3, "confidence_basis": "weakly_grounded",
+        # Basis is derived server-side (plan-20260930-0240Z) — an
+        # evidence-bearing edge mints weakly_grounded.
+        "evidence": [{
+            "to_ref": "trial-p", "ref_type": "trial",
+            "relation": "tested_by",
+        }],
     })
     assert "error" not in r, r
+    assert r["confidence_basis"] == "weakly_grounded"
     cid = r["claim_id"]
 
     got = await _call(claims_server, "get_claim", {"claim_id": cid})
@@ -81,7 +87,6 @@ async def test_list_claims_projects_confidence_basis(claims_server):
 async def test_assert_claim_honours_valid_from(claims_server):
     r = await _call(claims_server, "assert_claim", {
         "content": "dated claim", "type": "empirical",
-        "confidence": 0.3,
         "valid_from": "2026-01-15T12:00:00+00:00",
     })
     assert "error" not in r, r
@@ -92,14 +97,13 @@ async def test_assert_claim_honours_valid_from(claims_server):
     # Naive timestamps are refused — validity is a UTC statement.
     r = await _call(claims_server, "assert_claim", {
         "content": "naive", "type": "empirical",
-        "confidence": 0.3, "valid_from": "2026-01-15 12:00:00",
+        "valid_from": "2026-01-15 12:00:00",
     })
     assert "error" in r, r
 
     # valid_from must not postdate valid_until.
     r = await _call(claims_server, "assert_claim", {
         "content": "inverted", "type": "empirical",
-        "confidence": 0.3,
         "valid_from": "2026-02-01T00:00:00Z",
         "valid_until": "2026-01-01T00:00:00Z",
     })
@@ -195,6 +199,70 @@ async def test_undeclared_args_refused_on_gated_dispatch(tmp_path):
             r = await _call(mcp, tool, args)
             assert "error" in r, (tool, r)
             assert "typo_arg" in r["error"], r["error"]
+    finally:
+        for s in stores:
+            s.close()
+
+
+async def test_undeclared_args_refused_without_recurrence(tmp_path):
+    """Argument hygiene is not a protocol feature: the refusal must
+    fire with recurrent_protocol=0 AND with no enforcement_config
+    at all. This is the hole the numeric-provenance probe exposed —
+    conftest sets ML_RECURRENT_PROTOCOL=0, and the undeclared
+    `confidence` silently dropped into extra=ignore instead of
+    refusing."""
+    from ml_anamnesis_mcp.server import create_server as mk_claims
+    from ml_anamnesis_mcp.state.store import MemoryStore
+    from ml_arete_mcp.server import create_server as mk_l2
+    from ml_arete_mcp.state.store import ImproverStore
+    from ml_episteme_mcp.server import create_server as mk_l0
+    from ml_episteme_mcp.state.store import StateStore
+    from ml_zetesis_mcp.server import create_server as mk_l1
+    from ml_zetesis_mcp.state.store import SearchStore
+
+    cases = []
+    stores = []
+    for mk, store in (
+        (mk_claims, MemoryStore(str(tmp_path / "m.db"))),
+        (mk_l0, StateStore(str(tmp_path / "s.db"))),
+        (mk_l1, SearchStore(str(tmp_path / "z.db"))),
+        (mk_l2, ImproverStore(str(tmp_path / "a.db"))),
+    ):
+        store.connect()
+        stores.append(store)
+        cases.append({
+            "protocol_off": mk(
+                store,
+                enforcement_config={"recurrent_protocol": False}),
+            "no_config": mk(store),
+        })
+
+    try:
+        for mcp, tool, args in (
+            (cases[0]["protocol_off"], "assert_claim",
+             {"content": "x", "type": "empirical",
+              "confidence": 0.9}),
+            (cases[0]["no_config"], "list_claims",
+             {"typo_arg": 1}),
+            (cases[1]["protocol_off"], "list_programmes",
+             {"typo_arg": 1}),
+            (cases[1]["no_config"], "list_programmes",
+             {"typo_arg": 1}),
+            (cases[2]["protocol_off"], "list_investigations",
+             {"typo_arg": 1}),
+            (cases[2]["no_config"], "list_investigations",
+             {"typo_arg": 1}),
+            (cases[3]["protocol_off"], "list_improvers",
+             {"typo_arg": 1}),
+            (cases[3]["no_config"], "list_improvers",
+             {"typo_arg": 1}),
+        ):
+            r = await _call(mcp, tool, args)
+            assert "error" in r, (tool, r)
+            bad = "confidence" if tool == "assert_claim" \
+                else "typo_arg"
+            assert bad in r["error"], r["error"]
+            assert "undeclared" in r["error"], r["error"]
     finally:
         for s in stores:
             s.close()

@@ -192,6 +192,7 @@ class TestDownstreamVerbs:
             "tournament_id": tourn, "arm": "candidate",
             "goal": "improve the thing",
             "constraints": {}, "allowed_variables": ["lr"],
+            "campaign_arm": "challenger",
         })
         assert "error" not in r, r
         tool, args = orchestration.pushed[-1]
@@ -206,6 +207,7 @@ class TestDownstreamVerbs:
         r = await call_tool(arete_server, "spawn_arm_programme", {
             "tournament_id": tourn, "arm": "parent",
             "goal": "g", "constraints": {}, "allowed_variables": ["lr"],
+            "campaign_arm": "challenger",
         })
         assert "error" in r and "open_arm_campaign" in r["error"]
 
@@ -219,11 +221,13 @@ class TestDownstreamVerbs:
             "args": {"programme_id": "prog-x"},
         })
         assert "error" not in r, r
-        assert r["upstream_evidence_ref_id"] == "eref-up1"
-        # Local tournament-scoped eref recorded
+        # evidence_ref_id is the upstream ref record_arm_verdict accepts
+        assert r["evidence_ref_id"] == "eref-up1"
+        # Local tournament-scoped eref recorded, exposed as wrapper_ref_id
         refs = improver_store.list_evidence_refs("tournament", tourn)
         assert len(refs) == 1
         assert refs[0].tool == "pull_campaign_evidence"
+        assert r["wrapper_ref_id"] == refs[0].id
         assert "eref-up1" in refs[0].ref_ids
 
     async def test_record_result_and_close(
@@ -234,6 +238,7 @@ class TestDownstreamVerbs:
             "tournament_id": tourn, "arm": "candidate",
             "programme_id": "prog-1",
             "metrics": {"hits": 3.0},
+            "campaign_arm": "challenger",
         })
         assert "error" not in r, r
         tool, args = orchestration.pushed[-1]

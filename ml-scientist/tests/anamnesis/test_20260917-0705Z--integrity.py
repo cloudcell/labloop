@@ -24,7 +24,7 @@ def _check(payload, name):
     return next(c for c in payload["checks"] if c["name"] == name)
 
 
-def _claim(cid, confidence=0.8, **kw):
+def _claim(cid, confidence=None, **kw):
     return Claim(
         id=cid,
         content=kw.pop("content", f"content {cid}"),
@@ -44,40 +44,72 @@ def test_clean_store_is_ok(mem_store):
     assert len(payload["checks"]) == 5
 
 
-async def test_unsupported_high_confidence(mcp_server, mem_store):
-    # Supported claim → clean
-    await make_claim(mcp_server, confidence=0.9)
+async def test_unverifiable_confidence(mcp_server, mem_store):
+    """Every numeric confidence must recompute through its stored
+    derivation (plan-20260930-0240Z)."""
+    # A claim minted through the computation path → verifies clean
+    await make_claim(mcp_server)
     assert _check(
-        run_checks(mem_store), "unsupported_high_confidence"
+        run_checks(mem_store), "unverifiable_confidence"
     )["ok"]
 
     # Direct insert bypasses enforcement — the audit catches it
     mem_store.create_claim(_claim("claim-bare", confidence=0.9))
-    c = _check(run_checks(mem_store), "unsupported_high_confidence")
+    c = _check(run_checks(mem_store), "unverifiable_confidence")
     assert not c["ok"]
-    assert c["violations"][0]["claim_id"] == "claim-bare"
+    v = next(x for x in c["violations"]
+             if x["claim_id"] == "claim-bare")
+    assert v["legacy"] is True          # NULL basis → pre-invariant row
+    assert "derivation" in v["problem"]
 
 
-def test_prior_confidence_max_from_config(mem_store):
-    """[integrity] prior_confidence_max governs the audit — the same
-    knob the write-time gate reads, so they can't diverge."""
-    mem_store.create_claim(_claim("claim-mid", confidence=0.4))
-    # Default ceiling 0.3 → flagged
-    c = _check(run_checks(mem_store), "unsupported_high_confidence")
+def test_unverifiable_confidence_recompute_mismatch(mem_store):
+    """A stored derivation that does not reproduce the stored number
+    is fabrication at rest — recomputation is the audit."""
+    from ml_anamnesis_mcp.state.models import ClaimEdge, Relation, RefType
+    mem_store.create_claim(_claim(
+        "claim-mismatch", confidence=0.95, confidence_basis="grounded",
+        confidence_computation={
+            "procedure": "posterior_from_2lnbf",
+            "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+        },
+    ))
+    mem_store.create_edge(ClaimEdge(
+        id="edge-mm", from_claim="claim-mismatch",
+        to_ref="trial-1", ref_type=RefType.trial,
+        relation=Relation.tested_by,
+    ))
+    c = _check(run_checks(mem_store), "unverifiable_confidence")
     assert not c["ok"]
-    # Configured ceiling 0.5 → under the bar
-    c = _check(
-        run_checks(mem_store, prior_confidence_max=0.5),
-        "unsupported_high_confidence",
-    )
-    assert c["ok"]
-    # And through the config-table path the monitor/route use
-    payload = run_and_log(
-        mem_store,
-        config={"prior_confidence_max": 0.5, "log_max_files": 0},
-        trigger="tool",
-    )
-    assert _check(payload, "unsupported_high_confidence")["ok"]
+    v = c["violations"][0]
+    assert v["legacy"] is False
+    assert "does not recompute" in v["problem"]
+
+
+def test_unverifiable_confidence_grounded_without_edge(mem_store):
+    """A recomputing derivation without an evidence-bearing edge is
+    still a violation — grounded requires both legs."""
+    from ml_anamnesis_mcp import _grounded_constants as _gc
+    mem_store.create_claim(_claim(
+        "claim-float",
+        confidence=_gc.posterior_from_2lnbf(0.3, 2.7055),
+        confidence_basis="grounded",
+        confidence_computation={
+            "procedure": "posterior_from_2lnbf",
+            "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+        },
+    ))
+    c = _check(run_checks(mem_store), "unverifiable_confidence")
+    assert not c["ok"]
+    assert "evidence-bearing" in c["violations"][0]["problem"]
+
+
+def test_null_confidence_is_honest(mem_store):
+    """NULL confidence never violates — absence is the answer."""
+    mem_store.create_claim(_claim("claim-null", confidence=None))
+    assert _check(
+        run_checks(mem_store), "unverifiable_confidence"
+    )["ok"]
 
 
 async def test_dangling_claim_refs(mem_store):
@@ -220,7 +252,7 @@ def test_integrity_gui(mem_store):
     run_and_log(mem_store, config={})
     r = client.get("/integrity")
     assert r.status_code == 200
-    assert "unsupported_high_confidence" in r.text
+    assert "unverifiable_confidence" in r.text
 
     run = list_check_logs(Path(mem_store.db_path).parent / "logs")[0]
     r = client.get(f"/integrity/run/{run['file']}/{run['index']}")
@@ -228,7 +260,7 @@ def test_integrity_gui(mem_store):
     assert "claim-bare" in r.text
     r = client.get(f"/integrity/log/{run['file']}")
     assert r.status_code == 200
-    assert "unsupported_high_confidence" in r.text
+    assert "unverifiable_confidence" in r.text
 
 
 def test_integrity_help(mem_store):
@@ -249,7 +281,7 @@ def test_integrity_help(mem_store):
     r = client.get("/integrity/help")
     assert r.status_code == 200
     for name in (
-        "upstream_connectivity", "unsupported_high_confidence",
+        "upstream_connectivity", "unverifiable_confidence",
         "dangling_claim_refs", "broken_supersession",
     ):
         assert name in r.text

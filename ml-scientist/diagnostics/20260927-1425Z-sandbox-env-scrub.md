@@ -26,7 +26,7 @@ episteme — set up programme + hypothesis first.
 
 PART A — setup
 
-1. Episteme: create_programme + create_hypothesis for tag `diag-env`.
+1. Episteme: create_programme + formulate_hypothesis for tag `diag-env`.
    The programme must be status=active for run_trial — check
    get_programme / the run_trial schema description for the gate.
 

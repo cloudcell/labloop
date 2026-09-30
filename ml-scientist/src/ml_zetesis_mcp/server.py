@@ -102,16 +102,7 @@ def create_server(
     from .tools import integrity as integrity_tools
     from .tools import investigation, promotion
 
-    from .enforcement.checks import PRIOR_CONFIDENCE_MAX
-
-    investigation.register(
-        mcp, store, adaptors,
-        prior_confidence_max=float(
-            (integrity_config or {}).get(
-                "prior_confidence_max", PRIOR_CONFIDENCE_MAX
-            )
-        ),
-    )
+    investigation.register(mcp, store, adaptors)
     promotion.register(mcp, store, adaptors)
     integrity_tools.register(
         mcp, store, adaptors, integrity_config=integrity_config
@@ -153,10 +144,10 @@ def create_server(
     # response injection + open-violation gate (plan-20260926-0438Z).
     # Disabled unless [enforcement] is provided; __main__ always
     # forwards it, so the shipped server runs enabled by default.
+    from .enforcement import recurrence
+
     enf = enforcement_config or {}
     if enf and enf.get("recurrent_protocol", True):
-        from .enforcement import recurrence
-
         recurrence.TRACKER.configure(
             enf.get("status_freshness_seconds", _gc.STATUS_FRESHNESS_SECONDS.value)
         )
@@ -167,5 +158,11 @@ def create_server(
                 if hasattr(adaptors, "connectivity_report") else None
             ),
         )
+
+    # Argument hygiene is not a protocol feature — the undeclared-arg
+    # refusal must survive recurrent_protocol=0 (and an absent
+    # [enforcement] block). Outermost wrapper: malformed calls refuse
+    # by name before any gate runs.
+    recurrence.install_strict_args(mcp)
 
     return mcp

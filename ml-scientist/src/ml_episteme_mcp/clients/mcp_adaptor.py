@@ -358,7 +358,9 @@ class AnamnesisClaimsAdaptor(MCPClientAdaptor, ClaimsRole):
     episodic memory, which is owned by the loop's state.db (ADR-0005).
 
     Expected downstream tools:
-    - assert_claim(content, type, confidence, evidence, source_id) -> {claim_id}
+    - assert_claim(content, type, evidence, source_id,
+      confidence_computation?) -> {claim_id, confidence,
+      confidence_basis, ...}
     - relate(from_claim, to_ref, ref_type, relation) -> {edge_id}
     - get_claim(claim_id) -> claim + provenance bundle (JSON string)
     - list_claims(type?, limit?) -> list of claims (JSON string)
@@ -375,20 +377,17 @@ class AnamnesisClaimsAdaptor(MCPClientAdaptor, ClaimsRole):
         self,
         content: str,
         type: str,
-        confidence: float,
         evidence: list[dict[str, Any]] | None = None,
         source_id: str | None = None,
-        confidence_basis: str | None = None,
-    ) -> str:
-        data = self._parse(await self.call_tool("assert_claim", {
+        confidence_computation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._parse(await self.call_tool("assert_claim", {
             "content": content,
             "type": type,
-            "confidence": confidence,
             "evidence": evidence or [],
             "source_id": source_id,
-            "confidence_basis": confidence_basis,
+            "confidence_computation": confidence_computation,
         }), "assert_claim")
-        return data["claim_id"]
 
     async def relate(
         self,

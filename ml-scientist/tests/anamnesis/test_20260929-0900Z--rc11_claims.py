@@ -38,14 +38,14 @@ class TestDedupAttachesEvidence:
     ):
         r1 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 dedup probe", "type": "empirical",
-            "confidence": 0.5, "evidence": EV_A,
+            "evidence": EV_A,
         })
         cid = r1["claim_id"]
         assert r1.get("deduplicated") is not True
 
         r2 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 dedup probe", "type": "empirical",
-            "confidence": 0.5, "evidence": EV_B,
+            "evidence": EV_B,
         })
         assert r2["deduplicated"] is True
         assert r2["claim_id"] == cid
@@ -58,12 +58,12 @@ class TestDedupAttachesEvidence:
     ):
         r1 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 dedup twice", "type": "empirical",
-            "confidence": 0.5, "evidence": EV_A,
+            "evidence": EV_A,
         })
         cid = r1["claim_id"]
         r2 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 dedup twice", "type": "empirical",
-            "confidence": 0.5, "evidence": EV_A,
+            "evidence": EV_A,
         })
         assert r2["deduplicated"] is True
         assert r2["edges_added"] == 0
@@ -75,13 +75,12 @@ class TestDedupAttachesEvidence:
         """Minted bare, then evidence accrues via re-assertion."""
         r1 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 accrual", "type": "empirical",
-            "confidence": 0.3,
-        })
+                    })
         cid = r1["claim_id"]
         assert len(_edges(mem_store, cid)) == 0
         r2 = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 accrual", "type": "empirical",
-            "confidence": 0.3, "evidence": EV_A + EV_B,
+            "evidence": EV_A + EV_B,
         })
         assert r2["edges_added"] == 2
         assert len(_edges(mem_store, cid)) == 2
@@ -91,12 +90,10 @@ class TestDedupAttachesEvidence:
     ):
         await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 malformed", "type": "empirical",
-            "confidence": 0.3,
-        })
+                    })
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 malformed", "type": "empirical",
-            "confidence": 0.3,
-            "evidence": [{"to_ref": "trial-x", "ref_type": "bogus",
+                        "evidence": [{"to_ref": "trial-x", "ref_type": "bogus",
                           "relation": "supports"}],
         })
         assert "error" in r
@@ -107,12 +104,10 @@ class TestDedupAttachesEvidence:
     ):
         await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 claimref", "type": "empirical",
-            "confidence": 0.3,
-        })
+                    })
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 claimref", "type": "empirical",
-            "confidence": 0.3,
-            "evidence": [{"to_ref": "claim-nonexist",
+                        "evidence": [{"to_ref": "claim-nonexist",
                           "ref_type": "claim", "relation": "supports"}],
         })
         assert "error" in r
@@ -127,8 +122,7 @@ class TestReferenceVocabulary:
         cid = (
             await call_tool(mcp_server, "assert_claim", {
                 "content": "rc11 vocab", "type": "empirical",
-                "confidence": 0.3,
-            })
+                            })
         )["claim_id"]
         for rt, ref in (("bundle", "bundle-abc12345"),
                         ("dataref", "data-ref-xyz"),
@@ -145,8 +139,7 @@ class TestReferenceVocabulary:
         cid = (
             await call_tool(mcp_server, "assert_claim", {
                 "content": "rc11 guard", "type": "empirical",
-                "confidence": 0.3,
-            })
+                            })
         )["claim_id"]
         for ref in ("bundle-44bd7102", "data-ref-9", "claim-x",
                     "trial-1"):
@@ -162,8 +155,7 @@ class TestReferenceVocabulary:
     ):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 guard2", "type": "empirical",
-            "confidence": 0.3,
-            "evidence": [{"to_ref": "bundle-1", "ref_type": "external",
+                        "evidence": [{"to_ref": "bundle-1", "ref_type": "external",
                           "relation": "cites"}],
         })
         assert "error" in r
@@ -173,8 +165,7 @@ class TestReferenceVocabulary:
         cid = (
             await call_tool(mcp_server, "assert_claim", {
                 "content": "rc11 ext-ok", "type": "empirical",
-                "confidence": 0.3,
-            })
+                            })
         )["claim_id"]
         r = await call_tool(mcp_server, "relate", {
             "from_claim": cid, "to_ref": "doi:10.1234/example",
@@ -183,17 +174,29 @@ class TestReferenceVocabulary:
         assert "error" not in r, r
 
     async def test_cites_is_not_evidence(self, mcp_server):
-        """A cites edge does not satisfy the evidence ceiling —
-        citation is not support."""
+        """A cites edge does not satisfy the evidence requirement —
+        citation is not support. The mint succeeds but stays
+        ungrounded with NULL confidence, and a computation is refused
+        without an evidence-bearing edge."""
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "rc11 cites-not-evidence", "type": "empirical",
-            "confidence": 0.9,
             "evidence": [{"to_ref": "bundle-1", "ref_type": "bundle",
                           "relation": "cites"}],
         })
-        assert "error" in r
-        assert "confidence" in r["error"].lower() or \
-               "evidence" in r["error"].lower()
+        assert "error" not in r
+        assert r["confidence"] is None
+        assert r["confidence_basis"] == "ungrounded"
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "rc11 cites-not-evidence-computed",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            },
+            "evidence": [{"to_ref": "bundle-1", "ref_type": "bundle",
+                          "relation": "cites"}],
+        })
+        assert "error" in r and "evidence" in r["error"]
 
 
 class TestMisfiledExternalMigration:

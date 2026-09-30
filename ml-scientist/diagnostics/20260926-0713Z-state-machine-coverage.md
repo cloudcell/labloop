@@ -69,9 +69,10 @@ PART B — Loop 0 promotion machinery (episteme; seeds zetesis' truth)
 
 PART C — anamnesis bi-temporal claims (no FSM — live/superseded/expired)
 
-13. assert_claim (diag claim) → live. NEGATIVE: assert a claim at
-    confidence > 0.3 with NO evidence edges → confirm the cap fires
-    (unevidenced claims cannot be asserted strongly).
+13. assert_claim (diag claim) → live. NEGATIVE: assert a claim with
+    a `confidence` argument → refused as undeclared (the numeric
+    provenance invariant — no caller-originated numbers). A bare
+    mint stores confidence NULL / basis ungrounded.
 14. relate: claim→claim edge (verified ref) and claim→external ref
     (e.g. the cand-/trial- ids from Parts A–B — opaque, trusted).
     NEGATIVE: relate to a claim id that does not exist → refused

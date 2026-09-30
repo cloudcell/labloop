@@ -21,9 +21,11 @@ from .. import _grounded_constants as _gc
 from ..clients.adaptor import MCPAdaptor
 from ..enforcement.commitments import (
     check_candidate_parent_exists,
+    check_contract_metrics,
     check_contract_programme_exists,
     check_decision_valid,
     check_digest_claim,
+    check_not_foreign_id,
     check_programme_active,
     check_promotion_policy_power,
 )
@@ -133,6 +135,8 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
     def get_candidate(candidate_id: Annotated[str, Field(description='Candidate version ID to read.')]) -> Annotated[CallToolResult, GetCandidateOut]:
         """Read one candidate version (read-only)."""
         try:
+            if e := check_not_foreign_id(candidate_id, "cand-"):
+                return fail(json.dumps({"error": e}))
             c = store.get_candidate_version(candidate_id)
             if c is None:
                 return fail(json.dumps({
@@ -188,6 +192,8 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         is a new 'rollback' verdict, never a mutation.
         """
         try:
+            if e := check_not_foreign_id(candidate_id, "cand-"):
+                return fail(json.dumps({"error": e}))
             if store.get_candidate_version(candidate_id) is None:
                 return fail(json.dumps({
                     "error": f"Candidate not found: {candidate_id}"
@@ -231,6 +237,8 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         are reported per programme.
         """
         try:
+            if e := check_not_foreign_id(candidate_id, "cand-"):
+                return fail(json.dumps({"error": e}))
             if store.get_candidate_version(candidate_id) is None:
                 return fail(json.dumps({
                     "error": f"Candidate not found: {candidate_id}"
@@ -269,6 +277,8 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         result attributed to this candidate inherits.
         """
         try:
+            if e := check_not_foreign_id(candidate_id, "cand-"):
+                return fail(json.dumps({"error": e}))
             lineage = store.get_candidate_lineage(candidate_id)
             if not lineage:
                 return fail(json.dumps({
@@ -307,6 +317,12 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
         supersedes the previous. metrics and promotion_policy may be
         sent as JSON-encoded strings.
 
+        The powered-policy gate enforces presence of the design keys
+        (sesoi_d, target_power, min_evidence_rung), not adequacy —
+        target_power: 0.5 pre-registers fine; adequacy surfaces
+        downstream as underpowered / power_acknowledged on the
+        campaign, not as a mint refusal.
+
         Enforcement: programme must exist.
         """
         try:
@@ -327,6 +343,12 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             # Enforcement: commitment 1 — a closed programme is immutable
             err = check_programme_active(store.get_programme(programme_id))
             if err:
+                return fail(json.dumps({"error": err}))
+
+            # Enforcement: a contract that cannot resolve a primary
+            # metric and direction can never spawn a programme —
+            # refuse at mint rather than after a campaign pins it.
+            if err := check_contract_metrics(metrics):
                 return fail(json.dumps({"error": err}))
 
             # Enforcement: a contract without declared SESOI/power is

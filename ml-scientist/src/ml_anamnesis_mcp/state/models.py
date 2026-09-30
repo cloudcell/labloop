@@ -131,18 +131,26 @@ class Claim(BaseModel):
     id: str
     content: str
     type: ClaimType
-    confidence: float = Field(ge=0.0, le=1.0)
+    # Numeric provenance invariant (plan-20260930-0240Z): non-NULL
+    # confidence exists iff a registered derivation produced it —
+    # an unevidenced claim has no computable confidence, so the
+    # column says NULL rather than wearing a policy constant.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     valid_from: str = Field(default_factory=_utc_now)
     valid_until: str | None = None
     supersedes_id: str | None = None
     content_hash: str
     source_id: str | None = None
-    # Confidence provenance (plan-20260929-1642Z): what the float
-    # rests on — grounded = a posterior bound was computed;
-    # weakly_grounded = evidence consulted, no likelihood;
-    # ungrounded = prior-ceiling mint, no evidence. NULL on
-    # legacy rows — recorded as ungrounded, not guessed.
+    # Confidence provenance (plan-20260929-1642Z; server-derived
+    # since plan-20260930-0240Z): grounded = a registered derivation
+    # produced the number; weakly_grounded = evidence-bearing edges
+    # attached, no derivation; ungrounded = bare mint. NULL on
+    # legacy rows only — post-cutover mints always carry a basis.
     confidence_basis: str | None = None
+    # The derivation record: {procedure, inputs} that produced
+    # confidence — replayable by any auditor. NULL ⟺ confidence is
+    # not derived (NULL confidence or a legacy row).
+    confidence_computation: dict | None = None
     created_at: str = Field(default_factory=_utc_now)
 
 

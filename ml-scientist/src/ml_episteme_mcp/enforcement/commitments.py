@@ -612,7 +612,9 @@ def check_promotion_policy_power(policy: dict | None) -> str | None:
             "effect of interest, Cohen's d > 0), 'target_power' in "
             "(0, 1), 'min_evidence_rung' "
             f"({'|'.join(_gc.EVIDENCE_RUNGS)}); optional 'alpha' "
-            "(default 0.05)."
+            "(default 0.05), optional 'prior' in (0, 0.5] "
+            "(declared P[H1] before the evidence; absent → "
+            "PRIOR_CONFIDENCE_MAX)."
         )
     d = policy["sesoi_d"]
     if (
@@ -671,6 +673,92 @@ def check_promotion_policy_power(policy: dict | None) -> str | None:
     return None
 
 
+_METRICS_RESERVED_KEYS = ("primary_metric", "secondary_metrics", "direction")
+_DIRECTION_WORDS = ("max", "maximize", "min", "minimize")
+
+# Prefixes minted by the other loops (or by this loop for
+# non-evidence surfaces like artifacts and acks) — recognised shape,
+# opaque identity. Not exhaustively enumerable by design, but every
+# minted prefix is listed so that a fabricated prefix like "evr-"
+# cannot masquerade as a foreign ref.
+FOREIGN_ID_PREFIXES: dict[str, str] = {
+    # zetesis (Loop 1)
+    "eref-": "ml-zetesis", "inv-": "ml-zetesis", "find-": "ml-zetesis",
+    "camp-": "ml-zetesis", "cres-": "ml-zetesis", "spawn-": "ml-zetesis",
+    "spol-": "ml-zetesis",
+    # arete (Loop 2)
+    "mcp-": "ml-arete", "imp-": "ml-arete", "mdec-": "ml-arete",
+    "pol-": "ml-arete", "tourn-": "ml-arete", "tcamp-": "ml-arete",
+    "tres-": "ml-arete", "canary-": "ml-arete", "mcontract-": "ml-arete",
+    # anamnesis (memory)
+    "claim-": "ml-anamnesis", "edge-": "ml-anamnesis",
+    # this loop's non-evidence mints — recognised, but not resolvable
+    # through an evidence getter
+    "ta-": "ml-episteme", "art-": "ml-episteme",
+    "archive-": "ml-episteme", "ae-": "ml-episteme",
+    "vack-": "ml-episteme",
+}
+
+
+def check_not_foreign_id(id_value: str, expected_prefix: str) -> str | None:
+    """A get_* tool asked about an id carrying another server's mint
+    prefix should say 'wrong loop', not 'not found' — the object
+    exists elsewhere, and 'not found' sends the caller hunting a
+    missing row instead of the right server."""
+    if id_value.startswith(expected_prefix):
+        return None
+    owner = next(
+        (srv for p, srv in FOREIGN_ID_PREFIXES.items()
+         if id_value.startswith(p)),
+        None,
+    )
+    if owner is not None:
+        return (
+            f"{id_value} is minted by {owner}, not ml-episteme — "
+            "wrong loop; read it on the server that owns the prefix."
+        )
+    return None
+
+
+def check_contract_metrics(metrics: dict | None) -> str | None:
+    """A contract must declare a resolvable primary metric and
+    direction at mint — the spawn-side check
+    (zetesis._resolve_contract_direction) refuses an unresolvable
+    contract only after a campaign has pinned its id. Gate the mint
+    so a never-spawnable contract is refused where it is written.
+    Both upstream spellings are honoured: an explicit `direction`
+    key, or the name→direction map form where the primary metric's
+    value is the direction."""
+    if not isinstance(metrics, dict) or not metrics:
+        return (
+            "metrics must be a non-empty object — declare "
+            "'primary_metric' (+ optional 'direction': max|min, "
+            "secondaries) or the name→direction map form "
+            '{"hits": "maximize"}'
+        )
+    named = [k for k in metrics if k not in _METRICS_RESERVED_KEYS]
+    primary = metrics.get("primary_metric") or (named[0] if named else None)
+    if not primary or not isinstance(primary, str):
+        return (
+            "metrics declares no primary metric — pass "
+            "'primary_metric' or use the name→direction map form "
+            '{"hits": "maximize"}; nothing can be scored under a '
+            "contract that names no quantity."
+        )
+    raw = metrics.get("direction")
+    if raw is None:
+        raw = metrics.get(primary)
+    if raw not in _DIRECTION_WORDS:
+        return (
+            f"metrics carries no resolvable direction — declare "
+            f"metrics.direction (max|min) or use the name→direction "
+            f"map form so the primary '{primary}' resolves to a "
+            f"direction; got: {raw!r}. A contract without a direction "
+            "can never spawn a programme."
+        )
+    return None
+
+
 def check_decision_valid(
     verdict: str,
     rationale: str,
@@ -720,25 +808,6 @@ def check_decision_valid(
             ("belief-", store.get_belief_by_id),
             ("data-ref-", store.get_data_ref),
         )
-        # Prefixes minted by the other loops (or by this loop for
-        # non-evidence surfaces like artifacts and acks) — recognised
-        # shape, opaque identity. Not exhaustively enumerable by
-        # design, but every minted prefix is listed so that a
-        # fabricated prefix like "evr-" cannot masquerade as a
-        # foreign ref.
-        _FOREIGN_PREFIXES = frozenset({
-            # zetesis (Loop 1)
-            "eref-", "inv-", "find-", "camp-", "cres-", "spawn-",
-            "spol-",
-            # arete (Loop 2)
-            "mcp-", "imp-", "mdec-", "pol-", "tourn-", "tcamp-",
-            "tres-", "canary-", "mcontract-",
-            # anamnesis (memory)
-            "claim-", "edge-",
-            # this loop's non-evidence mints — recognised, but not
-            # resolvable through an evidence getter
-            "ta-", "art-", "archive-", "ae-", "vack-",
-        })
         missing = []
         unknown = []
         for ref in evidence_refs:
@@ -749,7 +818,7 @@ def check_decision_valid(
                     break
             else:
                 if not any(
-                    ref.startswith(p) for p in _FOREIGN_PREFIXES
+                    ref.startswith(p) for p in FOREIGN_ID_PREFIXES
                 ):
                     unknown.append(ref)
         if missing:

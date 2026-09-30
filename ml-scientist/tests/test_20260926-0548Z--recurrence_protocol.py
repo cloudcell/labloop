@@ -542,7 +542,7 @@ def anamnesis(tmp_path):
 
 async def _mint_claim(mcp, content: str, evidence) -> str:
     r = await call_tool(mcp, "assert_claim", {
-        "content": content, "type": "empirical", "confidence": 0.2,
+        "content": content, "type": "empirical",
         "evidence": evidence,
     })
     assert "error" not in r, r
@@ -593,12 +593,12 @@ async def test_anamnesis_freshness_gate(tmp_path):
             enforcement_config={"status_freshness_seconds": 600},
         )
         r = await call_tool(mcp, "assert_claim", {
-            "content": "c", "type": "empirical", "confidence": 0.2,
+            "content": "c", "type": "empirical",
         })
         assert "Stale session" in r["error"]
         await read_status(mcp, "claims://status")
         r = await call_tool(mcp, "assert_claim", {
-            "content": "c", "type": "empirical", "confidence": 0.2,
+            "content": "c", "type": "empirical",
         })
         assert "error" not in r
         assert "next" not in r  # post-mutation hints are suppressed (R33)

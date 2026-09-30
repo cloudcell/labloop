@@ -59,7 +59,6 @@ class TestDedupEchoesValidUntil:
                 first = await _call(client, "assert_claim", {
                     "content": "dedup echo test claim",
                     "type": "empirical",
-                    "confidence": 0.5,
                     "valid_until": "2026-12-31T00:00:00Z",
                     "evidence": [{
                         "to_ref": "trial-x", "ref_type": "trial",
@@ -70,7 +69,6 @@ class TestDedupEchoesValidUntil:
                 again = await _call(client, "assert_claim", {
                     "content": "dedup echo test claim",
                     "type": "empirical",
-                    "confidence": 0.5,
                 })
             assert again.get("deduplicated") is True
             assert again["claim_id"] == first["claim_id"]
@@ -102,7 +100,6 @@ class TestRefTypeVocabulary:
                 claim = await _call(client, "assert_claim", {
                     "content": "typed ref edge test",
                     "type": "empirical",
-                    "confidence": 0.5,
                     "evidence": [{
                         "to_ref": "trial-x", "ref_type": "trial",
                         "relation": "tested_by",
@@ -149,13 +146,14 @@ class _RecordingClaims:
         self.minted = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None,
-        confidence_basis=None,
+        self, content, type, evidence=None, source_id=None,
+        confidence_computation=None,
     ):
         cid = f"claim-{len(self.minted) + 1:04d}"
         self.minted.append({
             "claim_id": cid, "content": content,
             "evidence": evidence, "source_id": source_id,
+            "confidence_computation": confidence_computation,
         })
         return {"claim_id": cid, "status": "created"}
 
@@ -228,12 +226,14 @@ class TestRollbackMintsClaim:
             assert mint["source_id"] == r["decision_id"]
             assert "'rollback'" in mint["content"]
             # cand-9 typed as candidate, not external, now that the
-            # vocabulary covers it.
+            # vocabulary covers it. The decision record itself is
+            # edged too — it anchors the mint's provenance.
             edge_types = {
                 e["to_ref"]: e["ref_type"] for e in mint["evidence"]
             }
             assert edge_types == {
                 "trial-1": "trial", "cand-9": "candidate",
+                r["decision_id"]: "meta_decision",
             }
         finally:
             store.close()
@@ -404,12 +404,13 @@ class _EpistemeClaims:
         self.asserts = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None,
-        confidence_basis=None,
+        self, content, type, evidence=None, source_id=None,
+        confidence_computation=None,
     ):
         self.asserts.append({
             "content": content, "source_id": source_id,
             "evidence": evidence,
+            "confidence_computation": confidence_computation,
         })
         return {"claim_id": "claim-9", "status": "created"}
 

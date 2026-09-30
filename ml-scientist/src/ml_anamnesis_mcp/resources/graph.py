@@ -99,6 +99,8 @@ def register(mcp, store) -> None:
                     "content": c.content,
                     "type": c.type.value,
                     "confidence": c.confidence,
+                    "confidence_basis": c.confidence_basis,
+                    "confidence_computation": c.confidence_computation,
                     "supersedes_id": c.supersedes_id,
                     "created_at": c.created_at,
                 }

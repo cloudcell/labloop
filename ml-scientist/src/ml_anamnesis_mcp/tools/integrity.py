@@ -44,11 +44,11 @@ def register(mcp, store, integrity_config: dict | None = None) -> None:
         """Audit the claim graph against the memory layer's invariants.
 
         Returns {status: ok|violations, checks: [{name, ok,
-        violations, detail}]}: unsupported high-confidence claims (the
-        evidence rule audited), dangling claim-typed references,
-        broken supersession chains. Report-only — nothing is repaired
-        or mutated. The run is logged to <db_dir>/logs/ (retention:
-        [integrity] log_max_files).
+        violations, detail}]}: unverifiable numeric confidence (the
+        provenance invariant audited), dangling claim-typed
+        references, broken supersession chains. Report-only — nothing
+        is repaired or mutated. The run is logged to <db_dir>/logs/
+        (retention: [integrity] log_max_files).
         """
         payload = run_and_log(store, config=integrity_config, trigger="tool")
         _annotate_acks(store, payload)

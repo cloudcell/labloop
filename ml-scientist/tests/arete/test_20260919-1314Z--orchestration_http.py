@@ -199,6 +199,7 @@ class TestOrchestrationGate:
                 "goal": f"{arm} descendant programme",
                 "constraints": {"max_steps": 100},
                 "allowed_variables": ["lr"],
+                "campaign_arm": "challenger",
             })
             assert "error" not in r, r
             spawn = r["spawn"]
@@ -224,6 +225,7 @@ class TestOrchestrationGate:
                 "tournament_id": tourn, "arm": arm,
                 "goal": "over-cap spawn",
                 "constraints": {}, "allowed_variables": ["lr"],
+                "campaign_arm": "challenger",
             })
             assert "error" in r2, r2
             assert "spawn cap" in r2["error"]
@@ -253,8 +255,8 @@ class TestOrchestrationGate:
             })
             assert "error" not in r, r
             assert r["evidence_ref_id"]
-            assert r["upstream_evidence_ref_id"]
-            battery[f"eref_{arm}"] = r["upstream_evidence_ref_id"]
+            assert r["wrapper_ref_id"]
+            battery[f"eref_{arm}"] = r["evidence_ref_id"]
         battery["eref"] = battery["eref_candidate"]
 
     async def test_04_results_spawn_scoped(self, battery):
@@ -274,6 +276,7 @@ class TestOrchestrationGate:
             "tournament_id": tourn, "arm": "candidate",
             "programme_id": foreign["programme_id"],
             "metrics": {"val_ppl": 1.0},
+            "campaign_arm": "challenger",
         })
         assert "error" in r
         assert "not spawned" in r["error"]
@@ -284,6 +287,7 @@ class TestOrchestrationGate:
                 "tournament_id": tourn, "arm": arm,
                 "programme_id": battery[f"prog_{arm}"],
                 "metrics": {"val_ppl": 4.0 if arm == "parent" else 2.0},
+                "campaign_arm": "challenger",
             })
             assert "error" not in r, r
             r = await call_tool_http(arete, "record_arm_result", {

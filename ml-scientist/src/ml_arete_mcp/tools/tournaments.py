@@ -46,6 +46,7 @@ def _result_json(r: TournamentResult) -> dict:
         "descendant_spec": r.descendant_spec,
         "metrics": r.metrics,
         "corrections": r.corrections,
+        "corrections_count": len(r.corrections or []),
         "created_at": r.created_at,
     }
 
@@ -332,6 +333,32 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 descendant_spec = coerce_json(
                     descendant_spec, dict, "descendant_spec"
                 )
+            if metrics is not None:
+                # A correction replaces metrics wholesale — refuse a
+                # replacement that drops the contract's primary
+                # metric, or the row stops supporting the
+                # computation it feeds (same gate as the write path).
+                prior = store.get_tournament_result(result_id)
+                tournament = (
+                    store.get_tournament(prior.tournament_id)
+                    if prior is not None else None
+                )
+                contract = (
+                    store.get_meta_contract(tournament.contract_id)
+                    if tournament is not None else None
+                )
+                primary = (
+                    (contract.metrics or {}).get("primary_metric")
+                    if contract is not None else None
+                )
+                if primary and primary not in metrics:
+                    return fail(json.dumps({
+                        "error": "corrected metrics must carry the "
+                        f"contract's primary_metric '{primary}' — a "
+                        "correction that drops the scored metric "
+                        "leaves a row the recursive_gain computation "
+                        "cannot read."
+                    }))
             seed_src = metrics if metrics is not None else descendant_spec
             seed = (seed_src or {}).get("seed")
             if seed is not None and not isinstance(
@@ -535,16 +562,54 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    def get_tournament(tournament_id: Annotated[str, Field(description='ID of the target tournament.')]) -> Annotated[CallToolResult, GetTournamentOut]:
+    async def get_tournament(tournament_id: Annotated[str, Field(description='ID of the target tournament.')]) -> Annotated[CallToolResult, GetTournamentOut]:
         """Read a tournament with both arms' results and its evidence
-        trail."""
+        trail.
+
+        `linked_campaigns` projects each arm's upstream campaign link
+        plus a best-effort live read (status, promotion_score,
+        decision_id) — a dead or unconfigured peer leaves those fields
+        null rather than failing the read."""
         try:
             t = store.get_tournament(tournament_id)
             if t is None:
                 return fail(json.dumps({
                     "error": f"Tournament not found: {tournament_id}"
                 }))
-            return ok({"tournament": _tournament_json(store, t)})
+            linked = []
+            for link in store.list_tournament_campaigns(t.id):
+                entry = {
+                    "link_id": link.id,
+                    "arm": link.arm.value,
+                    "campaign_id": link.campaign_id,
+                    "upstream_contract_id": link.upstream_contract_id,
+                    "challenger_id": link.challenger_id,
+                    "created_at": link.created_at,
+                    "status": None,
+                    "promotion_score": None,
+                    "decision_id": None,
+                }
+                loop1 = getattr(adaptors, "loop1", None)
+                if loop1 is not None:
+                    try:
+                        raw = await loop1.pull(
+                            "get_campaign",
+                            {"campaign_id": link.campaign_id},
+                        )
+                        camp = (
+                            (json.loads(raw) if isinstance(raw, str)
+                             else raw) or {}
+                        ).get("campaign") or {}
+                        entry["status"] = camp.get("status")
+                        entry["promotion_score"] = camp.get(
+                            "promotion_score")
+                        entry["decision_id"] = camp.get("decision_id")
+                    except Exception:
+                        pass  # upstream read is best-effort
+                linked.append(entry)
+            out = _tournament_json(store, t)
+            out["linked_campaigns"] = linked
+            return ok({"tournament": out})
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))
 

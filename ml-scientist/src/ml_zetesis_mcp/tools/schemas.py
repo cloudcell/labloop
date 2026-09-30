@@ -205,15 +205,27 @@ class RecordPromotionVerdictOut(TypedDict, total=False):
     confidence_basis: str | None
 
 
+class RosterReconciled(TypedDict, total=False):
+    # incumbent reconciliation owns demoted/champion; rollback
+    # reconciliation owns rolled_back/unrolled. A candidate un-rolled
+    # in the same refresh it becomes incumbent lands under
+    # champion/demoted, so unrolled may stay empty — see the
+    # refresh_roster docstring.
+    demoted: list[str] | None
+    champion: str | None
+    rolled_back: list[str] | None
+    unrolled: list[str] | None
+
+
 class RefreshRosterOut(TypedDict, total=False):
     upstream_candidates: int | None
     adopted: list[str] | None
     already_tracked: int | None
     incumbent: str | None
-    reconciled: dict | None
+    reconciled: RosterReconciled | None
     dry_run: bool | None
     would_adopt: list[str] | None
-    would_reconcile: dict | None
+    would_reconcile: RosterReconciled | None
 
 
 class RegisterChallengerOut(TypedDict, total=False):

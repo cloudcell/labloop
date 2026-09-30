@@ -155,7 +155,9 @@ def resolve_ref_redirect(ref_id: str) -> HTMLResponse:
     return HTMLResponse(render_base(f"Ref {ref_id}", body), status_code=404)
 
 
-def _confidence(conf: float) -> str:
+def _confidence(conf: float | None) -> str:
+    if conf is None:
+        return '<span class="muted">—</span>'
     pct = int(conf * 100)
     return (
         f'<span class="confidence-bar"><span class="confidence-fill" '

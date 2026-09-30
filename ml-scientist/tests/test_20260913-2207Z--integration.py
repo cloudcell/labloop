@@ -176,14 +176,17 @@ class TestClaimsRoleViaMCP:
         adaptor = AnamnesisClaimsAdaptor(claims_config(downstream_servers["claims"]))
         await adaptor.connect()
         try:
-            claim_id = await adaptor.assert_claim(
+            # No confidence crosses the wire (plan-20260930-0240Z) —
+            # the adaptor returns the server's derived response dict.
+            minted = await adaptor.assert_claim(
                 "depth=12 beats depth=6",
                 "empirical",
-                0.85,
                 evidence=[{"ref": "conclusion-1", "relation": "tested_by"}],
                 source_id="prog-test",
             )
+            claim_id = minted["claim_id"]
             assert claim_id.startswith("claim-")
+            assert minted["confidence_basis"] == "weakly_grounded"
 
             edge_id = await adaptor.relate(
                 claim_id, "conclusion-1", "conclusion", "tested_by"
@@ -326,9 +329,10 @@ class TestFullLoopWithRealMCPDownstream:
                 assert "depth=12 beats depth=6" in minted["content"]
                 assert "holds under" in minted["content"]
                 assert minted["type"] == "empirical"
-                # Prior-ceiling mint — no comparative likelihood on a
-                # single-arm verdict (plan-20260929-1642Z).
-                assert minted["confidence"] == 0.3
+                # No comparative likelihood on a single-arm verdict —
+                # NULL confidence, weakly_grounded by the evidence
+                # edges (plan-20260930-0240Z).
+                assert minted["confidence"] is None
                 assert minted["confidence_basis"] == "weakly_grounded"
 
                 # Verify the tested_by evidence edge to the trial

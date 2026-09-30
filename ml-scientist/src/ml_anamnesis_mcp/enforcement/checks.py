@@ -9,7 +9,6 @@ assertions is worse than no memory at all.
 from __future__ import annotations
 
 from ..state.models import (
-    EVIDENCE_RELATIONS,
     INTERNAL_REF_PREFIXES,
     RefType,
     Relation,
@@ -17,11 +16,11 @@ from ..state.models import (
 from ..state.store import MemoryStore
 from .. import _grounded_constants as _gc
 
-# Claims asserted without evidence-bearing edges may not exceed this
-# confidence — a prior-level ceiling, not a truth judgement. Named so
-# the threshold is tunable without archaeology (i-review note).
-# Value + grounding: _grounded_constants.PRIOR_CONFIDENCE_MAX
-# (IN-RANGE, NAP 2019 App. D Table D-1).
+# The prior-level ceiling that once capped caller-declared confidence
+# (pre plan-20260930-0240Z). Kept exported: the config key
+# [integrity] prior_confidence_max still exists and downstream code
+# references the value as a declared policy threshold — it is no
+# longer a write gate, only a documented constant.
 PRIOR_CONFIDENCE_MAX = _gc.PRIOR_CONFIDENCE_MAX.value
 
 
@@ -65,29 +64,6 @@ def check_claim_type_valid(claim_type: str) -> str | None:
     if claim_type not in ("empirical", "methodological"):
         return (
             f"type must be empirical|methodological, got: {claim_type}"
-        )
-    return None
-
-
-def check_evidence_requirement(
-    evidence: list[dict] | None,
-    confidence: float,
-    prior_max: float = PRIOR_CONFIDENCE_MAX,
-) -> str | None:
-    """A claim without evidence-bearing edges is capped at prior-level
-    confidence — the barrier against unsupported high-confidence spam.
-    prior_max is the configured ceiling ([integrity]
-    prior_confidence_max); the audit uses the same value."""
-    has_evidence = bool(
-        evidence
-        and any(e.get("relation") in EVIDENCE_RELATIONS for e in evidence)
-    )
-    if not has_evidence and confidence > prior_max:
-        return (
-            f"confidence {confidence} exceeds prior ceiling "
-            f"{prior_max} without evidence. Provide at least "
-            f"one evidence edge (relation: supports|derived_from|"
-            f"tested_by|valid_under) or lower confidence."
         )
     return None
 

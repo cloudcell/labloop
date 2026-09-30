@@ -138,11 +138,15 @@ async def call_tool(mcp, name: str, args: dict) -> dict:
 
 
 async def make_claim(mcp, content: str = "claim under test", **overrides) -> str:
-    """Assert a claim with evidence; return its claim_id."""
+    """Assert a claim with evidence and a registered derivation —
+    mints a grounded numeric confidence (≈0.624, the NAP D-1 row)."""
     args = {
         "content": content,
         "type": "empirical",
-        "confidence": 0.8,
+        "confidence_computation": {
+            "procedure": "posterior_from_2lnbf",
+            "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+        },
         "evidence": [
             {"to_ref": "trial-seed", "ref_type": "trial", "relation": "tested_by"}
         ],

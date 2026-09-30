@@ -61,12 +61,14 @@ PART B — R42: reference vocabulary + external guard
 9. POSITIVE CONTROL: `ref_type: "external"` with a genuinely opaque
    id (e.g. `doi:10.1234/example` or a raw URL string) → accepted —
    `external` still exists for what it means. Report verbatim.
-10. `cites` is NOT evidence: assert_claim a fresh claim at confidence
-    above the prior ceiling with only a `cites` edge → refused by
-    the evidence requirement (cites is a citation, not support).
-    Then assert the same content at/below the ceiling → minted;
-    re-assert above the ceiling with a `tested_by` edge → attaches
-    on the dedup path regardless (the ceiling is mint-time-only).
+10. `cites` is NOT evidence: assert_claim a fresh claim with a
+    confidence_computation ({procedure: "posterior_from_2lnbf",
+    inputs: {prior: 0.3, bf_2ln: 2.7055}}) and only a `cites` edge →
+    refused — cites is a citation, not an evidence-bearing relation.
+    Then assert the same content bare → minted with confidence NULL /
+    basis ungrounded; a computed mint needs an edge from the
+    evidence-bearing set (supports/derived_from/tested_by/
+    valid_under).
 
 PART C — R44: status-word records cannot launder a completion
 

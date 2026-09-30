@@ -1627,38 +1627,37 @@ def register(
                     ))
 
             # Mint the methodological claim — memory is a byproduct,
-            # never a gate on the decision. Evidence edges go in the
-            # same assert_claim call: anamnesis caps unevidenced claims
-            # at the prior ceiling, and edges minted inline satisfy the
-            # gate (post-hoc relate would hit the chicken-and-egg).
-            # Confidence is the NAP D-1 posterior bound when the
-            # campaign's statistic exists — a promote mints P[H₁|data],
-            # retain/rollback mint the conservative H₀ bound (the
-            # oracle BF is the most generous reading for H₁, so
-            # 1−posterior understates H₀'s support — defensible).
-            # No statistic → the prior ceiling, labelled
-            # weakly_grounded (evidence was consulted; no likelihood).
+            # never a gate on the decision. No number crosses the wire
+            # (plan-20260930-0240Z): the caller names a registered
+            # derivation, anamnesis recomputes and stores it.
+            # promote → posterior_from_2lnbf (P[H₁|data]);
+            # retain/rollback → h0_bound_from_2lnbf (the conservative
+            # H₀ complement — the oracle BF is the most generous
+            # reading for H₁, so 1−posterior understates H₀'s support).
+            # No statistic → no computation → NULL confidence,
+            # weakly_grounded via the evidence edges.
             prior = (
                 campaign.prior
                 if campaign.prior is not None
                 else _gc.PRIOR_CONFIDENCE_MAX.value
             )
+            confidence_computation = None
             if campaign.bf_2ln is not None:
-                # Posterior straight from the persisted 2 ln BF —
-                # no p → z round-trip (p underflows to 0.0 at
-                # extreme z, losing the statistic).
-                posterior = _gc.posterior_from_2lnbf(
-                    prior, campaign.bf_2ln
-                )
-                confidence = (
-                    posterior if verdict == "promote" else 1 - posterior
-                )
-                confidence_basis = "grounded"
-            else:
-                confidence = _gc.PRIOR_CONFIDENCE_MAX.value
-                confidence_basis = "weakly_grounded"
+                confidence_computation = {
+                    "procedure": (
+                        "posterior_from_2lnbf"
+                        if verdict == "promote"
+                        else "h0_bound_from_2lnbf"
+                    ),
+                    "inputs": {
+                        "prior": prior,
+                        "bf_2ln": campaign.bf_2ln,
+                    },
+                    "evidence_refs": sorted(evidence_ref_ids),
+                }
             claim_id = None
             claim_status = "skipped"
+            confidence_basis = None
             if adaptors.claims is None:
                 claim_status = "disabled"
             else:
@@ -1671,6 +1670,24 @@ def register(
                             if store.get_evidence_ref(rid) else []
                         )
                     }
+                    # The campaign record itself is the derivation's
+                    # provenance — edge to it so a computed mint is
+                    # never floating free of the graph even when the
+                    # caller passed no evidence_ref_ids.
+                    evidence = [
+                        {
+                            "to_ref": campaign_id,
+                            "ref_type": "campaign",
+                            "relation": "derived_from",
+                        }
+                    ] + [
+                        {
+                            "to_ref": ref_id,
+                            "ref_type": _ref_type_for(ref_id),
+                            "relation": "derived_from",
+                        }
+                        for ref_id in sorted(consulted)
+                    ]
                     minted = await adaptors.claims.assert_claim(
                         content=(
                             f"Promotion campaign {campaign_id}: "
@@ -1681,19 +1698,12 @@ def register(
                             + (f" {rationale}" if rationale else "")
                         ),
                         type="methodological",
-                        confidence=confidence,
-                        confidence_basis=confidence_basis,
-                        evidence=[
-                            {
-                                "to_ref": ref_id,
-                                "ref_type": _ref_type_for(ref_id),
-                                "relation": "derived_from",
-                            }
-                            for ref_id in sorted(consulted)
-                        ],
+                        confidence_computation=confidence_computation,
+                        evidence=evidence,
                         source_id=campaign_id,
                     )
                     claim_id = minted["claim_id"]
+                    confidence_basis = minted.get("confidence_basis")
                     store.set_campaign_claim(campaign_id, claim_id)
                     claim_status = "minted"
                 except Exception:

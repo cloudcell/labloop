@@ -98,27 +98,28 @@ def _ref_type_for(ref_id: str) -> str:
 
 async def _mint_decision_claim(
     store, adaptors, decision,
-    confidence: float | None = None,
-    confidence_basis: str | None = None,
+    confidence_computation: dict | None = None,
 ) -> tuple:
     """Mint the methodological claim for a meta-decision row.
 
     Shared by record_meta_decision and rollback — every insert-only
     mdec- row carries the same grounding contract. Returns
-    (claim_id, claim_status, claim_error, edges_created); failures are
-    reported, never raised — a claims outage must not block a decision.
+    (claim_id, claim_status, claim_error, edges_created,
+    confidence_basis); failures are reported, never raised — a claims
+    outage must not block a decision.
 
-    confidence/confidence_basis come from the caller's evidence
-    resolution (plan-20260929-1642Z): the posterior bound when the
-    cited tournament carries the statistic, else the grounded prior
-    ceiling labelled weakly_grounded — never a bare literal.
+    confidence_computation is the caller-named registered derivation
+    (plan-20260930-0240Z): the posterior bound when the cited
+    tournament carries the statistic, else NULL — anamnesis computes
+    and stores, this server never originates a number.
     """
     claim_status = "skipped"
     claim_id = None
     claim_error = None
     edges_created = 0
+    minted_basis = None
     if adaptors.claims is None:
-        return None, "disabled", None, 0
+        return None, "disabled", None, 0, None
     try:
         upstream_ids: set[str] = set()
         for eref_id in decision.evidence_refs:
@@ -126,9 +127,23 @@ async def _mint_decision_claim(
             if eref is not None:
                 upstream_ids.update(eref.ref_ids)
         consulted = sorted(upstream_ids)
-        # Evidence edges mint inline — anamnesis caps
-        # unevidenced claims at the prior ceiling, and
-        # post-hoc relate hits the chicken-and-egg.
+        # The decision record itself is the derivation's provenance —
+        # edge to it so a computed mint is never floating free of the
+        # graph even when the erefs resolved to nothing upstream.
+        evidence = [
+            {
+                "to_ref": decision.id,
+                "ref_type": "meta_decision",
+                "relation": "derived_from",
+            }
+        ] + [
+            {
+                "to_ref": ref_id,
+                "ref_type": _ref_type_for(ref_id),
+                "relation": "derived_from",
+            }
+            for ref_id in consulted
+        ]
         minted = await adaptors.claims.assert_claim(
             content=(
                 f"Loop-2 meta-decision '{decision.verdict.value}' on "
@@ -136,33 +151,20 @@ async def _mint_decision_claim(
                 f"{decision.rationale}"
             ),
             type="methodological",
-            confidence=(
-                confidence
-                if confidence is not None
-                else _gc.PRIOR_CONFIDENCE_MAX.value
-            ),
-            confidence_basis=(
-                confidence_basis or "weakly_grounded"
-            ),
-            evidence=[
-                {
-                    "to_ref": ref_id,
-                    "ref_type": _ref_type_for(ref_id),
-                    "relation": "derived_from",
-                }
-                for ref_id in consulted
-            ],
+            confidence_computation=confidence_computation,
+            evidence=evidence,
             source_id=decision.id,
         )
         claim_id = minted["claim_id"]
-        edges_created += len(consulted)
+        minted_basis = minted.get("confidence_basis")
+        edges_created += len(evidence)
         claim_status = "minted"
     except Exception as exc:
         # The mint reason must survive — a bare "failed"
         # is undiagnosable (rc-7 Q2).
         claim_status = "failed"
         claim_error = str(exc)
-    return claim_id, claim_status, claim_error, edges_created
+    return claim_id, claim_status, claim_error, edges_created, minted_basis
 
 
 def _decision_json(d: MetaDecision) -> dict:
@@ -212,6 +214,15 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         decision) with derived_from edges to the upstream entities
         the cited evidence consulted. claim_status is reported:
         'minted' | 'failed' | 'disabled' — never blocks the decision.
+
+        evidence_refs are lineage-scoped, not context-matched:
+        proposal-context refs must come from this candidate or its
+        ancestors; tournament-context refs must involve this
+        candidate. Evidence consulted anywhere in the candidate's
+        line is legitimately citable. The minted claim's confidence
+        binds the DECISION (did the evidence justify this verdict),
+        not the campaign's outcome — a grounded promote on a losing
+        campaign is a correct record.
         """
         try:
             candidate = store.get_improver(candidate_improver_id)
@@ -373,39 +384,35 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 computed_rung=computed_rung,
             )
 
-            # Confidence the minted claim carries (plan-20260929-1642Z):
-            # when the cited tournament measured a p, promote mints the
-            # NAP D-1 posterior bound; reject/rollback mint the
-            # conservative H₀ bound; hold asserts neither and mints the
-            # prior ceiling. No statistic → the ceiling, labelled
-            # weakly_grounded — evidence was consulted, no likelihood
-            # exists on a meta-decision.
-            confidence = None
-            confidence_basis = None
+            # Confidence the minted claim carries is computed by
+            # anamnesis, not here (plan-20260930-0240Z): when the cited
+            # tournament measured a statistic, name the derivation —
+            # promote → posterior_from_2lnbf (P[H₁|data]);
+            # reject/rollback → h0_bound_from_2lnbf (the conservative
+            # H₀ complement). hold asserts neither → no computation →
+            # NULL confidence.
+            confidence_computation = None
             if (
                 tournament is not None
                 and tournament.bf_2ln is not None
                 and verdict in ("promote", "reject", "rollback")
             ):
-                prior = (
-                    tournament.prior
-                    if tournament.prior is not None
-                    else _gc.PRIOR_CONFIDENCE_MAX.value
-                )
-                # Posterior straight from the persisted 2 ln BF —
-                # the p → z round-trip underflows to p=0 at
-                # extreme z, losing the statistic.
-                posterior = _gc.posterior_from_2lnbf(
-                    prior, tournament.bf_2ln
-                )
-                confidence = (
-                    posterior if verdict == "promote" else 1 - posterior
-                )
-                confidence_basis = "grounded"
-            else:
-                confidence = _gc.PRIOR_CONFIDENCE_MAX.value
-                confidence_basis = "weakly_grounded"
-            decision.confidence_basis = confidence_basis
+                confidence_computation = {
+                    "procedure": (
+                        "posterior_from_2lnbf"
+                        if verdict == "promote"
+                        else "h0_bound_from_2lnbf"
+                    ),
+                    "inputs": {
+                        "prior": (
+                            tournament.prior
+                            if tournament.prior is not None
+                            else _gc.PRIOR_CONFIDENCE_MAX.value
+                        ),
+                        "bf_2ln": tournament.bf_2ln,
+                    },
+                    "evidence_refs": sorted(evidence_refs),
+                }
 
             # Mint the methodological claim — the claim's source_id
             # names the decision record being inserted next.
@@ -414,11 +421,12 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 claim_status,
                 claim_error,
                 edges_created,
+                confidence_basis,
             ) = await _mint_decision_claim(
                 store, adaptors, decision,
-                confidence=confidence,
-                confidence_basis=confidence_basis,
+                confidence_computation=confidence_computation,
             )
+            decision.confidence_basis = confidence_basis
 
             decision.claim_id = claim_id
             decision.claim_error = claim_error
@@ -570,9 +578,11 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 claim_status,
                 claim_error,
                 edges_created,
+                confidence_basis,
             ) = await _mint_decision_claim(store, adaptors, decision)
             decision.claim_id = claim_id
             decision.claim_error = claim_error
+            decision.confidence_basis = confidence_basis
 
             restored = None
             if candidate.is_champion:

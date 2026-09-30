@@ -383,7 +383,9 @@ def check_promotion_policy_power(policy: dict | None) -> str | None:
             "effect of interest, Cohen's d > 0), 'target_power' in "
             "(0, 1), 'min_evidence_rung' "
             f"({'|'.join(_gc.EVIDENCE_RUNGS)}); optional 'alpha' "
-            "(default 0.05)."
+            "(default 0.05), optional 'prior' in (0, 0.5] "
+            "(declared P[H1] before the evidence; absent → "
+            "PRIOR_CONFIDENCE_MAX)."
         )
     d = policy["sesoi_d"]
     if (

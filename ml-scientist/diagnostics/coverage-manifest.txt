@@ -21,12 +21,12 @@ claims://by-relation/{relation} -> resource-surface
 claims://session -> resource-surface
 claims://constants -> rc12-regressions, rc7-surface-verification
 claims://status -> connectivity-fault-observability, deadline-exceeded, rc7-surface-verification, resource-surface, grounded-constants
-assert_claim -> claim-valid-until-expiry, rc11-extraction-findings, rc9-findings, state-machine-coverage, grounded-constants
+assert_claim -> claim-valid-until-expiry, numeric-provenance, rc11-extraction-findings, rc9-findings, state-machine-coverage, grounded-constants, rc13-findings
 relate -> rc11-extraction-findings, rc9-findings, state-machine-coverage, grounded-constants
-get_claim -> claim-mint-loop2-reftypes, claim-valid-until-expiry, rc11-extraction-findings, rc9-findings, read-paths-and-registries
+get_claim -> claim-mint-loop2-reftypes, claim-valid-until-expiry, numeric-provenance, rc11-extraction-findings, rc9-findings, read-paths-and-registries
 get_claims -> read-paths-and-registries
-list_claims -> claim-mint-loop2-reftypes, claim-valid-until-expiry, read-paths-and-registries, resource-surface, write-boundary-gates
-check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
+list_claims -> claim-mint-loop2-reftypes, claim-valid-until-expiry, numeric-provenance, read-paths-and-registries, resource-surface, write-boundary-gates, rc13-findings
+check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, numeric-provenance, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
 acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
 read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
 
@@ -46,26 +46,26 @@ pull_evidence -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-ref
 register_improver -> boundary-class-registry, read-paths-and-registries, state-machine-coverage, write-boundary-gates
 get_improver -> read-paths-and-registries
 list_improvers -> rc9-findings, read-paths-and-registries
-get_improver_lineage -> read-paths-and-registries
+get_improver_lineage -> read-paths-and-registries, rc13-findings
 check_invariants -> arm-campaign-verbs, blob-retrieval-and-input-digests, boundary-class-registry, campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, canary-and-correction, cancel-spawn-window-kill, channel-current-fields, claim-mint-loop2-reftypes, claim-valid-until-expiry, connectivity-fault-observability, connectivity-live-gating, integrity-report-honesty, orphan-rollback-derivation, rc11-extraction-findings, rc7-surface-verification, rc9-findings, read-paths-and-registries, resource-surface, retry-reason-ordering, roster-rollback-derivation, sandbox-env-scrub, sealed-path-runtime-deny, sealed-provenance-honesty, spawn-guard-ordering, state-machine-coverage, stderr-elision-and-schema-docs, trial-terminal-precedence, write-boundary-gates
 acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sealed-path-runtime-deny, sealed-provenance-honesty
 read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
-open_arm_campaign -> arm-campaign-verbs, campaign-orchestration, rc9-findings, spawn-guard-ordering, contract-declared-power
-spawn_arm_programme -> arm-campaign-verbs, rc9-findings
-pull_arm_evidence -> arm-campaign-verbs
-record_arm_result -> arm-campaign-verbs
-close_arm_campaign -> arm-campaign-verbs
-record_arm_verdict -> arm-campaign-verbs, contract-declared-power
-create_meta_contract -> read-paths-and-registries, contract-declared-power
+open_arm_campaign -> arm-campaign-verbs, campaign-orchestration, rc9-findings, spawn-guard-ordering, contract-declared-power, rc13-findings
+spawn_arm_programme -> arm-campaign-verbs, rc9-findings, rc13-findings
+pull_arm_evidence -> arm-campaign-verbs, rc13-findings
+record_arm_result -> arm-campaign-verbs, rc13-findings
+close_arm_campaign -> arm-campaign-verbs, rc13-findings
+record_arm_verdict -> arm-campaign-verbs, contract-declared-power, rc13-findings
+create_meta_contract -> read-paths-and-registries, contract-declared-power, rc13-findings
 propose_meta_change -> arm-campaign-verbs, boundary-class-registry, canary-and-correction, claim-mint-loop2-reftypes, integrity-report-honesty, state-machine-coverage, stderr-elision-and-schema-docs, write-boundary-gates
 get_proposal -> read-paths-and-registries
 list_proposals -> read-paths-and-registries
 open_tournament -> arm-campaign-verbs, campaign-orchestration, canary-and-correction, state-machine-coverage, write-boundary-gates, contract-declared-power
 record_tournament_result -> canary-and-correction, state-machine-coverage
-correct_tournament_result -> canary-and-correction
+correct_tournament_result -> canary-and-correction, rc13-findings
 close_tournament -> canary-and-correction, state-machine-coverage, write-boundary-gates, contract-declared-power
 void_tournament -> state-machine-coverage
-get_tournament -> arm-campaign-verbs, canary-and-correction, read-paths-and-registries
+get_tournament -> arm-campaign-verbs, canary-and-correction, read-paths-and-registries, rc13-findings
 list_tournaments -> read-paths-and-registries
 
 ## ml_episteme_mcp
@@ -94,12 +94,12 @@ get_next_experiment -> read-paths-and-registries
 update_belief -> write-boundary-gates
 register_candidate -> arm-campaign-verbs, campaign-orchestration, claim-mint-loop2-reftypes, connectivity-live-gating, orphan-rollback-derivation, retry-reason-ordering, roster-rollback-derivation, state-machine-coverage
 list_candidates -> claim-mint-loop2-reftypes, roster-rollback-derivation
-get_candidate -> read-paths-and-registries
+get_candidate -> read-paths-and-registries, rc13-findings
 get_incumbent -> orphan-rollback-derivation, read-paths-and-registries, roster-rollback-derivation, state-machine-coverage
 list_promotion_decisions -> read-paths-and-registries
 get_candidate_scorecard -> read-paths-and-registries
 get_candidate_lineage -> read-paths-and-registries
-create_evaluation_contract -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, state-machine-coverage, contract-declared-power
+create_evaluation_contract -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, state-machine-coverage, contract-declared-power, rc13-findings
 get_evaluation_contract -> read-paths-and-registries
 record_promotion_decision -> campaign-metric-write-gate, campaign-value-gate-abandon, claim-mint-loop2-reftypes, connectivity-live-gating, orphan-rollback-derivation, roster-rollback-derivation, state-machine-coverage, contract-declared-power
 prepare_data -> blob-retrieval-and-input-digests, rc7-surface-verification, read-paths-and-registries, recurrent-protocol-smoke, resource-surface, sealed-path-runtime-deny, stderr-elision-and-schema-docs, trial-terminal-precedence
@@ -113,7 +113,7 @@ describe_blob -> blob-retrieval-and-input-digests
 get_blob -> blob-retrieval-and-input-digests, sealed-path-runtime-deny
 read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
 record_observation -> arm-campaign-verbs, blob-retrieval-and-input-digests, recurrent-protocol-smoke, sealed-path-runtime-deny, sealed-provenance-honesty, state-machine-coverage, trial-terminal-precedence
-create_programme -> cancel-spawn-window-kill, deadline-exceeded, rc11-extraction-findings, retry-reason-ordering, sandbox-env-scrub, state-machine-coverage
+create_programme -> cancel-spawn-window-kill, deadline-exceeded, rc11-extraction-findings, retry-reason-ordering, sandbox-env-scrub, state-machine-coverage, rc13-findings
 list_active_programmes -> claim-mint-loop2-reftypes
 list_programmes -> arm-campaign-verbs, campaign-orchestration, deadline-exceeded, resource-surface, sealed-provenance-honesty
 update_metric_direction -> read-paths-and-registries
@@ -140,13 +140,13 @@ acknowledge_violation -> connectivity-live-gating, integrity-report-honesty, sea
 read_resource -> channel-lasterror-heals, rc7-surface-verification, resource-surface
 open_investigation -> read-paths-and-registries, state-machine-coverage
 pull_evidence -> arm-campaign-verbs, canary-and-correction, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings, state-machine-coverage, write-boundary-gates
-record_finding -> read-paths-and-registries, state-machine-coverage
+record_finding -> numeric-provenance, read-paths-and-registries, state-machine-coverage
 drop_finding -> state-machine-coverage
-conclude_investigation -> read-paths-and-registries, state-machine-coverage
+conclude_investigation -> numeric-provenance, read-paths-and-registries, state-machine-coverage
 abandon_investigation -> state-machine-coverage
-get_investigation -> read-paths-and-registries
+get_investigation -> numeric-provenance, read-paths-and-registries
 list_investigations -> read-paths-and-registries
-refresh_roster -> campaign-metric-write-gate, campaign-value-gate-abandon, channel-current-fields, orphan-rollback-derivation, roster-rollback-derivation, state-machine-coverage, stderr-elision-and-schema-docs
+refresh_roster -> campaign-metric-write-gate, campaign-value-gate-abandon, channel-current-fields, orphan-rollback-derivation, roster-rollback-derivation, state-machine-coverage, stderr-elision-and-schema-docs, rc13-findings
 register_challenger -> arm-campaign-verbs, state-machine-coverage
 register_search_policy -> read-paths-and-registries
 list_search_policies -> read-paths-and-registries
@@ -158,6 +158,6 @@ record_campaign_result -> campaign-metric-write-gate, campaign-orchestration, ca
 pull_campaign_evidence -> campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification
 close_campaign -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification, state-machine-coverage, stderr-elision-and-schema-docs, grounded-constants, contract-declared-power
 abandon_campaign -> campaign-value-gate-abandon, rc7-surface-verification, rc9-findings, grounded-constants
-record_promotion_verdict -> campaign-orchestration, state-machine-coverage, stderr-elision-and-schema-docs, contract-declared-power
+record_promotion_verdict -> campaign-orchestration, numeric-provenance, state-machine-coverage, stderr-elision-and-schema-docs, contract-declared-power
 get_campaign -> campaign-metric-write-gate, campaign-orchestration, campaign-value-gate-abandon, rc7-surface-verification, rc9-findings, spawn-guard-ordering, grounded-constants
 list_campaigns -> campaign-value-gate-abandon, claim-mint-loop2-reftypes, rc7-surface-verification, rc9-findings

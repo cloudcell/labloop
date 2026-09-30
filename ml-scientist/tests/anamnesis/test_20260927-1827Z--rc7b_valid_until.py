@@ -59,7 +59,6 @@ class TestValidUntilWrite:
     async def test_naive_timestamp_refused(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "naive ts", "type": "empirical",
-            "confidence": 0.5,
             "valid_until": "2027-01-01T00:00:00",
         })
         assert "error" in r
@@ -68,7 +67,6 @@ class TestValidUntilWrite:
     async def test_garbage_timestamp_refused(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "bad ts", "type": "empirical",
-            "confidence": 0.5,
             "valid_until": "next tuesday",
         })
         assert "error" in r

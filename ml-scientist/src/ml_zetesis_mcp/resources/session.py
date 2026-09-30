@@ -46,11 +46,12 @@ LOOP_STEPS = [
         "tool": "record_finding",
         "description": (
             "Record a provisional methodological finding grounded in "
-            "the pulls. Confidence above the prior ceiling (0.3) "
-            "requires ≥1 evidence_ref_id — an assertion the "
-            "investigator never grounded cannot pretend to be earned."
+            "the pulls — no confidence parameter (numeric provenance "
+            "invariant): a finding is a proto-claim, not a "
+            "measurement; the claim minted at conclude derives its "
+            "own basis from the evidence edges."
         ),
-        "inputs": ["investigation_id", "content", "confidence",
+        "inputs": ["investigation_id", "content",
                    "evidence_ref_ids?"],
         "outputs": ["finding_id"],
         "repeat": "Once per distinct finding",

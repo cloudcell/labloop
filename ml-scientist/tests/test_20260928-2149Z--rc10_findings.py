@@ -208,8 +208,8 @@ class TestAreteLoop0Whitelist:
                 self.minted = []
 
             async def assert_claim(
-                self, content, type, confidence, evidence=None,
-                source_id=None, confidence_basis=None,
+                self, content, type, evidence=None,
+                source_id=None, confidence_computation=None,
             ):
                 cid = f"claim-{len(self.minted) + 1:04d}"
                 self.minted.append({"evidence": evidence or []})

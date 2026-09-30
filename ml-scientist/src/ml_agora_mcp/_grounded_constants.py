@@ -657,6 +657,77 @@ def posterior_from_2lnbf(prior: float, bf_2ln: float) -> float:
     return odds / (1 + odds)
 
 
+def h0_bound_from_2lnbf(prior: float, bf_2ln: float) -> float:
+    """Conservative H0-side bound for retain/rollback verdicts.
+
+    Posterior-odds complement of the same NAP D-1 bound:
+    ``1 - posterior_from_2lnbf(prior, bf_2ln)``. Registered separately
+    because it is a *different* derivation — minting a retain claim
+    under the name 'posterior_from_2lnbf' would record a procedure
+    that does not reproduce the stored value
+    (plan-20260930-0240Z)."""
+    return 1.0 - posterior_from_2lnbf(prior, bf_2ln)
+
+
+# ---------------------------------------------------------------------------
+# Confidence-procedure registry — the only derivations that may mint a
+# numeric claim confidence (numeric provenance invariant,
+# plan-20260930-0240Z). Anamnesis recomputes mint-side; the name is the
+# provenance, the recomputed value is the confidence. A claim either
+# recomputes through a registered procedure or stores NULL.
+#
+# Map: procedure name -> (callable, required input keys).
+CONFIDENCE_PROCEDURES = {
+    "posterior_from_2lnbf": (posterior_from_2lnbf, ("prior", "bf_2ln")),
+    "h0_bound_from_2lnbf": (h0_bound_from_2lnbf, ("prior", "bf_2ln")),
+    "verdict_posterior": (verdict_posterior, ("prior", "p")),
+}
+
+
+def compute_confidence(computation: dict) -> float:
+    """Run a registered confidence computation.
+
+    ``computation`` is ``{"procedure": <name>, "inputs": {...}}``.
+    Raises UngroundedDecisionBasis on an unregistered procedure or
+    missing inputs — a numeric confidence is derived or absent,
+    never asserted."""
+    if not isinstance(computation, dict):
+        raise UngroundedDecisionBasis(
+            f"confidence_computation must be a dict, got "
+            f"{type(computation).__name__}"
+        )
+    name = computation.get("procedure")
+    entry = CONFIDENCE_PROCEDURES.get(name)
+    if entry is None:
+        known = "|".join(sorted(CONFIDENCE_PROCEDURES))
+        raise UngroundedDecisionBasis(
+            f"confidence_computation.procedure must be one of "
+            f"{known}, got: {name!r}"
+        )
+    fn, required = entry
+    inputs = computation.get("inputs")
+    if not isinstance(inputs, dict):
+        raise UngroundedDecisionBasis(
+            f"confidence_computation.inputs must be a dict of "
+            f"{'|'.join(required)}, got: {inputs!r}"
+        )
+    missing = [k for k in required if k not in inputs]
+    if missing:
+        raise UngroundedDecisionBasis(
+            f"confidence_computation.inputs missing: "
+            f"{', '.join(missing)}"
+        )
+    try:
+        return fn(**{k: inputs[k] for k in required})
+    except UngroundedDecisionBasis:
+        raise
+    except Exception as e:
+        raise UngroundedDecisionBasis(
+            f"confidence_computation {name} failed on inputs "
+            f"{inputs}: {e}"
+        )
+
+
 def required_n(
     sesoi_d: float,
     target_power: float,

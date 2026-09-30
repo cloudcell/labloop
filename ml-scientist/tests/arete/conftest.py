@@ -59,14 +59,26 @@ class FakeClaimsAdaptor(FakeUpstreamAdaptor):
         self.edges: list[dict] = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None,
-        confidence_basis=None,
+        self, content, type, evidence=None, source_id=None,
+        confidence_computation=None,
     ):
         cid = f"claim-{len(self.minted) + 1:04d}"
+        has_evidence = any(
+            e.get("relation") in (
+                "supports", "derived_from", "tested_by", "valid_under",
+            )
+            for e in (evidence or [])
+        )
+        basis = (
+            "grounded" if confidence_computation is not None
+            else "weakly_grounded" if has_evidence
+            else "ungrounded"
+        )
         self.minted.append({
             "claim_id": cid, "content": content, "type": type,
-            "confidence": confidence, "evidence": evidence,
-            "source_id": source_id, "confidence_basis": confidence_basis,
+            "evidence": evidence,
+            "source_id": source_id, "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
         })
         # Inline evidence edges mint the same relations relate() would.
         for e in evidence or []:
@@ -75,7 +87,12 @@ class FakeClaimsAdaptor(FakeUpstreamAdaptor):
                 "from_claim": cid, "to_ref": e["to_ref"],
                 "ref_type": e["ref_type"], "relation": e["relation"],
             })
-        return {"claim_id": cid, "status": "created"}
+        return {
+            "claim_id": cid, "status": "created",
+            "confidence": None,
+            "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
+        }
 
     async def relate(
         self, from_claim, to_ref, ref_type, relation, source_id=None

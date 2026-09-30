@@ -23,7 +23,6 @@ async def _seed(url):
     cid = await call_tool_http(url, "assert_claim", {
         "content": "gui-visible claim alpha",
         "type": "empirical",
-        "confidence": 0.8,
         "evidence": [
             {"to_ref": "trial-gui", "ref_type": "trial",
              "relation": "tested_by"}
@@ -90,16 +89,14 @@ class TestAnamnesisGUI:
         old = await call_tool_http(anamnesis_url, "assert_claim", {
             "content": "doomed gui claim",
             "type": "empirical",
-            "confidence": 0.8,
-            "evidence": [
+                "evidence": [
                 {"to_ref": "t", "ref_type": "trial", "relation": "tested_by"}
             ],
         })
         await call_tool_http(anamnesis_url, "assert_claim", {
             "content": "replacer gui claim",
             "type": "empirical",
-            "confidence": 0.8,
-            "supersedes_id": old["claim_id"],
+                "supersedes_id": old["claim_id"],
             "evidence": [
                 {"to_ref": "t", "ref_type": "trial", "relation": "tested_by"}
             ],

@@ -28,9 +28,6 @@ from typing import Annotated, Literal
 from pydantic import Field
 from mcp.types import CallToolResult
 
-from .. import _grounded_constants as _gc
-
-
 # Verdict → claim minting for Phase-3a. Hypothesis verdicts are
 # single-arm — no comparative likelihood exists on them
 # (plan-20260929-1642Z) — so the minted confidence is the grounded
@@ -365,15 +362,17 @@ def register(
                         # Bounded call: a claims outage must never block
                         # a verdict — not even by hanging. A dead server
                         # can leave the MCP read pending indefinitely.
-                        result["claim_id"] = await asyncio.wait_for(
+                        # No confidence crosses the wire
+                        # (plan-20260930-0240Z): a conclusion mint has
+                        # no likelihood — the evidence edges derive
+                        # weakly_grounded server-side, NULL confidence.
+                        minted = await asyncio.wait_for(
                             adaptor.claims.assert_claim(
                             content=(
                                 f"{hypothesis.statement} — {finding} "
                                 f"under {regime}: {evidence_summary}"
                             ),
                             type="empirical",
-                            confidence=_gc.PRIOR_CONFIDENCE_MAX.value,
-                            confidence_basis="weakly_grounded",
                             evidence=[
                                 {
                                     "to_ref": conclusion.id,
@@ -410,6 +409,7 @@ def register(
                             ),
                             timeout=_claims_call_timeout,
                         )
+                        result["claim_id"] = minted["claim_id"]
                         result["claim_status"] = "minted"
                     except Exception as e:
                         result["claim_status"] = "failed"

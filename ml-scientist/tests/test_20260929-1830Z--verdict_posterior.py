@@ -1,11 +1,14 @@
-"""Verdict confidence → computed posterior (e-plan 20260929-1642Z).
+"""Verdict confidence → computed posterior (e-plans 20260929-1642Z,
+20260930-0240Z).
 
-The indicted confidence literals are gone — minted confidence is now
-either the NAP D-1 oracle posterior bound (computed from the contract's
-declared prior and the measured arm statistic) or the grounded prior
-ceiling, and every mint carries a `confidence_basis` label. The rung
-gate graduated: promote may claim at most what the evidence's own
-upper bound reaches (declared ≤ claimed ≤ computed).
+The indicted confidence literals are gone — and post-0240Z no number
+crosses the wire at all: the mint names a registered derivation in
+`confidence_computation` and anamnesis recomputes it (the NAP D-1
+oracle posterior bound from the contract's declared prior and the
+measured arm statistic), or the claim carries NULL confidence with a
+derived basis label. The rung gate stands: promote may claim at most
+what the evidence's own upper bound reaches (declared ≤ claimed ≤
+computed).
 
 Pins: the 8 transcribed NAP D-1 cells, directional correction (a
 losing challenger gets BF = 1, not BF > 1), prior validation and
@@ -419,13 +422,15 @@ class TestComputedRungGate:
         assert "error" not in r, r
         assert r["computed_rung"] == "very_strong"
         assert r["confidence_basis"] == "grounded"
-        # The minted claim carries the posterior bound — bf_2ln=600
-        # saturates the oracle bound at 1.0, still grounded.
+        # No number crosses the wire (plan-20260930-0240Z): the mint
+        # names the registered derivation — anamnesis recomputes
+        # posterior_from_2lnbf(0.4, 600) and stores the result.
         minted = adaptors.claims.minted[-1]
         assert minted["confidence_basis"] == "grounded"
-        assert minted["confidence"] == pytest.approx(
-            _gc.posterior_from_2lnbf(0.4, 600.0)
-        )
+        comp = minted["confidence_computation"]
+        assert comp["procedure"] == "posterior_from_2lnbf"
+        assert comp["inputs"]["prior"] == 0.4
+        assert comp["inputs"]["bf_2ln"] == 600.0
         # Upstream decision row carries the measured statistic.
         _, args = adaptors.promotion.pushed[-1]
         assert args["computed_rung"] == "very_strong"
@@ -444,10 +449,12 @@ class TestComputedRungGate:
         assert "error" not in r, r
         minted = adaptors.claims.minted[-1]
         assert minted["confidence_basis"] == "grounded"
-        # bf_2ln=0 → posterior=prior → 1−posterior is the H₀ bound.
-        assert minted["confidence"] == pytest.approx(
-            1 - _gc.PRIOR_CONFIDENCE_MAX.value
-        )
+        # bf_2ln=0 → posterior=prior → the H₀ bound is a distinct
+        # registered derivation, named (not computed) by the caller.
+        comp = minted["confidence_computation"]
+        assert comp["procedure"] == "h0_bound_from_2lnbf"
+        assert comp["inputs"]["bf_2ln"] == 0.0
+        assert comp["inputs"]["prior"] == _gc.PRIOR_CONFIDENCE_MAX.value
 
     async def test_no_statistic_claim_above_declared_refused(
         self, zetesis
@@ -471,8 +478,8 @@ class TestComputedRungGate:
         self, zetesis
     ):
         """Null computed rung: claiming exactly the declared minimum
-        still passes — the mint is the prior ceiling, labelled
-        weakly_grounded."""
+        still passes — the mint carries no computation, so the claim
+        is NULL-confidence, labelled weakly_grounded."""
         _, mcp, adaptors = zetesis
         cid, eref, _ = await _open_and_close_campaign(
             mcp, [80], [120]  # n=1/arm → no statistic
@@ -487,7 +494,7 @@ class TestComputedRungGate:
         assert r["computed_rung"] is None
         assert r["confidence_basis"] == "weakly_grounded"
         minted = adaptors.claims.minted[-1]
-        assert minted["confidence"] == _gc.PRIOR_CONFIDENCE_MAX.value
+        assert minted["confidence_computation"] is None
         assert minted["confidence_basis"] == "weakly_grounded"
 
 
@@ -653,14 +660,30 @@ class _EpistemeClaims:
         self.asserts = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None,
-        source_id=None, confidence_basis=None,
+        self, content, type, evidence=None,
+        source_id=None, confidence_computation=None,
     ):
+        has_evidence = any(
+            e.get("relation") in (
+                "supports", "derived_from", "tested_by", "valid_under",
+            )
+            for e in (evidence or [])
+        )
+        basis = (
+            "grounded" if confidence_computation is not None
+            else "weakly_grounded" if has_evidence
+            else "ungrounded"
+        )
         self.asserts.append({
-            "confidence": confidence,
-            "confidence_basis": confidence_basis,
+            "evidence": evidence,
+            "confidence_computation": confidence_computation,
+            "confidence_basis": basis,
         })
-        return {"claim_id": "claim-1", "status": "created"}
+        return {
+            "claim_id": "claim-1", "status": "created",
+            "confidence": None, "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
+        }
 
 
 class TestHypothesisMint:
@@ -719,7 +742,7 @@ class TestHypothesisMint:
             assert "error" not in r, r
             assert r["claim_status"] == "minted"
             mint = claims.asserts[0]
-            assert mint["confidence"] == _gc.PRIOR_CONFIDENCE_MAX.value
+            assert mint["confidence_computation"] is None
             assert mint["confidence_basis"] == "weakly_grounded"
         finally:
             store.close()
@@ -747,7 +770,6 @@ class TestInvestigationBasis:
         await _call(mcp, "record_finding", {
             "investigation_id": inv_id,
             "content": "f",
-            "confidence": 0.7 if with_ref else 0.2,
             "evidence_ref_ids": refs,
         })
         r = await _call(mcp, "conclude_investigation", {
@@ -782,6 +804,8 @@ class TestInvestigationBasis:
 
 class TestClaimBasisColumn:
     async def test_assert_claim_basis_round_trip(self, tmp_path):
+        """A computation mint derives grounded confidence server-side
+        and the derivation record survives the read path."""
         from ml_anamnesis_mcp.server import create_server as _a_server
         from ml_anamnesis_mcp.state.store import MemoryStore
 
@@ -789,20 +813,31 @@ class TestClaimBasisColumn:
         store.connect()
         try:
             mcp = _a_server(store)
+            comp = {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            }
             r = await _call(mcp, "assert_claim", {
                 "content": "c", "type": "empirical",
-                "confidence": 0.2,
-                "confidence_basis": "grounded",
+                "confidence_computation": comp,
+                "evidence": [{
+                    "to_ref": "trial-x", "ref_type": "trial",
+                    "relation": "derived_from",
+                }],
             })
             assert "error" not in r, r
+            assert r["confidence"] == pytest.approx(
+                _gc.posterior_from_2lnbf(0.3, 2.7055)
+            )
             got = await _call(mcp, "get_claim", {
                 "claim_id": r["claim_id"],
             })
             assert got["claim"]["confidence_basis"] == "grounded"
+            assert got["claim"]["confidence_computation"] == comp
         finally:
             store.close()
 
-    async def test_bad_basis_refused(self, tmp_path):
+    async def test_unknown_procedure_refused(self, tmp_path):
         from ml_anamnesis_mcp.server import create_server as _a_server
         from ml_anamnesis_mcp.state.store import MemoryStore
 
@@ -812,10 +847,17 @@ class TestClaimBasisColumn:
             mcp = _a_server(store)
             r = await _call(mcp, "assert_claim", {
                 "content": "c", "type": "empirical",
-                "confidence": 0.2,
-                "confidence_basis": "sorta",
+                "confidence_computation": {
+                    "procedure": "sorta",
+                    "inputs": {"prior": 0.3, "bf_2ln": 2.7},
+                },
+                "evidence": [{
+                    "to_ref": "trial-x", "ref_type": "trial",
+                    "relation": "derived_from",
+                }],
             })
-            assert "error" in r and "confidence_basis" in r["error"]
+            assert "error" in r
+            assert "procedure" in r["error"]
         finally:
             store.close()
 
@@ -851,6 +893,10 @@ class TestClaimBasisColumn:
                 for r in store._fetchall("PRAGMA table_info(claims)")
             }
             assert "importance" not in cols
+            assert "confidence_computation" in cols
+            # The legacy row's bare 0.5 survives but its derivation is
+            # honestly NULL — never reconstructed.
+            assert claim.confidence_computation is None
         finally:
             store.close()
 

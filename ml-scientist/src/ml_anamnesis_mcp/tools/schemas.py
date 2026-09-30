@@ -87,6 +87,9 @@ class AssertClaimOut(TypedDict, total=False):
     claim_id: str | None
     edge_ids: list | None
     edges_added: int | None
+    confidence: float | None
+    confidence_basis: str | None
+    confidence_computation: dict | None
     valid_until: str | None
     deduplicated: bool | None
     status: str | None

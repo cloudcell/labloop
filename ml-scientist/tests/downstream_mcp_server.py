@@ -79,21 +79,47 @@ def create_claims_server():
     def assert_claim(
         content: str,
         type: str,
-        confidence: float,
         evidence: list | None = None,
         source_id: str | None = None,
-        confidence_basis: str | None = None,
+        confidence_computation: dict | None = None,
     ) -> str:
         for cid, c in claims.items():
             if c["content"] == content and c["type"] == type:
-                return json.dumps({"claim_id": cid, "deduplicated": True, "status": "exists"})
+                return json.dumps({
+                    "claim_id": cid, "deduplicated": True,
+                    "confidence": c["confidence"],
+                    "confidence_basis": c["confidence_basis"],
+                    "confidence_computation": c["confidence_computation"],
+                    "status": "exists",
+                })
         claim_id = f"claim-{len(claims) + 1}"
+        has_evidence = any(
+            e.get("relation") in (
+                "supports", "derived_from", "tested_by", "valid_under",
+            )
+            for e in (evidence or [])
+        )
+        if confidence_computation is not None:
+            confidence = 0.5  # stub — the real server recomputes
+            basis = "grounded"
+        elif has_evidence:
+            confidence = None
+            basis = "weakly_grounded"
+        else:
+            confidence = None
+            basis = "ungrounded"
         claims[claim_id] = {
             "id": claim_id, "content": content, "type": type,
             "confidence": confidence, "evidence": evidence or [],
-            "source_id": source_id, "confidence_basis": confidence_basis,
+            "source_id": source_id, "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
         }
-        return json.dumps({"claim_id": claim_id, "status": "created"})
+        return json.dumps({
+            "claim_id": claim_id, "confidence": confidence,
+            "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
+            "status": "created",
+        })
 
     @mcp.tool()
     def relate(from_claim: str, to_ref: str, ref_type: str, relation: str) -> str:

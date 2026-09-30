@@ -14,10 +14,8 @@ import re
 import uuid
 
 from ..enforcement.checks import (
-    PRIOR_CONFIDENCE_MAX,
     check_conclude_allowed,
     check_evidence_refs_exist,
-    check_finding_confidence,
     check_investigation_open,
     check_source_valid,
     check_tool_whitelisted,
@@ -141,17 +139,7 @@ def register(
     mcp,
     store: SearchStore,
     adaptors,
-    prior_confidence_max: float | None = None,
 ) -> None:
-    """Register investigation-loop tools.
-
-    prior_confidence_max is the configured prior ceiling
-    ([integrity] prior_confidence_max) gating unevidenced findings."""
-    _prior_max = (
-        PRIOR_CONFIDENCE_MAX
-        if prior_confidence_max is None
-        else prior_confidence_max
-    )
     """Register the investigation-loop tools on the MCP server.
 
     `adaptors` is an Adaptors container read at call time — a channel
@@ -275,16 +263,17 @@ def register(
     def record_finding(
         investigation_id: Annotated[str, Field(description='ID of the target investigation.')],
         content: Annotated[str, Field(description='The finding text.')],
-        confidence: Annotated[float, Field(description='0–1 — above the prior ceiling (0.3) requires ≥1 evidence_ref_id from pull_evidence.')],
         evidence_ref_ids: Annotated[list | str | None, Field(description='Evidence_ref IDs minted by pull_evidence/pull_arm_evidence calls; list or JSON-encoded.')] = None,
     ) -> Annotated[CallToolResult, RecordFindingOut]:
         """Record a provisional methodological finding.
 
         A finding is a proto-claim: it becomes a `methodological` claim
-        in anamnesis only at conclude_investigation. Evidence rule:
-        confidence above the prior ceiling (0.3) requires ≥1
-        evidence_ref_id from pull_evidence — an assertion the
-        investigator never grounded cannot pretend to be earned.
+        in anamnesis only at conclude_investigation. There is no
+        confidence parameter (numeric provenance invariant,
+        plan-20260930-0240Z): a finding is not a measurement, so it
+        carries no scalar. The claim mint derives weakly_grounded from
+        attached evidence refs, ungrounded otherwise — NULL confidence
+        either way.
         """
         try:
             err, _inv = check_investigation_open(store, investigation_id)
@@ -292,30 +281,22 @@ def register(
                 return fail(json.dumps({"error": err}))
             if not content.strip():
                 return fail(json.dumps({"error": "content must be non-empty"}))
-            if not (0.0 <= confidence <= 1.0):
-                return fail(json.dumps({"error": "confidence must be in [0, 1]"}))
             if evidence_ref_ids is not None:
                 evidence_ref_ids = coerce_json(
                     evidence_ref_ids, list, "evidence_ref_ids"
                 )
             evidence_ref_ids = evidence_ref_ids or []
 
-            for e in (
-                check_finding_confidence(
-                    confidence, evidence_ref_ids, prior_max=_prior_max
-                ),
-                check_evidence_refs_exist(
-                    store, investigation_id, evidence_ref_ids
-                ),
-            ):
-                if e:
-                    return fail(json.dumps({"error": e}))
+            e = check_evidence_refs_exist(
+                store, investigation_id, evidence_ref_ids
+            )
+            if e:
+                return fail(json.dumps({"error": e}))
 
             finding = Finding(
                 id=f"find-{uuid.uuid4().hex[:8]}",
                 investigation_id=investigation_id,
                 content=content,
-                confidence=confidence,
             )
             with store.transaction():
                 store.create_finding(finding)
@@ -412,25 +393,27 @@ def register(
                                 for r in finding_refs
                                 for ref_id in r.ref_ids
                             }
-                            # Evidence edges mint inline — anamnesis caps
-                            # unevidenced claims at the prior ceiling, and
-                            # post-hoc relate hits the chicken-and-egg.
+                            # Evidence edges mint inline — post-hoc
+                            # relate hits the chicken-and-egg.
+                            # No confidence or basis crosses the wire
+                            # (plan-20260930-0240Z): anamnesis derives
+                            # weakly_grounded from the evidence edges,
+                            # ungrounded without — confidence is NULL
+                            # either way. The eref row itself is edged
+                            # too — the pull record is the durable
+                            # consultation trail even when the payload
+                            # yielded no extractable entity ids.
                             minted = await adaptors.claims.assert_claim(
                                 content=f.content,
                                 type="methodological",
-                                confidence=f.confidence,
-                                # Caller-declared confidence — no
-                                # likelihood exists on a finding;
-                                # the basis records which side of the
-                                # prior-ceiling gate it minted on: the
-                                # finding's attached erefs, whether or
-                                # not the pull returned upstream items
-                                # (plan-20260929-1642Z).
-                                confidence_basis=(
-                                    "weakly_grounded"
-                                    if finding_refs else "ungrounded"
-                                ),
                                 evidence=[
+                                    {
+                                        "to_ref": r.id,
+                                        "ref_type": "evidence_ref",
+                                        "relation": "derived_from",
+                                    }
+                                    for r in finding_refs
+                                ] + [
                                     {
                                         "to_ref": ref_id,
                                         "ref_type": _ref_type_for(ref_id),
@@ -442,7 +425,7 @@ def register(
                             )
                             cid = minted["claim_id"]
                             claim_ids.append(cid)
-                            edges_created += len(consulted)
+                            edges_created += len(finding_refs) + len(consulted)
                             store.set_finding_claim(f.id, cid)
                             store.set_finding_status(
                                 f.id, FindingStatus.asserted

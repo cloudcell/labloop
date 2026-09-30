@@ -26,7 +26,7 @@ episteme — programme must be status=active for run_trial.
 
 PART A — setup
 
-1. Episteme: create_programme + create_hypothesis (tag `diag-retry`),
+1. Episteme: create_programme + formulate_hypothesis (tag `diag-retry`),
    programme active. register_candidate not needed — this is pure
    Loop-0.
 

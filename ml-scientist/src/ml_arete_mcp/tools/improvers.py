@@ -236,19 +236,30 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    def get_improver_lineage(improver_id: Annotated[str, Field(description='ID of the target improver version.')]) -> Annotated[CallToolResult, GetImproverLineageOut]:
+    def get_improver_lineage(improver_id: Annotated[str, Field(description='ID of the target improver version.')], depth: Annotated[int | None, Field(description='Optional walk cap — limit the chain to this many ancestors back from the improver (the returned chain is still oldest-first). Omit for the full chain to genesis.')] = None) -> Annotated[CallToolResult, GetImproverLineageOut]:
         """Walk the parent chain back to genesis, oldest first.
 
         The ancestry proof the ancestral tournament enforces — a
         candidate's claim to descend from the parent arm is exactly
-        this chain.
+        this chain. `depth` caps how far back the walk goes.
         """
         try:
+            if depth is not None and (not isinstance(depth, int)
+                                      or isinstance(depth, bool)
+                                      or depth < 0):
+                return fail(json.dumps({
+                    "error": f"depth must be a non-negative integer "
+                    f"(ancestors back to walk), got: {depth!r}"
+                }))
             if store.get_improver(improver_id) is None:
                 return fail(json.dumps({
                     "error": f"Improver not found: {improver_id}"
                 }))
             chain = store.lineage(improver_id)
+            if depth is not None:
+                # chain is oldest-first; a depth cap keeps the
+                # nearest ancestors plus the improver itself.
+                chain = chain[-(depth + 1):]
             return ok({
                 "improver_id": improver_id,
                 "depth": len(chain) - 1,

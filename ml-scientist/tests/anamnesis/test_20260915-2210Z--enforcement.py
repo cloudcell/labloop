@@ -6,69 +6,151 @@ from .conftest import call_tool, make_claim
 
 
 class TestAssertClaim:
-    async def test_high_confidence_without_evidence_rejected(self, mcp_server):
+    async def test_caller_confidence_is_not_a_parameter(self, mcp_server):
+        """The numeric provenance invariant: assert_claim has no
+        confidence parameter — a caller cannot assert a number. A
+        bare mint records NULL confidence and ungrounded basis."""
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "unsupported claim",
             "type": "empirical",
-            "confidence": 0.9,
-        })
-        assert "error" in r
-        assert "prior ceiling" in r["error"]
-
-    async def test_prior_ceiling_configurable(self, mem_store):
-        """[integrity] prior_confidence_max governs the write-time
-        gate — the same knob the audit reads."""
-        from ml_anamnesis_mcp.server import create_server
-
-        mcp = create_server(
-            mem_store, integrity_config={"prior_confidence_max": 0.5}
-        )
-        r = await call_tool(mcp, "assert_claim", {
-            "content": "mid-confidence claim",
-            "type": "empirical",
-            "confidence": 0.4,
-        })
-        assert "error" not in r  # 0.4 < configured 0.5 → allowed
-        r = await call_tool(mcp, "assert_claim", {
-            "content": "still too confident",
-            "type": "empirical",
-            "confidence": 0.6,
-        })
-        assert "prior ceiling" in r["error"]
-
-    async def test_prior_confidence_without_evidence_accepted(self, mcp_server):
-        r = await call_tool(mcp_server, "assert_claim", {
-            "content": "prior-level hunch",
-            "type": "empirical",
-            "confidence": 0.3,
         })
         assert "error" not in r
-        assert r["claim_id"].startswith("claim-")
+        assert r["confidence"] is None
+        assert r["confidence_basis"] == "ungrounded"
+        got = await call_tool(
+            mcp_server, "get_claim", {"claim_id": r["claim_id"]}
+        )
+        assert got["claim"]["confidence"] is None
+        assert got["claim"]["confidence_basis"] == "ungrounded"
 
-    async def test_evidence_unlocks_high_confidence(self, mcp_server):
-        cid = await make_claim(mcp_server, confidence=0.95)
-        assert cid.startswith("claim-")
+    async def test_computation_mints_grounded_confidence(
+            self, mcp_server):
+        """posterior_from_2lnbf(0.3, 2.7055) = 0.624 — the NAP D-1
+        row, recomputed server-side and stored with the record."""
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "computed claim",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            },
+            "evidence": [
+                {"to_ref": "trial-1", "ref_type": "trial",
+                 "relation": "tested_by"}
+            ],
+        })
+        assert "error" not in r
+        assert abs(r["confidence"] - 0.6237) < 0.001
+        assert r["confidence_basis"] == "grounded"
+        assert (
+            r["confidence_computation"]["procedure"]
+            == "posterior_from_2lnbf"
+        )
+        got = await call_tool(
+            mcp_server, "get_claim", {"claim_id": r["claim_id"]}
+        )
+        assert got["claim"]["confidence_computation"]["inputs"][
+            "bf_2ln"] == 2.7055
 
-    async def test_structural_edge_does_not_count_as_evidence(self, mcp_server):
+    async def test_computation_without_evidence_refused(
+            self, mcp_server):
+        """A posterior floating free of the graph is not grounded."""
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "floating posterior",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            },
+        })
+        assert "error" in r
+        assert "evidence" in r["error"]
+
+    async def test_unregistered_procedure_refused(self, mcp_server):
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "invented procedure",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "my_magic_confidence",
+                "inputs": {"prior": 0.3, "bf_2ln": 8.0},
+            },
+            "evidence": [
+                {"to_ref": "t", "ref_type": "trial",
+                 "relation": "tested_by"}
+            ],
+        })
+        assert "error" in r and "my_magic_confidence" in r["error"]
+
+    async def test_computation_missing_inputs_refused(self, mcp_server):
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "half a computation",
+            "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3},
+            },
+            "evidence": [
+                {"to_ref": "t", "ref_type": "trial",
+                 "relation": "tested_by"}
+            ],
+        })
+        assert "error" in r and "bf_2ln" in r["error"]
+
+    async def test_evidence_without_computation_is_null(
+            self, mcp_server):
+        """Evidence-bearing edges without a derivation mint
+        weakly_grounded — confidence stays NULL, not a policy
+        constant."""
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "evidence but no likelihood",
+            "type": "empirical",
+            "evidence": [
+                {"to_ref": "trial-1", "ref_type": "trial",
+                 "relation": "tested_by"}
+            ],
+        })
+        assert "error" not in r
+        assert r["confidence"] is None
+        assert r["confidence_basis"] == "weakly_grounded"
+
+    async def test_structural_edge_is_not_evidence(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "only similar_to edge",
             "type": "empirical",
-            "confidence": 0.9,
             "evidence": [
                 {"to_ref": "x", "ref_type": "external", "relation": "similar_to"}
             ],
         })
-        assert "error" in r and "prior ceiling" in r["error"]
+        assert "error" not in r
+        assert r["confidence"] is None
+        assert r["confidence_basis"] == "ungrounded"
+
+    async def test_dedup_cannot_launder_computation(self, mcp_server):
+        """Re-asserting existing content cannot upgrade a NULL claim
+        to a grounded number — mint-time fields are mint-time-only."""
+        cid = await call_tool(mcp_server, "assert_claim", {
+            "content": "bare claim", "type": "empirical",
+        })
+        assert cid["confidence"] is None
+        r = await call_tool(mcp_server, "assert_claim", {
+            "content": "bare claim", "type": "empirical",
+            "confidence_computation": {
+                "procedure": "posterior_from_2lnbf",
+                "inputs": {"prior": 0.3, "bf_2ln": 2.7055},
+            },
+        })
+        assert r.get("deduplicated") is True
+        assert r["confidence"] is None  # existing row's NULL persists
 
     async def test_bad_claim_type_rejected(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
-            "content": "bad type", "type": "vibes", "confidence": 0.1,
+            "content": "bad type", "type": "vibes",
         })
         assert "error" in r and "empirical" in r["error"] and "methodological" in r["error"]
 
     async def test_bad_evidence_relation_rejected(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
-            "content": "bad relation", "type": "empirical", "confidence": 0.8,
+            "content": "bad relation", "type": "empirical",
             "evidence": [
                 {"to_ref": "x", "ref_type": "trial", "relation": "vibes"}
             ],
@@ -77,7 +159,7 @@ class TestAssertClaim:
 
     async def test_bad_evidence_ref_type_rejected(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
-            "content": "bad ref_type", "type": "empirical", "confidence": 0.8,
+            "content": "bad ref_type", "type": "empirical",
             "evidence": [
                 {"to_ref": "x", "ref_type": "vibes", "relation": "tested_by"}
             ],
@@ -87,7 +169,6 @@ class TestAssertClaim:
     async def test_claim_typed_evidence_ref_must_exist(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "dangling claim ref", "type": "empirical",
-            "confidence": 0.8,
             "evidence": [
                 {"to_ref": "claim-nope", "ref_type": "claim",
                  "relation": "supports"}
@@ -98,7 +179,6 @@ class TestAssertClaim:
     async def test_external_ref_trusted(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "external evidence", "type": "empirical",
-            "confidence": 0.8,
             "evidence": [
                 {"to_ref": "doi:10.1/x", "ref_type": "external",
                  "relation": "supports"}
@@ -109,7 +189,7 @@ class TestAssertClaim:
     async def test_supersedes_must_exist(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "supersedes ghost", "type": "empirical",
-            "confidence": 0.2, "supersedes_id": "claim-nope",
+            "supersedes_id": "claim-nope",
         })
         assert "error" in r and "not found" in r["error"]
 
@@ -117,7 +197,7 @@ class TestAssertClaim:
         """Review note: column + edge are one fact, written atomically."""
         old = await make_claim(mcp_server, "old claim")
         r = await call_tool(mcp_server, "assert_claim", {
-            "content": "new claim", "type": "empirical", "confidence": 0.8,
+            "content": "new claim", "type": "empirical",
             "supersedes_id": old,
             "evidence": [
                 {"to_ref": "t", "ref_type": "trial", "relation": "tested_by"}
@@ -133,24 +213,23 @@ class TestAssertClaim:
         cid = await make_claim(mcp_server, "  spaced   out  claim ")
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "spaced out claim", "type": "empirical",
-            "confidence": 0.1,
         })
         assert r.get("deduplicated") is True
         assert r["claim_id"] == cid
 
-    async def test_dedup_bypasses_evidence_gate(self, mcp_server):
-        """Re-asserting existing content is a lookup, not a new claim."""
+    async def test_dedup_is_a_lookup(self, mcp_server):
+        """Re-asserting existing content is a lookup, not a new claim —
+        edges still attach, the row's mint-time fields are untouched."""
         cid = await make_claim(mcp_server, "already here")
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "already here", "type": "empirical",
-            "confidence": 0.99,  # would fail evidence gate for a new claim
         })
         assert r.get("deduplicated") is True and r["claim_id"] == cid
+        assert r["confidence_basis"] == "grounded"  # minted grounded
 
     async def test_json_string_evidence_accepted(self, mcp_server):
         r = await call_tool(mcp_server, "assert_claim", {
             "content": "json string evidence", "type": "empirical",
-            "confidence": 0.8,
             "evidence": '[{"to_ref": "t", "ref_type": "trial", '
                         '"relation": "tested_by"}]',
         })
@@ -223,7 +302,7 @@ class TestListClaims:
         cid = await make_claim(mcp_server, "live claim")
         old = await make_claim(mcp_server, "doomed claim")
         await call_tool(mcp_server, "assert_claim", {
-            "content": "replacement", "type": "empirical", "confidence": 0.8,
+            "content": "replacement", "type": "empirical",
             "supersedes_id": old,
             "evidence": [
                 {"to_ref": "t", "ref_type": "trial", "relation": "tested_by"}

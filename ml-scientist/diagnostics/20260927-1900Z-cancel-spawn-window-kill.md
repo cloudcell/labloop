@@ -28,24 +28,29 @@ Marker tag: `diag-race`. Report every refusal verbatim — errors are
 data.
 
 Read tool schemas before calling. Loop-0 chain: create_programme →
-create_hypothesis → design_experiment → capture_bundle → run_trial.
+formulate_hypothesis → design_experiment → capture_bundle → run_trial.
 The programme must be status=active for run_trial.
 
 PART A — setup
 
-1. Episteme: create_programme + create_hypothesis (tag `diag-race`),
+1. Episteme: create_programme + formulate_hypothesis (tag `diag-race`),
    programme active.
 
 PART B — the spawn-window cancel (the bug's exact shape)
 
-2. Write a SLOW stub /tmp/diag-race/slow.py:
-   `import time; time.sleep(90); print({"accuracy": 0.5})`.
+2. Write a SLOW stub /tmp/diag-race/slow.py that exposes the
+   executor contract — `def run_training(config):` body
+   `import time; time.sleep(90); return {"metrics": {"accuracy":
+   0.5}, "variance": {}}`. (run_trial imports the file and calls
+   run_training(config); a bare top-level print never runs.)
    Bundle it and design three trials (t1, t2, t3) — the race is
    probabilistic, so run the scenario more than once.
-3. For EACH trial: run_trial → then IMMEDIATELY mark_retryable with
-   reason "diag-race: spawn-window cancel" — no reads in between.
-   Record the wall-clock latency between run_trial's return and
-   mark_retryable's call for each (the VM hit the race at +14 ms;
+3. For EACH trial: run_trial → returns quickly with
+   `status: "running"` (the call does NOT wait for the trial to
+   finish — poll get_trial_status) → then IMMEDIATELY mark_retryable
+   with reason "diag-race: spawn-window cancel" — no reads in
+   between. Record the wall-clock latency between run_trial's return
+   and mark_retryable's call for each (the VM hit the race at +14 ms;
    anything under ~1 s still exercises the boundary path).
    Response must confirm status "retryable".
 4. IMMEDIATELY after each mark_retryable: get_trial_status →
@@ -58,8 +63,9 @@ PART B — the spawn-window cancel (the bug's exact shape)
    lab-cnt-mcp container (docker exec / nsenter / whatever the VM
    exposes), `pgrep -f <trial_id>` ~10 s after each mark — the
    trial's wrapper filename carries the id; nothing must be alive.
-   If no container shell exists, mark this step BLOCKED and rely on
-   steps 6–7 — do not fake a process check.
+   An agent operating as `lab` on the VM has no in-guest shell and
+   CANNOT run this — mark the step BLOCKED and rely on steps 6–7.
+   Do not fake a process check.
 6. Wait past the stub's natural end (~95 s after run_trial).
    get_trial_status each trial again → still "retryable", same full
    field set, same retry_reason. If `executor_output` is present, its

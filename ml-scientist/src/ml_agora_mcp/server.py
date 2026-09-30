@@ -137,4 +137,38 @@ def create_server(
             )
         )
 
+    # Argument hygiene — undeclared-argument refusal. Agora has no
+    # recurrence module (read-only), but the framework's
+    # extra=ignore hole exists here too: an undeclared argument
+    # would be silently dropped before the tool body runs. Always
+    # on, independent of any protocol flag.
+    _outermost_call_tool = mcp.call_tool
+    _declared_args: dict[str, frozenset] | None = None
+
+    async def _strict_call_tool(name, arguments, context=None):
+        nonlocal _declared_args
+        if _declared_args is None:
+            _declared_args = {
+                t.name: frozenset(
+                    (t.input_schema or {}).get("properties", {})
+                )
+                for t in await mcp.list_tools()
+            }
+        declared = _declared_args.get(name)
+        if declared is not None and isinstance(arguments, dict):
+            unknown = sorted(set(arguments) - declared)
+            if unknown:
+                from .tools.schemas import fail
+                return fail(json.dumps({
+                    "error": (
+                        f"{name} received undeclared argument(s): "
+                        f"{', '.join(unknown)} — refused; undeclared "
+                        "arguments are silently dropped by the "
+                        "argument model"
+                    )
+                }))
+        return await _outermost_call_tool(name, arguments, context)
+
+    mcp.call_tool = _strict_call_tool
+
     return mcp

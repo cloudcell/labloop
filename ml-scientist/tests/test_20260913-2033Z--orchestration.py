@@ -82,17 +82,34 @@ class MockClaims(ClaimsRole):
         self.asserts: list[dict[str, Any]] = []
 
     async def assert_claim(
-        self, content, type, confidence, evidence=None, source_id=None,
-        confidence_basis=None,
+        self, content, type, evidence=None, source_id=None,
+        confidence_computation=None,
     ):
         if self.fail:
             raise RuntimeError("claims server unreachable")
+        has_evidence = any(
+            e.get("relation") in (
+                "supports", "derived_from", "tested_by", "valid_under",
+            )
+            for e in (evidence or [])
+        )
+        basis = (
+            "grounded" if confidence_computation is not None
+            else "weakly_grounded" if has_evidence
+            else "ungrounded"
+        )
         self.asserts.append({
-            "content": content, "type": type, "confidence": confidence,
+            "content": content, "type": type,
             "evidence": evidence, "source_id": source_id,
-            "confidence_basis": confidence_basis,
+            "confidence_computation": confidence_computation,
+            "confidence_basis": basis,
         })
-        return f"claim-{len(self.asserts)}"
+        return {
+            "claim_id": f"claim-{len(self.asserts)}",
+            "status": "created", "confidence": None,
+            "confidence_basis": basis,
+            "confidence_computation": confidence_computation,
+        }
 
     async def relate(self, from_claim, to_ref, ref_type, relation):
         return "edge-1"
@@ -607,10 +624,10 @@ class TestClaimMinting:
                 client, store, verdict=verdict
             )
         assert result["claim_status"] == "minted"
-        # Single-arm verdicts carry no comparative likelihood — the
-        # mint is the grounded prior ceiling, honestly labelled
-        # (plan-20260929-1642Z).
-        assert claims.asserts[0]["confidence"] == 0.3
+        # Single-arm verdicts carry no comparative likelihood — no
+        # computation crosses the wire, anamnesis labels the basis
+        # (plan-20260930-0240Z).
+        assert claims.asserts[0]["confidence_computation"] is None
         assert claims.asserts[0]["confidence_basis"] == "weakly_grounded"
 
     @pytest.mark.asyncio
@@ -740,8 +757,8 @@ class TestRoleInterfaceNotProductDependent:
                 return "custom"
 
         class CustomClaims(ClaimsRole):
-            async def assert_claim(self, content, type, confidence, evidence=None, source_id=None, confidence_basis=None):
-                return "custom-claim"
+            async def assert_claim(self, content, type, evidence=None, source_id=None, confidence_computation=None):
+                return {"claim_id": "custom-claim"}
             async def relate(self, from_claim, to_ref, ref_type, relation):
                 return "custom-edge"
             async def get_claim(self, claim_id):

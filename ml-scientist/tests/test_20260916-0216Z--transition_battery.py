@@ -429,9 +429,10 @@ class TestHypothesisTransitions:
                     async with ClientSession(r2, w2) as m:
                         await m.initialize()
                         c = await ok(m, "get_claim", {"claim_id": r["claim_id"]})
-                        # prior-ceiling mint — no comparative
-                        # likelihood on a single-arm verdict
-                        assert c["claim"]["confidence"] == 0.3
+                        # no comparative likelihood on a single-arm
+                        # verdict → NULL confidence, weakly_grounded
+                        # by the evidence edges (plan-20260930-0240Z)
+                        assert c["claim"]["confidence"] is None
                         assert (
                             c["claim"]["confidence_basis"]
                             == "weakly_grounded"
@@ -461,8 +462,8 @@ class TestHypothesisTransitions:
                         c = await ok(m, "get_claim", {"claim_id": r["claim_id"]})
                         # falsification is positive knowledge, but a
                         # single-arm verdict has no comparative
-                        # likelihood — the prior ceiling, labelled
-                        assert c["claim"]["confidence"] == 0.3
+                        # likelihood — NULL confidence, weakly_grounded
+                        assert c["claim"]["confidence"] is None
                         assert (
                             c["claim"]["confidence_basis"]
                             == "weakly_grounded"
@@ -832,7 +833,7 @@ class TestLineage:
                 await s.initialize()
                 await err(s, "create_evaluation_contract", {
                     "programme_id": "prog-nonexistent",
-                    "metrics": {"primary": "accuracy"},
+                    "metrics": {"primary_metric": "accuracy", "direction": "max"},
                     "promotion_policy": {"rule": "beat champion"},
                 })
 
@@ -847,7 +848,7 @@ class TestLineage:
                 pid = await mk_programme(s)
                 ct = await ok(s, "create_evaluation_contract", {
                     "programme_id": pid,
-                    "metrics": {"primary": "accuracy"},
+                    "metrics": {"primary_metric": "accuracy", "direction": "max"},
                     "promotion_policy": {
                         "rule": "beat champion",
                         "sesoi_d": 0.5, "target_power": 0.8,
@@ -946,7 +947,7 @@ class TestArchive:
                     }),
                     ("create_evaluation_contract", {
                         "programme_id": pid,
-                        "metrics": {"primary": "accuracy"},
+                        "metrics": {"primary_metric": "accuracy", "direction": "max"},
                         "promotion_policy": {"rule": "beat champion"},
                     }),
                 ]:
@@ -992,12 +993,16 @@ class TestAnamnesisDirect:
                 await m.initialize()
                 e = await err(m, "assert_claim", {
                     "content": "x", "type": "astrological",
-                    "confidence": 0.5,
                 })
                 assert "type" in e["error"].lower()
 
-    async def test_no_evidence_caps_confidence(self, pair):
-        """Prior ceiling: without evidence, confidence > 0.3 is rejected."""
+    async def test_caller_confidence_cannot_land(self, pair):
+        """Numeric provenance invariant (plan-20260930-0240Z):
+        assert_claim takes no confidence argument — the call is
+        refused by name. Argument hygiene is always on (rc-12 W6):
+        it does not ride on recurrent_protocol, so the harness's
+        ML_RECURRENT_PROTOCOL=0 cannot re-open the extra=ignore
+        hole."""
         async with streamable_http_client(pair["mem"]) as (r, w):
             async with ClientSession(r, w) as m:
                 await m.initialize()
@@ -1005,22 +1010,22 @@ class TestAnamnesisDirect:
                     "content": f"unsupported-{uuid.uuid4().hex[:8]}",
                     "type": "empirical", "confidence": 0.9,
                 })
-                assert "ceiling" in e["error"].lower() or "evidence" in e["error"].lower()
-                # at or below the ceiling it lands
-                r = await ok(m, "assert_claim", {
-                    "content": f"unsupported-{uuid.uuid4().hex[:8]}",
-                    "type": "empirical", "confidence": 0.3,
-                })
-                c = await ok(m, "get_claim", {"claim_id": r["claim_id"]})
-                assert c["claim"]["confidence"] == 0.3
+                assert "confidence" in e["error"]
+                assert "undeclared" in e["error"]
+                # the refused call minted nothing — no claim carries
+                # the caller's number
+                lst = await ok(m, "list_claims", {"limit": 200})
+                assert not any(
+                    c.get("confidence") == 0.9
+                    for c in lst.get("claims", [])
+                )
 
     async def test_dedup_returns_existing(self, pair):
         async with streamable_http_client(pair["mem"]) as (r, w):
             async with ClientSession(r, w) as m:
                 await m.initialize()
                 content = f"dedup-{uuid.uuid4().hex[:8]}"
-                args = {"content": content, "type": "empirical",
-                        "confidence": 0.3}
+                args = {"content": content, "type": "empirical"}
                 first = await ok(m, "assert_claim", args)
                 second = await ok(m, "assert_claim", args)
                 assert second["claim_id"] == first["claim_id"]
@@ -1032,7 +1037,6 @@ class TestAnamnesisDirect:
                 await m.initialize()
                 await err(m, "assert_claim", {
                     "content": "x", "type": "empirical",
-                    "confidence": 0.3,
                     "supersedes_id": "claim-nonexistent",
                 })
 
@@ -1042,7 +1046,7 @@ class TestAnamnesisDirect:
                 await m.initialize()
                 c = await ok(m, "assert_claim", {
                     "content": f"relate-{uuid.uuid4().hex[:8]}",
-                    "type": "empirical", "confidence": 0.3,
+                    "type": "empirical",
                 })
                 cid = c["claim_id"]
                 # bad relation

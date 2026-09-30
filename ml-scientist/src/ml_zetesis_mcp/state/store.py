@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS findings (
     id               TEXT PRIMARY KEY,
     investigation_id TEXT NOT NULL REFERENCES investigations(id),
     content          TEXT NOT NULL,
-    confidence       REAL NOT NULL,
+    confidence       REAL,
     status           TEXT NOT NULL DEFAULT 'provisional',
     claim_id         TEXT,
     created_at       TEXT NOT NULL
@@ -237,6 +237,46 @@ class SearchStore:
                         ON evidence_refs(investigation_id);
                     CREATE INDEX IF NOT EXISTS idx_eref_camp
                         ON evidence_refs(campaign_id);
+                    """
+                )
+                self.conn.execute("PRAGMA foreign_keys = ON")
+                self.conn.commit()
+
+        # findings.confidence NOT NULL → nullable (plan-20260930-0240Z):
+        # a finding is a proto-claim, not a measurement — no
+        # caller-declared scalar. Rebuild preserves legacy values
+        # verbatim (audit sees them; nothing rewrites them).
+        if "findings" in tables:
+            info = self.conn.execute(
+                "PRAGMA table_info(findings)"
+            ).fetchall()
+            if any(
+                r["name"] == "confidence" and r["notnull"] for r in info
+            ):
+                self.conn.execute("PRAGMA foreign_keys = OFF")
+                self.conn.executescript(
+                    """
+                    CREATE TABLE findings_new (
+                        id               TEXT PRIMARY KEY,
+                        investigation_id TEXT NOT NULL
+                            REFERENCES investigations(id),
+                        content          TEXT NOT NULL,
+                        confidence       REAL,
+                        status           TEXT NOT NULL
+                            DEFAULT 'provisional',
+                        claim_id         TEXT,
+                        created_at       TEXT NOT NULL
+                    );
+                    INSERT INTO findings_new
+                        (id, investigation_id, content, confidence,
+                         status, claim_id, created_at)
+                        SELECT id, investigation_id, content,
+                               confidence, status, claim_id, created_at
+                        FROM findings;
+                    DROP TABLE findings;
+                    ALTER TABLE findings_new RENAME TO findings;
+                    CREATE INDEX IF NOT EXISTS idx_find_inv
+                        ON findings(investigation_id);
                     """
                 )
                 self.conn.execute("PRAGMA foreign_keys = ON")

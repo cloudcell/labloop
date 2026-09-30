@@ -965,7 +965,10 @@ def register(
         is runtime-only.
 
         For long-running jobs, this returns quickly with status "running".
-        Use get_trial_status to poll for completion.
+        Use get_trial_status to poll for completion. Note the return is
+        not immediate — there is a consistent ~10 s handshake/settle
+        before status "running" comes back; that settle window is what
+        makes cancel-race behaviour reproducible.
 
         Enforcement: commitment 6 — the bundle must be controlled.
         Rejects if the bundle is not fully captured.

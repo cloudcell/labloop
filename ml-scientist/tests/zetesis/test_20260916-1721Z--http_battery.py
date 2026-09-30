@@ -80,7 +80,6 @@ async def test_full_lifecycle_over_http(zetesis_http_server):
     find = await call_tool_http(url, "record_finding", {
         "investigation_id": inv_id,
         "content": "strategy X correlates with completion",
-        "confidence": 0.6,
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     assert "error" not in find

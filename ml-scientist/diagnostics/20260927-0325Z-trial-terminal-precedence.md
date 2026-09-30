@@ -19,16 +19,21 @@ capture_bundle → run_trial → record_observation.
 
 PART A — happy path: terminal precedence
 
-1. Write a QUICK stub /tmp/diag-term/quick.py that prints
-   {"accuracy": 0.9} and exits. Loop-0 → run_trial → it completes.
-   get_trial_status → status "completed" with real telemetry and
-   executor_output. Call it again → same record (stable, not
-   re-finalized).
+1. Write a QUICK stub /tmp/diag-term/quick.py exposing the executor
+   contract: `def run_training(config):` returns
+   `{"metrics": {"accuracy": 0.9}, "variance": {}}`. Loop-0 →
+   run_trial → returns `status: "running"` (the call returns early,
+   ~seconds, not at terminal state) → poll get_trial_status until
+   "completed" with real telemetry and executor_output. Call it
+   again → same record (stable, not re-finalized).
 
 PART B — the masking bug: mark_retryable on a live trial
 
-2. Write a SLOW stub /tmp/diag-term/slow.py: import time;
-   time.sleep(120); print({"accuracy": 0.1}). Loop-0 → run_trial.
+2. Write a SLOW stub /tmp/diag-term/slow.py exposing the executor
+   contract: `def run_training(config):` body `import time;
+   time.sleep(120); return {"metrics": {"accuracy": 0.1},
+   "variance": {}}`. Loop-0 → run_trial → returns quickly with
+   `status: "running"` (run_trial does not wait for completion).
 3. Confirm it is running: get_trial_status → "running".
 4. While running: mark_retryable(trial_id, reason="diag-term:
    infrastructure test"). Response must confirm status "retryable"

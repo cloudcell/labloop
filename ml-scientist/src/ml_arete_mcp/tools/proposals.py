@@ -74,6 +74,14 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
         pre-registered promotion rule (confidence bar, safety gates).
         Contracts are immutable — a new create mints the next version;
         open_tournament freezes the version it runs under.
+
+        Byte-identical re-creates are deduplicated — the same
+        metrics+policy+holdouts+budget returns the existing contract
+        id rather than forking the registry on a double submit. The
+        powered-policy gate enforces presence of the design keys
+        (sesoi_d, target_power, min_evidence_rung), not adequacy —
+        target_power: 0.5 pre-registers fine; adequacy surfaces
+        downstream as underpowered / power_acknowledged.
         """
         try:
             metrics = coerce_json(metrics, dict, "metrics")
@@ -94,6 +102,24 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                 }))
             if err := check_promotion_policy_power(promotion_policy):
                 return fail(json.dumps({"error": err}))
+
+            # Mint-time dedup: a byte-identical contract already exists
+            # — returning its id is the honest answer to a double
+            # submit; silently minting a new version would fork the
+            # registry (same semantics as assert_claim's dedup).
+            canon = lambda o: json.dumps(o, sort_keys=True,
+                                       default=str)
+            for existing in store.list_meta_contracts():
+                if (canon(existing.metrics) == canon(metrics)
+                        and canon(existing.promotion_policy)
+                        == canon(promotion_policy)
+                        and canon(existing.holdouts) == canon(holdouts)
+                        and canon(existing.budget) == canon(budget)):
+                    return ok({
+                        "contract_id": existing.id,
+                        "version": existing.version,
+                        "deduplicated": True,
+                    })
 
             contract = MetaContract(
                 id=f"mcontract-{uuid.uuid4().hex[:8]}",

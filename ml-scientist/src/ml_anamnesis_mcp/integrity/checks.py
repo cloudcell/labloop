@@ -1,7 +1,8 @@
 """Invariant checks for memory.db — the anamnesis integrity audit.
 
-Write-time enforcement (confidence ceilings, supersession targets,
-closed vocabularies) prevents violations; these checks detect what
+Write-time enforcement (server-computed confidence, supersession
+targets, closed vocabularies) prevents violations; these checks
+detect what
 enforcement cannot cover: hand-edits, races, and future bugs. The
 audit counterpart of the evidence rule — asserted, then audited.
 
@@ -14,7 +15,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..enforcement.checks import PRIOR_CONFIDENCE_MAX
+import json
+
 from ..state.models import EVIDENCE_RELATIONS, INTERNAL_REF_PREFIXES
 
 from .. import _grounded_constants as _gc
@@ -41,32 +43,82 @@ def _skipped(name: str, reason: str) -> dict:
             "detail": f"skipped — {reason}"}
 
 
-def _check_unsupported_high_confidence(
-    store, prior_max: float = PRIOR_CONFIDENCE_MAX
-) -> dict:
-    """Live claims above the prior ceiling with no evidence-bearing
-    edge — the evidence rule audited, not just enforced. Uses the
-    same configured ceiling as the write-time gate."""
+def _check_unverifiable_confidence(store) -> dict:
+    """Every numeric confidence must recompute through its stored
+    derivation (numeric provenance invariant,
+    plan-20260930-0240Z). NULL confidence is honest — absence of a
+    computation is absence of a number. A live claim violates when:
+
+    - confidence is non-NULL but confidence_computation is NULL
+      (no derivation was recorded — legacy rows flag ``legacy``),
+    - the stored computation fails to recompute or recomputes to a
+      different value (the record does not reproduce the number), or
+    - a computed confidence lacks any evidence-bearing edge (a
+      posterior floating free of the graph)."""
     ev = tuple(sorted(EVIDENCE_RELATIONS))
     placeholders = ",".join("?" for _ in ev)
     rows = store._fetchall(
-        f"""SELECT c.id, c.confidence FROM claims c
-            WHERE c.confidence > ?
+        f"""SELECT c.id, c.confidence, c.confidence_basis,
+                  c.confidence_computation FROM claims c
+            WHERE c.confidence IS NOT NULL
               AND NOT {store._SUPERSEDED_CLAUSE}
-              AND (c.valid_until IS NULL OR c.valid_until >= ?)
-              AND c.id NOT IN (
-                  SELECT from_claim FROM claim_edges
-                  WHERE relation IN ({placeholders}))""",
-        (prior_max, _utc_now(), *ev),
+              AND (c.valid_until IS NULL OR c.valid_until >= ?)""",
+        (_utc_now(),),
     )
-    violations = [
-        {"claim_id": r["id"], "confidence": r["confidence"]}
-        for r in rows
-    ]
+    violations = []
+    for r in rows:
+        legacy = r["confidence_basis"] is None
+        comp_raw = r["confidence_computation"]
+        if comp_raw is None:
+            violations.append({
+                "claim_id": r["id"],
+                "confidence": r["confidence"],
+                "basis": r["confidence_basis"],
+                "legacy": legacy,
+                "problem": "numeric confidence without a stored "
+                           "derivation",
+            })
+            continue
+        try:
+            recomputed = _gc.compute_confidence(json.loads(comp_raw))
+        except Exception as e:
+            violations.append({
+                "claim_id": r["id"],
+                "confidence": r["confidence"],
+                "basis": r["confidence_basis"],
+                "legacy": legacy,
+                "problem": f"derivation does not recompute: {e}",
+            })
+            continue
+        if abs(recomputed - r["confidence"]) > 1e-9:
+            violations.append({
+                "claim_id": r["id"],
+                "confidence": r["confidence"],
+                "basis": r["confidence_basis"],
+                "legacy": legacy,
+                "problem": f"stored confidence does not recompute "
+                           f"(derivation yields {recomputed})",
+            })
+            continue
+        has_evidence = store._fetchone(
+            f"""SELECT 1 FROM claim_edges
+                WHERE from_claim = ? AND relation IN ({placeholders})
+                LIMIT 1""",
+            (r["id"], *ev),
+        )
+        if has_evidence is None:
+            violations.append({
+                "claim_id": r["id"],
+                "confidence": r["confidence"],
+                "basis": r["confidence_basis"],
+                "legacy": legacy,
+                "problem": "computed confidence without an "
+                           "evidence-bearing edge",
+            })
     return _res(
-        "unsupported_high_confidence", violations,
-        f"{len(violations)} live claim(s) above "
-        f"{prior_max} with no evidence-bearing edge",
+        "unverifiable_confidence", violations,
+        f"{len(violations)} live claim(s) with confidence that does "
+        "not verify against a stored derivation",
     )
 
 
@@ -155,9 +207,7 @@ def _check_misfiled_external_refs(store) -> dict:
     )
 
 
-def run_checks(
-    store, *, prior_confidence_max: float = PRIOR_CONFIDENCE_MAX
-) -> dict:
+def run_checks(store) -> dict:
     """Run the full anamnesis invariant suite; return the payload."""
     started = time.monotonic()
     checks = [
@@ -168,7 +218,7 @@ def run_checks(
             "upstream_connectivity",
             "semantic-memory endpoint — no upstream channels",
         ),
-        _check_unsupported_high_confidence(store, prior_confidence_max),
+        _check_unverifiable_confidence(store),
         _check_dangling_claim_refs(store),
         _check_broken_supersession(store),
         _check_misfiled_external_refs(store),
@@ -199,12 +249,7 @@ def run_and_log(
     from .log import write_check_log
 
     cfg = config or {}
-    payload = run_checks(
-        store,
-        prior_confidence_max=float(
-            cfg.get("prior_confidence_max", PRIOR_CONFIDENCE_MAX)
-        ),
-    )
+    payload = run_checks(store)
     payload["trigger"] = trigger
     log_path = write_check_log(
         log_dir_for(store),

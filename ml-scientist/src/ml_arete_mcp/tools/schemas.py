@@ -161,6 +161,7 @@ class CorrectTournamentResultOut(TypedDict, total=False):
 class CreateMetaContractOut(TypedDict, total=False):
     contract_id: str | None
     version: int | None
+    deduplicated: bool | None  # set when a byte-identical contract already existed
 
 
 class GetImproverOut(TypedDict, total=False):
@@ -218,8 +219,8 @@ class ProposeMetaChangeOut(TypedDict, total=False):
 
 
 class PullArmEvidenceOut(TypedDict, total=False):
-    evidence_ref_id: str | None
-    upstream_evidence_ref_id: str | None
+    evidence_ref_id: str | None   # upstream campaign-scoped ref — the id record_arm_verdict accepts
+    wrapper_ref_id: str | None    # local tournament-scoped ref — citation handle for record_meta_decision
     ref_ids: list[str] | None
     result: dict | None
 

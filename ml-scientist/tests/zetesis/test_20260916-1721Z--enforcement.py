@@ -66,58 +66,33 @@ async def test_pull_rejects_absent_adaptor(search_store, zetesis_server):
     assert g["evidence_refs"] == []
 
 
-async def test_finding_confidence_gate(zetesis_server):
+async def test_finding_carries_no_confidence(zetesis_server):
+    """Numeric provenance invariant (plan-20260930-0240Z): a finding
+    is a proto-claim, not a measurement — record_finding has no
+    confidence parameter and stores NULL."""
     inv_id = await open_inv(zetesis_server)
     r = await call_tool(zetesis_server, "record_finding", {
         "investigation_id": inv_id, "content": "ungrounded",
-        "confidence": 0.8,
     })
-    assert "error" in r
-    assert "prior ceiling" in r["error"]
+    assert "error" not in r
+    g = await call_tool(zetesis_server, "get_investigation",
+                        {"investigation_id": inv_id})
+    assert g["findings"][0]["confidence"] is None
 
-    # same confidence WITH an evidence ref is allowed
+    # evidence-attached findings record the same honest NULL — the
+    # grounding lives on the claim mint's basis, not a caller scalar.
     pull = await call_tool(zetesis_server, "pull_evidence", {
         "investigation_id": inv_id, "source": "loop0",
         "tool": "list_active_programmes",
     })
     r = await call_tool(zetesis_server, "record_finding", {
         "investigation_id": inv_id, "content": "grounded",
-        "confidence": 0.8,
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     assert "error" not in r
-
-
-async def test_finding_confidence_gate_configurable(
-    search_store, adaptors
-):
-    """[integrity] prior_confidence_max governs the write-time gate."""
-    from ml_zetesis_mcp.server import create_server
-
-    mcp = create_server(
-        search_store, adaptors=adaptors,
-        integrity_config={"prior_confidence_max": 0.5},
-    )
-    inv_id = await open_inv(mcp)
-    r = await call_tool(mcp, "record_finding", {
-        "investigation_id": inv_id, "content": "mid-confidence",
-        "confidence": 0.4,
-    })
-    assert "error" not in r  # 0.4 < configured 0.5 → allowed
-    r = await call_tool(mcp, "record_finding", {
-        "investigation_id": inv_id, "content": "too confident",
-        "confidence": 0.6,
-    })
-    assert "prior ceiling" in r["error"]
-
-
-async def test_finding_below_ceiling_needs_no_evidence(zetesis_server):
-    inv_id = await open_inv(zetesis_server)
-    r = await call_tool(zetesis_server, "record_finding", {
-        "investigation_id": inv_id, "content": "hunch",
-        "confidence": 0.3,
-    })
-    assert "error" not in r
+    g = await call_tool(zetesis_server, "get_investigation",
+                        {"investigation_id": inv_id})
+    assert all(f["confidence"] is None for f in g["findings"])
 
 
 async def test_finding_rejects_foreign_evidence_ref(zetesis_server):
@@ -130,7 +105,6 @@ async def test_finding_rejects_foreign_evidence_ref(zetesis_server):
     })
     r = await call_tool(zetesis_server, "record_finding", {
         "investigation_id": inv_b, "content": "smuggled",
-        "confidence": 0.7,
         "evidence_ref_ids": [pull["evidence_ref_id"]],
     })
     assert "error" in r
@@ -150,7 +124,7 @@ async def test_closed_investigation_rejects_pulls_and_findings(
     for tool, args in (
         ("pull_evidence", {"source": "loop0",
                            "tool": "list_active_programmes"}),
-        ("record_finding", {"content": "x", "confidence": 0.1}),
+        ("record_finding", {"content": "x"}),
     ):
         args["investigation_id"] = inv_id
         r = await call_tool(zetesis_server, tool, args)

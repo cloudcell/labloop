@@ -208,10 +208,10 @@ def create_server(
     # Disabled unless [enforcement] is provided (in-process embedders
     # stay opt-in); __main__ always forwards it, so the shipped
     # servers run enabled by default.
+    from .enforcement import recurrence
+
     enf = enforcement_config or {}
     if enf and enf.get("recurrent_protocol", True):
-        from .enforcement import recurrence
-
         recurrence.TRACKER.configure(
             enf.get("status_freshness_seconds", _gc.STATUS_FRESHNESS_SECONDS.value)
         )
@@ -222,5 +222,11 @@ def create_server(
                 if hasattr(adaptor, "connectivity_report") else None
             ),
         )
+
+    # Argument hygiene is not a protocol feature — the undeclared-arg
+    # refusal must survive recurrent_protocol=0 (and an absent
+    # [enforcement] block). Outermost wrapper: malformed calls refuse
+    # by name before any gate runs.
+    recurrence.install_strict_args(mcp)
 
     return mcp

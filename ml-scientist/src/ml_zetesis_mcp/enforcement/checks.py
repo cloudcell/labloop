@@ -20,14 +20,6 @@ from ..state.models import (
 from ..state.store import SearchStore
 from .. import _grounded_constants as _gc
 
-# A finding recorded without evidence refs may not exceed this
-# confidence — the same prior-level ceiling anamnesis applies to
-# claims, one layer earlier (a provisional assertion can't grow into
-# a claim it never earned).
-# Value + grounding: _grounded_constants.PRIOR_CONFIDENCE_MAX
-# (IN-RANGE, NAP 2019 App. D Table D-1).
-PRIOR_CONFIDENCE_MAX = _gc.PRIOR_CONFIDENCE_MAX.value
-
 # The read-only upstream surface. pull_evidence proxies calls through
 # the evidence channel; anything outside these names is rejected before
 # the call — a client cannot reach run_trial or record_promotion_decision
@@ -135,25 +127,6 @@ def check_investigation_open(
             inv,
         )
     return None, inv
-
-
-def check_finding_confidence(
-    confidence: float,
-    evidence_ref_ids: list[str],
-    prior_max: float = PRIOR_CONFIDENCE_MAX,
-) -> str | None:
-    """A finding without evidence is capped at prior-level confidence —
-    the barrier against unsupported high-confidence assertions.
-    prior_max is the configured ceiling ([integrity]
-    prior_confidence_max)."""
-    if not evidence_ref_ids and confidence > prior_max:
-        return (
-            f"confidence {confidence} exceeds prior ceiling "
-            f"{prior_max} without evidence. Cite at least "
-            "one evidence_ref_id from pull_evidence, or lower "
-            "confidence."
-        )
-    return None
 
 
 def check_evidence_refs_exist(
@@ -321,7 +294,9 @@ def check_promotion_policy_power(policy: dict | None) -> str | None:
             "effect of interest, Cohen's d > 0), 'target_power' in "
             "(0, 1), 'min_evidence_rung' "
             f"({'|'.join(_gc.EVIDENCE_RUNGS)}); optional 'alpha' "
-            "(default 0.05)."
+            "(default 0.05), optional 'prior' in (0, 0.5] "
+            "(declared P[H1] before the evidence; absent → "
+            "PRIOR_CONFIDENCE_MAX)."
         )
     d = policy["sesoi_d"]
     if (
@@ -364,7 +339,7 @@ def check_promotion_policy_power(policy: dict | None) -> str | None:
     # Optional declared prior P[H₁] — NAP Table D-1 tabulates to
     # 0.5; a challenger starting above 'as likely as not' before
     # the evidence exists is not a preregistration. Absent → the
-    # mint uses PRIOR_CONFIDENCE_MAX (0.3).
+    # mint's computation inputs default to PRIOR_CONFIDENCE_MAX (0.3).
     prior = policy.get("prior")
     if prior is not None and (
         not isinstance(prior, (int, float))
