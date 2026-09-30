@@ -19,10 +19,14 @@ case "$VM" in
     -*|*[!a-zA-Z0-9_.-]*) echo "00-build-lab-template: bad domain name '$VM'" >&2; exit 1 ;;
 esac
 # one EXIT trap: sudo keepalive + the transient cache http server
-SUDO_KEEPALIVE=""; CACHE_HTTP_PID=""
+# + the transient ufw hole that lets guests reach it
+SUDO_KEEPALIVE=""; CACHE_HTTP_PID=""; CACHE_RULE_ADDED=0
 cleanup() {
     [ -n "$SUDO_KEEPALIVE" ] && kill "$SUDO_KEEPALIVE" 2>/dev/null
     [ -n "$CACHE_HTTP_PID" ] && kill "$CACHE_HTTP_PID" 2>/dev/null
+    [ "$CACHE_RULE_ADDED" = 1 ] && sudo -n ufw delete allow in on virbr0 \
+        to 192.168.122.1 port 8777 proto tcp comment 'labloop-cache' \
+        >/dev/null 2>&1
     return 0
 }
 trap cleanup EXIT
@@ -54,7 +58,17 @@ systemctl is-active --quiet libvirtd 2>/dev/null || missing+=(libvirt-daemon-sys
 # happens HERE, before the unattended build starts. sudo -v primes the
 # timestamp; the bounded keepalive refreshes it so nothing mid-run
 # (apt, usermod, or anything downstream) asks again.
-if ((${#missing[@]})) || ! id -nG | grep -qw libvirt; then
+# sudo is also needed when ufw is active: the guest reaches the cache
+# endpoint through virbr0, and ufw's default deny-incoming drops those
+# SYNs — opening the hole needs root (transient; removed at exit).
+_needs_sudo=0
+((${#missing[@]})) && _needs_sudo=1
+id -nG | grep -qw libvirt || _needs_sudo=1
+# ufw active => the cache endpoint needs a firewall hole, which needs
+# root. MANIFEST may not exist yet on a cold cache (prefetch creates
+# it below), so don't gate on it.
+systemctl is-active --quiet ufw 2>/dev/null && _needs_sudo=1
+if [ "$_needs_sudo" = 1 ]; then
     sudo -v
     (for _ in $(seq 240); do sudo -n true 2>/dev/null || break; sleep 60; done) &
     SUDO_KEEPALIVE=$!
@@ -104,6 +118,20 @@ if [ -f "$CACHE_ROOT/MANIFEST" ]; then
             >/dev/null 2>&1 &
         CACHE_HTTP_PID=$!
         echo "==> cache endpoint: http://192.168.122.1:8777 (pid $CACHE_HTTP_PID)"
+    fi
+    # ufw default-denies inbound — libvirt opens INPUT holes only for
+    # its own services (dnsmasq 53/67), so guest->192.168.122.1:8777
+    # SYNs are silently dropped (connect TIMEOUT, not refused). Open a
+    # transient hole for the build's duration; cleanup() removes it.
+    if systemctl is-active --quiet ufw 2>/dev/null; then
+        if sudo -n ufw allow in on virbr0 to 192.168.122.1 \
+                port 8777 proto tcp comment 'labloop-cache' >/dev/null; then
+            CACHE_RULE_ADDED=1
+            echo "    ufw: virbr0 -> 192.168.122.1:8777 allowed (transient)"
+        else
+            echo "    WARN: could not open ufw hole for :8777 —" >&2
+            echo "    guests will not reach the cache (sudo timestamp?)" >&2
+        fi
     fi
 fi
 

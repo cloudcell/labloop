@@ -33,7 +33,7 @@ ML_SCIENTIST="${ML_SCIENTIST:-$REPO/../ml-scientist}"
 ISO="${LABLOOP_ISO:-}"
 VIRSH="virsh -c qemu:///system"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; [ -z "${CACHE_HTTP_PID:-}" ] || kill "$CACHE_HTTP_PID" 2>/dev/null; true' EXIT
+trap 'rm -rf "$WORK"; [ -z "${CACHE_HTTP_PID:-}" ] || kill "$CACHE_HTTP_PID" 2>/dev/null; [ "${CACHE_RULE_ADDED:-0}" = 1 ] && sudo -n ufw delete allow in on virbr0 to 192.168.122.1 port 8777 proto tcp comment labloop-cache >/dev/null 2>&1; true' EXIT
 
 die()  { echo "create-lab-template: $*" >&2; exit 1; }
 note() { echo; echo "==> $*"; }
@@ -127,6 +127,24 @@ if ! cache_serving && [ -f "$CACHE_ROOT/MANIFEST" ]; then
     note "cache endpoint started: $CACHE_URL (pid $CACHE_HTTP_PID)"
 fi
 cache_serving && CACHE_UP=1
+# The endpoint answering US is not enough: ufw default-denies inbound
+# on virbr0, and libvirt opens INPUT holes only for its own services
+# (dnsmasq 53/67) — so a listening server is still unreachable from the
+# guest (connect TIMEOUT, not refused). This holds for our server AND
+# for a reused/orphaned one, so check ufw whenever CACHE_UP=1. Without
+# sudo we degrade to the plain network path; offline mode still dies
+# at the gate below.
+if [ "$CACHE_UP" = 1 ] && systemctl is-active --quiet ufw 2>/dev/null; then
+    if sudo ufw allow in on virbr0 to 192.168.122.1 port 8777 proto tcp \
+            comment 'labloop-cache' >/dev/null; then
+        CACHE_RULE_ADDED=1
+    else
+        echo "    warn: ufw is active and no sudo — guests cannot reach" >&2
+        echo "    the cache; falling back to the network path" >&2
+        [ -n "$CACHE_HTTP_PID" ] && kill "$CACHE_HTTP_PID" 2>/dev/null
+        CACHE_HTTP_PID=""; CACHE_UP=0
+    fi
+fi
 if [ "${LABLOOP_OFFLINE:-0}" = "1" ]; then
     "$REPO/selfbuild/prefetch-cache.sh" --verify \
         || die "offline build requested but the artifact cache is incomplete"
