@@ -91,6 +91,34 @@ command -v python3 >/dev/null || die "python3 required on host"
 [ -f "$ML_SCIENTIST/pyproject.toml" ] && [ -d "$ML_SCIENTIST/src" ] \
     || die "ML_SCIENTIST=$ML_SCIENTIST is not an ml-scientist checkout (need pyproject.toml + src/)"
 
+# ---- artifact cache (warmed by 00 -> selfbuild/prefetch-cache.sh) ----
+# Every consume path below prefers the cache endpoint when its server
+# is up and falls back to today's network path when it isn't — the
+# cache is additive, never required for an online build. In
+# LABLOOP_OFFLINE=1 it IS required: verify hard-fails on gaps and a
+# dead endpoint means the guest cannot fetch at all.
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/labloop"
+CACHE_URL="${LABLOOP_CACHE_URL:-http://192.168.122.1:8777}"
+CACHE_UP=0
+curl -fs -m 3 -o /dev/null "$CACHE_URL/MANIFEST" 2>/dev/null && CACHE_UP=1
+if [ "${LABLOOP_OFFLINE:-0}" = "1" ]; then
+    "$REPO/selfbuild/prefetch-cache.sh" --verify \
+        || die "offline build requested but the artifact cache is incomplete"
+    [ "$CACHE_UP" = 1 ] || die "offline build needs the cache endpoint \
+(start the build via ./00-build-lab-template.sh, or serve $CACHE_ROOT \
+on 192.168.122.1:8777 yourself)"
+fi
+# apt prelude: inject the flat cache source + refresh ONLY its lists
+# (a full update would reintroduce the mirror dependency). Harmless
+# when the endpoint is down — the install falls through to mirrors.
+APT_PRELUDE=""
+if [ "$CACHE_UP" = 1 ]; then
+    note "artifact cache: $CACHE_URL (prefetched artifacts in use)"
+    APT_PRELUDE="printf 'deb [trusted=yes] $CACHE_URL/apt ./\n' > /etc/apt/sources.list.d/labloop-cache.list && \
+apt-get update -o Dir::Etc::SourceList='sources.list.d/labloop-cache.list' \
+    -o Dir::Etc::SourceParts='-' -o APT::Get::List-Cleanup='0' -qq || true ; "
+fi
+
 # ------------------------------------------------------------------
 # qemu guest-agent driver (inlined; exec + chunked file push)
 # ------------------------------------------------------------------
@@ -358,7 +386,12 @@ echo "    agent responding (installed system)"
 # Phase 2 — provision the guest (all via guest-agent, as needed user)
 # ------------------------------------------------------------------
 note "base packages"
-qga "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+# GUEST_PKGS: this list is single-sourced in selfbuild/prefetch-cache.sh
+# (the prefetcher resolves its closure into the apt bundle). Add a
+# package here without adding it there and it silently falls back to
+# the mirror — fine online, dead in an offline build.
+qga "${APT_PRELUDE}apt-get update -qq || true ; \
+     DEBIAN_FRONTEND=noninteractive apt-get install -y \
      podman uidmap acl pipx python-is-python3 git curl qemu-guest-agent \
      spice-vdagent mc nodejs npm nftables"
 # casper is the live-ISO bootstrapper left over by the unattended
@@ -461,10 +494,27 @@ qga "su - mcp -c 'podman network exists lab-net-mcp || \
 qga "su - exp -c 'podman network exists lab-net-exp || \
      podman network create --subnet 172.30.0.0/24 lab-net-exp'"
 
-note "building images (trusted lab-img-mcp under mcp + hostile lab-img-exp under exp)"
-qga "su - mcp -c 'podman build -t lab-img-mcp -f /home/mcp/build/mcp/Containerfile /home/mcp/build/mcp'"
-qga "su - exp -c 'podman build -t lab-img-exp \
-     /srv/lab/workspace/ml-labloop/containers/experiment'"
+note "images: load prefetched tarballs, else guest-side build"
+# prefetch-cache.sh bakes both images host-side (registry pulls, debian
+# apt, uv sync all execute in the online phase). Loading the tarballs
+# into each user's rootless store gives the quadlets the same
+# localhost/lab-img-* names the builds would produce.
+img_mcp=""; img_exp=""
+if [ "$CACHE_UP" = 1 ]; then
+    img_mcp=$(basename "$(ls -t "$CACHE_ROOT"/images/lab-img-mcp-*.tar 2>/dev/null | head -1)" 2>/dev/null || true)
+    img_exp=$(basename "$(ls -t "$CACHE_ROOT"/images/lab-img-exp-*.tar 2>/dev/null | head -1)" 2>/dev/null || true)
+fi
+if [ -n "$img_mcp" ] && [ -n "$img_exp" ]; then
+    qga "curl -fsS -o '/tmp/$img_mcp' '$CACHE_URL/images/$img_mcp' && \
+         curl -fsS -o '/tmp/$img_exp' '$CACHE_URL/images/$img_exp' && \
+         su - mcp -c 'podman load -i /tmp/$img_mcp' && \
+         su - exp -c 'podman load -i /tmp/$img_exp' && \
+         rm -f '/tmp/$img_mcp' '/tmp/$img_exp'"
+else
+    qga "su - mcp -c 'podman build -t lab-img-mcp -f /home/mcp/build/mcp/Containerfile /home/mcp/build/mcp'"
+    qga "su - exp -c 'podman build -t lab-img-exp \
+         /srv/lab/workspace/ml-labloop/containers/experiment'"
+fi
 
 # build context is only needed at build time and would retain
 # ml-scientist sources otherwise — drop it before freeze
@@ -479,14 +529,33 @@ note "trial interpreter env: /srv/lab/trial-env -> /opt/trial-env (volume; survi
 # updatable later with another `podman run` — no image rebuild needed.
 # entrypoint.sh only exports ML_EPISTEME_EXECUTOR_PYTHON when the env
 # exists, so an unpopulated dir degrades to the slim interpreter.
-qga "install -d -m 0755 -o mcp -g mcp /srv/lab/trial-env && \
-     su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
-         -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
-         venv /opt/trial-env' && \
-     su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
-         -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
-         pip install --python /opt/trial-env/bin/python --no-cache \
-         numpy pandas scipy scikit-learn matplotlib reportlab'"
+# wheels from the cache when available: the bundle is resolved inside
+# python:3.12-slim at prefetch time so the tags match this interpreter.
+if [ "$CACHE_UP" = 1 ] && compgen -G "$CACHE_ROOT/wheels/trial-env/*.whl" >/dev/null; then
+    whl_list="$(ls "$CACHE_ROOT"/wheels/trial-env | tr '\n' ' ')"
+    qga "install -d -m 0755 -o mcp -g mcp /srv/lab/trial-env /srv/lab/wheelhouse && \
+         cd /srv/lab/wheelhouse && \
+         for w in $whl_list; do curl -fsS -o \"\$w\" '$CACHE_URL/wheels/trial-env/\$w' || exit 1; done && \
+         chown -R mcp:mcp /srv/lab/wheelhouse && \
+         su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
+             -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
+             venv /opt/trial-env' && \
+         su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
+             -v /srv/lab/trial-env:/opt/trial-env \
+             -v /srv/lab/wheelhouse:/wheels lab-img-mcp \
+             pip install --python /opt/trial-env/bin/python --no-cache \
+             --no-index --find-links=/wheels \
+             numpy pandas scipy scikit-learn matplotlib reportlab'"
+else
+    qga "install -d -m 0755 -o mcp -g mcp /srv/lab/trial-env && \
+         su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
+             -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
+             venv /opt/trial-env' && \
+         su - mcp -c 'podman run --rm -e HOME=/tmp --entrypoint uv \
+             -v /srv/lab/trial-env:/opt/trial-env lab-img-mcp \
+             pip install --python /opt/trial-env/bin/python --no-cache \
+             numpy pandas scipy scikit-learn matplotlib reportlab'"
+fi
 
 note "episteme ingest token (generated, never committed)"
 qga "printf 'ML_EPISTEME_INGEST_TOKEN=%s\n' \"\$(head -c 32 /dev/urandom | base64)\" \
@@ -592,13 +661,34 @@ qga_lab "sudo -u exp /usr/local/sbin/labloop-exec id -u"   # must print exp's ui
 qga_lab "sudo -u mcp /usr/local/sbin/labloop-fault status >/dev/null"
 
 note "VSCodium + Zoo Code + vscode-pdf"
-qga "wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg \
-         | gpg --batch --yes --dearmor -o /usr/share/keyrings/vscodium-archive-keyring.gpg && \
-     echo 'deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main' \
-         > /etc/apt/sources.list.d/vscodium.list && \
-     apt-get update -qq && apt-get install -y codium"
-qga_lab "codium --install-extension ZooCodeOrganization.zoo-code && \
-         codium --install-extension tomoki1207.pdf"
+# cache path: pinned release .deb + local .vsix installs — the gitlab
+# apt repo and open-vsx are never touched. The deb's dep closure is in
+# the apt bundle (prefetch resolves it via --print-uris on the deb).
+cod_deb=""; vsix_list=""
+if [ "$CACHE_UP" = 1 ]; then
+    cod_deb=$(basename "$(ls -t "$CACHE_ROOT"/pkgs/codium_*.deb 2>/dev/null | head -1)" 2>/dev/null || true)
+    vsix_list="$(cd "$CACHE_ROOT/pkgs" 2>/dev/null && ls *.vsix 2>/dev/null | tr '\n' ' ')"
+fi
+if [ -n "$cod_deb" ]; then
+    qga "curl -fsS -o '/tmp/$cod_deb' '$CACHE_URL/pkgs/$cod_deb' && \
+         DEBIAN_FRONTEND=noninteractive apt-get install -y '/tmp/$cod_deb' && \
+         rm -f '/tmp/$cod_deb'"
+else
+    qga "wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg \
+             | gpg --batch --yes --dearmor -o /usr/share/keyrings/vscodium-archive-keyring.gpg && \
+         echo 'deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main' \
+             > /etc/apt/sources.list.d/vscodium.list && \
+         apt-get update -qq && apt-get install -y codium"
+fi
+if [ -n "$vsix_list" ]; then
+    for v in $vsix_list; do
+        qga "curl -fsS -o '/tmp/$v' '$CACHE_URL/pkgs/$v'"
+        qga_lab "codium --install-extension '/tmp/$v' && rm -f '/tmp/$v'"
+    done
+else
+    qga_lab "codium --install-extension ZooCodeOrganization.zoo-code && \
+             codium --install-extension tomoki1207.pdf"
+fi
 
 # VSCodium (Electron) prompts to CREATE a gnome-keyring on first launch
 # to store extension secrets — the daemon runs but no keyring exists.
@@ -632,7 +722,20 @@ qga "apt-get install -y numlockx && \
      chown lab:lab /home/lab/.config/autostart/numlockx.desktop"
 
 note "uv system-wide + duckduckgo-search deps warmed"
-qga_lab "pipx install uv && timeout 120 ~/.local/bin/uvx duckduckgo-mcp-server </dev/null >/dev/null 2>&1 || true"
+# cache path: uv from its wheel; the warmup resolves duckduckgo-mcp-server
+# purely from the prefetched closure (--no-index --find-links) so uv's
+# cache is primed offline instead of by luck.
+if [ "$CACHE_UP" = 1 ] && compgen -G "$CACHE_ROOT/wheels/uvx/uv-*.whl" >/dev/null; then
+    uvx_list="$(ls "$CACHE_ROOT"/wheels/uvx | tr '\n' ' ')"
+    qga "mkdir -p /tmp/uvx-wheels && cd /tmp/uvx-wheels && \
+         for w in $uvx_list; do curl -fsS -o \"\$w\" '$CACHE_URL/wheels/uvx/\$w' || exit 1; done && \
+         chown -R lab:lab /tmp/uvx-wheels"
+    qga_lab "pipx install /tmp/uvx-wheels/uv-*.whl"
+    qga_lab "timeout 120 ~/.local/bin/uvx --no-index --find-links /tmp/uvx-wheels \
+             duckduckgo-mcp-server </dev/null >/dev/null 2>&1 || true"
+else
+    qga_lab "pipx install uv && timeout 120 ~/.local/bin/uvx duckduckgo-mcp-server </dev/null >/dev/null 2>&1 || true"
+fi
 qga "install -m 0755 /home/lab/.local/share/pipx/venvs/uv/bin/uv \
                     /home/lab/.local/share/pipx/venvs/uv/bin/uvx /usr/local/bin/"
 
@@ -651,8 +754,26 @@ note "Zoo Code provider seed (openai-compatible -> host vLLM)"
 qga_push "$REPO/deploy/seed-zoo-state.py" /tmp/seed-zoo-state.py
 qga_lab "python3 /tmp/seed-zoo-state.py"
 
-note "opencode CLI 2.0.14 via npm + MCP config (global path — found from any cwd)"
-qga "rm -f /usr/local/bin/opencode && npm install -g @opencode/cli@2.0.14"
+note "opencode CLI 2.0.15 via npm + MCP config (global path — found from any cwd)"
+# cache path: @opencode/cli is a 2 KB launcher whose real payload is an
+# optionalDependency platform binary (a registry fetch even from the
+# tgz). So prefetch-cache.sh packs the linux-x64 tarballs directly and
+# we install package/bin/opencode ourselves — choosing baseline vs
+# regular by /proc/cpuinfo, exactly like the package's postinstall.mjs.
+oc_tgz=""
+if [ "$CACHE_UP" = 1 ]; then
+    oc_tgz=$(basename "$(ls -t "$CACHE_ROOT"/pkgs/opencode-cli-linux-x64-[0-9]*.tgz 2>/dev/null | head -1)" 2>/dev/null || true)
+    oc_base=$(basename "$(ls -t "$CACHE_ROOT"/pkgs/opencode-cli-linux-x64-baseline-*.tgz 2>/dev/null | head -1)" 2>/dev/null || true)
+fi
+if [ -n "$oc_tgz" ] && [ -n "${oc_base:-}" ]; then
+    qga "curl -fsS -o '/tmp/$oc_tgz' '$CACHE_URL/pkgs/$oc_tgz' && \
+         curl -fsS -o '/tmp/$oc_base' '$CACHE_URL/pkgs/$oc_base' && \
+         if grep -qw avx2 /proc/cpuinfo; then t='$oc_tgz'; else t='$oc_base'; fi && \
+         tar xzf \"/tmp/\$t\" -O package/bin/opencode > /usr/local/bin/opencode && \
+         chmod 755 /usr/local/bin/opencode && rm -f '/tmp/$oc_tgz' '/tmp/$oc_base'"
+else
+    qga "rm -f /usr/local/bin/opencode && npm install -g @opencode/cli@2.0.15"
+fi
 qga_push "$REPO/deploy/opencode.json" /tmp/opencode.json
 qga_push "$REPO/deploy/opencode.jsonc" /tmp/opencode.jsonc
 qga "install -d -m 0755 -o lab -g lab /home/lab/.config/opencode && \
@@ -778,18 +899,28 @@ qga "install -d -m 0755 /usr/local/libexec && \
      install -m 0644 /tmp/labloop-panel-clock.desktop /etc/xdg/autostart/ && \
      rm -f /tmp/labloop-panel-clock.*"
 
-note "display mode: ${RES_X}x${RES_Y} @ ${REFRESH} Hz (login autostart)"
+note "display mode: ${RES_X}x${RES_Y} @ ${REFRESH} Hz (greeter + login autostart)"
 # the XML pins the EDID native mode; non-native rates (60, 59.94, 30…)
-# are injected by the login hook as a reduced-blanking modeline.
+# are injected by the login hook as a reduced-blanking modeline. Two
+# hooks run the same script: lightdm display-setup (root, before the
+# greeter — so the login screen is already at the right mode) and the
+# XDG autostart (repair path if a session profile re-applied the old
+# one). The --fb/--panning on the xrandr call is what keeps the pointer
+# from staying clamped to the pre-switch geometry.
 printf 'RES_X=%s\nRES_Y=%s\nREFRESH=%s\n' "$RES_X" "$RES_Y" "$REFRESH" \
     > "$WORK/display.conf"
 qga_push "$WORK/display.conf" /tmp/labloop-display.conf
 qga_push "$REPO/deploy/labloop-display.sh" /tmp/labloop-display.sh
 qga_push "$REPO/deploy/labloop-display.desktop" /tmp/labloop-display.desktop
-qga "install -d -m 0755 /usr/local/libexec /etc/labloop && \
+qga_push "$REPO/deploy/labloop-display-lightdm.conf" \
+         /tmp/labloop-display-lightdm.conf
+qga "install -d -m 0755 /usr/local/libexec /etc/labloop \
+         /etc/lightdm/lightdm.conf.d && \
      install -m 0644 /tmp/labloop-display.conf /etc/labloop/display.conf && \
      install -m 0755 /tmp/labloop-display.sh /usr/local/libexec/ && \
      install -m 0644 /tmp/labloop-display.desktop /etc/xdg/autostart/ && \
+     install -m 0644 /tmp/labloop-display-lightdm.conf \
+         /etc/lightdm/lightdm.conf.d/50-labloop-display.conf && \
      rm -f /tmp/labloop-display.*"
 # best-effort immediate patch too — covers the case where lab's panel
 # config already exists (template re-provision after a session)
@@ -837,6 +968,15 @@ qga "apt-get install -y spice-vdagent"
 #   Clipboard is still dead: <clipboard copypaste='no'/> is enforced
 #   server-side by QEMU's SPICE server — the agent cannot reopen it.
 #   Do NOT purge vdagent; that was an earlier over-correction.
+
+# cache plumbing must not persist in the frozen template: the apt
+# source points at a build-time host address (dead in every clone),
+# the wheelhouse is host-served scratch, and /tmp holds fetched
+# tarballs. Strip them so clones carry no host references.
+note "cache cleanup (source + wheelhouse never ship in the template)"
+qga "rm -f /etc/apt/sources.list.d/labloop-cache.list && \
+     rm -f /var/lib/apt/lists/*122.1.8777* /var/lib/apt/lists/*labloop-cache* 2>/dev/null; \
+     rm -rf /srv/lab/wheelhouse /tmp/uvx-wheels"
 
 # PASSWORD POLICY — the lab/exp password hash ships inside every clone
 # and inside any published image, where it can be cracked offline at

@@ -173,6 +173,7 @@ ensure_vm() {
              AGENT-LAB-GUIDE.md SECURITY-MANUAL.md \
              check-lab-ready.sh \
              labloop-display.sh labloop-display.desktop \
+             labloop-display-lightdm.conf \
              opencode.json opencode.jsonc; do
         qga_push "$vm" "$REPO/deploy/$f" "/tmp/ensure-$f"
     done
@@ -285,6 +286,8 @@ ensure_vm() {
                /usr/local/libexec/labloop-display.sh &&
         cmp -s /tmp/ensure-labloop-display.desktop \
                /etc/xdg/autostart/labloop-display.desktop &&
+        cmp -s /tmp/ensure-labloop-display-lightdm.conf \
+               /etc/lightdm/lightdm.conf.d/50-labloop-display.conf &&
         test -d /var/lib/labloop-export/user &&
         test -d /var/lib/labloop-export/root &&
         test -d /srv/lab/incoming &&
@@ -321,6 +324,10 @@ ensure_vm() {
             /usr/local/libexec/labloop-display.sh &&
         install -m 0644 -o root -g root /tmp/ensure-labloop-display.desktop \
             /etc/xdg/autostart/labloop-display.desktop &&
+        install -d -m 0755 /etc/lightdm/lightdm.conf.d &&
+        install -m 0644 -o root -g root \
+            /tmp/ensure-labloop-display-lightdm.conf \
+            /etc/lightdm/lightdm.conf.d/50-labloop-display.conf &&
         systemd-tmpfiles --create /etc/tmpfiles.d/labloop.conf &&
         rm -rf /run/labloop-export &&
         install -d -m 0755 -o lab -g lab /srv/lab/incoming &&

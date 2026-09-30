@@ -115,9 +115,11 @@ d-i partman-lvm/device_remove_lvm boolean true
 d-i partman-lvm/confirm boolean true
 d-i partman-md/device_remove_md boolean true
 
-### "Install multimedia codecs" checkbox -> yes
-ubiquity ubiquity/use_nonfree boolean true
-ubiquity ubiquity/install_nonfree boolean true
+### "Install multimedia codecs" checkbox -> yes, EXCEPT offline builds:
+### ttf-mscorefonts-installer's postinst fetches fonts from SourceForge
+### mid-install — uncacheable, and the classic unattended freezer.
+### LABLOOP_OFFLINE=1 flips both flags off (codecs go in post-boot then).
+### (emitted after this heredoc — it needs shell expansion)
 
 ### never let a package-phase debconf question block the install —
 ### and pre-answer the MS core fonts EULA (classic unattended-install
@@ -137,10 +139,22 @@ d-i pkgsel/install-language-support boolean false
 d-i pkgsel/upgrade select none
 
 ### install the guest agent during setup so the build can proceed
-### hands-free on first boot
+### hands-free on first boot. The labloop cache source is injected
+### first — additive and || true, so a build without the cache server
+### (plain online path) still works: the scoped update no-ops and the
+### install resolves via mirror lists as usual.
 ubiquity ubiquity/success_command string \
+    in-target sh -c 'echo "deb [trusted=yes] http://192.168.122.1:8777/apt ./" > /etc/apt/sources.list.d/labloop-cache.list' ; \
+    in-target apt-get update -o Dir::Etc::SourceList="sources.list.d/labloop-cache.list" -o Dir::Etc::SourceParts="-" -o APT::Get::List-Cleanup="0" || true ; \
     in-target apt-get install -y qemu-guest-agent spice-vdagent
 SEED
+
+# offline builds skip the codec bundle (postinst fetches SourceForge —
+# see the comment inside the heredoc above)
+nonfree=true
+[ "${LABLOOP_OFFLINE:-0}" = "1" ] && nonfree=false
+printf 'ubiquity ubiquity/use_nonfree boolean %s\nubiquity ubiquity/install_nonfree boolean %s\n' \
+    "$nonfree" "$nonfree" >> "$WORK/iso/preseed.cfg"
 
 echo "==> patching boot configs for unattended boot"
 # grub.cfg (UEFI): Mint's kernel lines end in ' --' — inject the

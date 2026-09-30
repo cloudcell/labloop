@@ -25,7 +25,10 @@ done
 
 mode="${X}x${Y}"
 
-# is a matching rate already offered for this mode? (native EDID list)
+# --fb + --panning are mandatory, not cosmetic: a bare --mode switch can
+# leave the X screen's panning region at the OLD geometry — the display
+# flips to the new resolution but the pointer stays clamped inside the
+# old box ("mouse acts as if it's in the old resolution").
 match=""
 for r in $(xrandr 2>/dev/null | awk -v m="$mode" \
         '$1==m {for (i=2;i<=NF;i++){gsub(/[*+]/,"",$i); print $i}}'); do
@@ -35,7 +38,8 @@ for r in $(xrandr 2>/dev/null | awk -v m="$mode" \
 done
 
 if [ -n "$match" ]; then
-    xrandr --output "$out" --mode "$mode" --rate "$match"
+    xrandr --fb "$mode" --output "$out" --mode "$mode" \
+           --rate "$match" --panning "${X}x${Y}"
     exit $?
 fi
 
@@ -50,4 +54,5 @@ params="$(cvt -r "$X" "$Y" "$HZ" 2>/dev/null \
 [ -n "$params" ] || exit 1
 xrandr --newmode "$name" $params 2>/dev/null
 xrandr --addmode "$out" "$name"
-xrandr --output "$out" --mode "$name"
+xrandr --fb "$mode" --output "$out" --mode "$name" \
+       --panning "${X}x${Y}"

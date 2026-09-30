@@ -18,6 +18,14 @@ case "$VM" in
     -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     -*|*[!a-zA-Z0-9_.-]*) echo "00-build-lab-template: bad domain name '$VM'" >&2; exit 1 ;;
 esac
+# one EXIT trap: sudo keepalive + the transient cache http server
+SUDO_KEEPALIVE=""; CACHE_HTTP_PID=""
+cleanup() {
+    [ -n "$SUDO_KEEPALIVE" ] && kill "$SUDO_KEEPALIVE" 2>/dev/null
+    [ -n "$CACHE_HTTP_PID" ] && kill "$CACHE_HTTP_PID" 2>/dev/null
+    return 0
+}
+trap cleanup EXIT
 # ---- host prerequisites — offer to install what's missing ----------
 # BEFORE the ISO step: mk-auto-iso.sh may need xorriso (sudo) and a long
 # download — every prompt and the sudo timestamp must already be done.
@@ -50,7 +58,6 @@ if ((${#missing[@]})) || ! id -nG | grep -qw libvirt; then
     sudo -v
     (for _ in $(seq 240); do sudo -n true 2>/dev/null || break; sleep 60; done) &
     SUDO_KEEPALIVE=$!
-    trap 'kill "$SUDO_KEEPALIVE" 2>/dev/null' EXIT
 fi
 
 if ((${#missing[@]})); then
@@ -67,6 +74,29 @@ if ! id -nG | grep -qw libvirt; then
     case "$a" in [Nn]*) echo "aborted — libvirt group required" >&2; exit 1;; esac
     sudo usermod -aG libvirt "$USER"
     echo "    added — effective immediately for child processes (sg)"
+fi
+
+# ---- artifact preflight — every byte the build needs must already be
+# in ~/.cache/labloop BEFORE the ISO step. A missing artifact dies here
+# at minute 0 with a gap list, not at minute 18 inside the guest.
+# LABLOOP_OFFLINE=1 = verify-only, never fetch.
+# (docs/e-plans/plan-20260930-1838Z--offline-build-prefetch.md)
+./selfbuild/prefetch-cache.sh --ensure
+
+# transient read-only artifact endpoint for the guest: the preseed's
+# in-target apt, the image tarballs, wheelhouses and pkgs all pull from
+# here instead of the internet. Bound to the stock libvirt NAT gateway
+# — reachable only by virbr0 guests, dead the moment this script exits.
+# (Skip if a server is already up — e.g. a previous run's — the cache
+#  is content-hashed so reusing it is safe.)
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/labloop"
+if [ -f "$CACHE_ROOT/MANIFEST" ] \
+   && ! curl -fs -m 2 -o /dev/null \
+        "http://192.168.122.1:8777/MANIFEST" 2>/dev/null; then
+    python3 -m http.server 8777 --bind 192.168.122.1 -d "$CACHE_ROOT" \
+        >/dev/null 2>&1 &
+    CACHE_HTTP_PID=$!
+    echo "==> cache endpoint: http://192.168.122.1:8777 (pid $CACHE_HTTP_PID)"
 fi
 
 # ---- ISO — all interaction is done; from here on it's unattended ----
