@@ -87,16 +87,24 @@ fi
 # in-target apt, the image tarballs, wheelhouses and pkgs all pull from
 # here instead of the internet. Bound to the stock libvirt NAT gateway
 # — reachable only by virbr0 guests, dead the moment this script exits.
-# (Skip if a server is already up — e.g. a previous run's — the cache
-#  is content-hashed so reusing it is safe.)
+# Reuse a running endpoint ONLY if it serves this exact MANIFEST — an
+# orphaned http.server from an earlier run answers the probe fine but
+# can die mid-provisioning and leave guest curls hung for minutes.
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/labloop"
-if [ -f "$CACHE_ROOT/MANIFEST" ] \
-   && ! curl -fs -m 2 -o /dev/null \
-        "http://192.168.122.1:8777/MANIFEST" 2>/dev/null; then
-    python3 -m http.server 8777 --bind 192.168.122.1 -d "$CACHE_ROOT" \
-        >/dev/null 2>&1 &
-    CACHE_HTTP_PID=$!
-    echo "==> cache endpoint: http://192.168.122.1:8777 (pid $CACHE_HTTP_PID)"
+if [ -f "$CACHE_ROOT/MANIFEST" ]; then
+    if curl -fs -m 2 "http://192.168.122.1:8777/MANIFEST" 2>/dev/null \
+       | cmp -s - "$CACHE_ROOT/MANIFEST"; then
+        echo "==> cache endpoint already serving this cache on :8777"
+    elif (exec 3<>"/dev/tcp/192.168.122.1/8777") 2>/dev/null; then
+        echo "00-build-lab-template: :8777 is in use but does not serve" >&2
+        echo "    our cache — kill the foreign listener and retry" >&2
+        exit 1
+    else
+        python3 -m http.server 8777 --bind 192.168.122.1 -d "$CACHE_ROOT" \
+            >/dev/null 2>&1 &
+        CACHE_HTTP_PID=$!
+        echo "==> cache endpoint: http://192.168.122.1:8777 (pid $CACHE_HTTP_PID)"
+    fi
 fi
 
 # ---- ISO — all interaction is done; from here on it's unattended ----

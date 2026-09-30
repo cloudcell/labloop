@@ -33,7 +33,7 @@ ML_SCIENTIST="${ML_SCIENTIST:-$REPO/../ml-scientist}"
 ISO="${LABLOOP_ISO:-}"
 VIRSH="virsh -c qemu:///system"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; [ -z "${CACHE_HTTP_PID:-}" ] || kill "$CACHE_HTTP_PID" 2>/dev/null; true' EXIT
 
 die()  { echo "create-lab-template: $*" >&2; exit 1; }
 note() { echo; echo "==> $*"; }
@@ -99,8 +99,34 @@ command -v python3 >/dev/null || die "python3 required on host"
 # dead endpoint means the guest cannot fetch at all.
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/labloop"
 CACHE_URL="${LABLOOP_CACHE_URL:-http://192.168.122.1:8777}"
+CACHE_HTTP_PID=""
+# "up" must mean OUR cache: an answer alone is not enough — a stale or
+# foreign http.server on :8777 answers the probe fine, then can die
+# mid-provisioning and leave guest curls hung for minutes. Compare the
+# served MANIFEST byte-for-byte with the local one.
+cache_serving() {
+    [ -f "$CACHE_ROOT/MANIFEST" ] \
+        && curl -fs -m 3 "$CACHE_URL/MANIFEST" 2>/dev/null \
+           | cmp -s - "$CACHE_ROOT/MANIFEST"
+}
 CACHE_UP=0
-curl -fs -m 3 -o /dev/null "$CACHE_URL/MANIFEST" 2>/dev/null && CACHE_UP=1
+if ! cache_serving && [ -f "$CACHE_ROOT/MANIFEST" ]; then
+    # down, or a foreign responder on the port. When we run under 00 its
+    # server is already up; standalone (or after a mid-run death) we
+    # bring up our own — killed by the EXIT trap above. A bare TCP
+    # connect tells "listening but not ours" from "nothing there" —
+    # independent of whether the foreign server has a /MANIFEST to 404.
+    if (exec 3<>"/dev/tcp/192.168.122.1/8777") 2>/dev/null; then
+        die "port 8777 is in use but does not serve the labloop cache — kill the foreign listener and retry"
+    fi
+    python3 -m http.server 8777 --bind 192.168.122.1 -d "$CACHE_ROOT" \
+        >/dev/null 2>&1 &
+    CACHE_HTTP_PID=$!
+    sleep 0.5
+    cache_serving || die "cache endpoint did not come up on $CACHE_URL"
+    note "cache endpoint started: $CACHE_URL (pid $CACHE_HTTP_PID)"
+fi
+cache_serving && CACHE_UP=1
 if [ "${LABLOOP_OFFLINE:-0}" = "1" ]; then
     "$REPO/selfbuild/prefetch-cache.sh" --verify \
         || die "offline build requested but the artifact cache is incomplete"
