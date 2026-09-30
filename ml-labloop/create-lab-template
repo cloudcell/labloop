@@ -576,6 +576,9 @@ qga "install -m 0755 -o root -g root \
      install -m 0755 -o root -g root \
          /srv/lab/workspace/ml-labloop/deploy/labloop-update-opencode \
          /usr/local/sbin/labloop-update-opencode && \
+     install -m 0755 -o root -g root \
+         /srv/lab/workspace/ml-labloop/deploy/labloop-fault \
+         /usr/local/sbin/labloop-fault && \
      install -m 0440 -o root -g root \
          /srv/lab/workspace/ml-labloop/deploy/labloop.sudoers /etc/sudoers.d/labloop && \
      install -m 0644 -o root -g root \
@@ -584,6 +587,9 @@ qga "install -m 0755 -o root -g root \
      install -d -m 0755 -o lab -g lab /srv/lab/incoming && \
      visudo -c | grep -q 'labloop: parsed OK'"
 qga_lab "sudo -u exp /usr/local/sbin/labloop-exec id -u"   # must print exp's uid, no password
+# the one lab->mcp grant: `status` is read-only, no fault is injected —
+# but it proves the sudoers rule + wrapper resolve end to end
+qga_lab "sudo -u mcp /usr/local/sbin/labloop-fault status >/dev/null"
 
 note "VSCodium + Zoo Code + vscode-pdf"
 qga "wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg \

@@ -5,10 +5,14 @@
 # a privilege downgrade, not an escalation. The container name is
 # pinned; arguments are free because the target is already hostile.
 #
-# There is deliberately no rule for the reverse direction and no rule
-# touching the `mcp` account — the trusted zone (lab-cnt-mcp, mcp-state)
-# lives in mcp's podman precisely so lab/agent cannot reach it. Admin
-# access is `sudo -iu mcp` (password — human only).
+# There is deliberately no rule for the reverse direction and exactly
+# ONE rule touching the `mcp` account — labloop-fault below. The
+# trusted zone (lab-cnt-mcp, mcp-state) lives in mcp's podman
+# precisely so lab/agent cannot reach it; the single exception is a
+# root-owned wrapper with a hardcoded verb/name allowlist whose grant
+# is availability-shaped only (suspend/kill/restart trusted-zone
+# processes) — never state, file, or shell access. Admin access is
+# `sudo -iu mcp` (password — human only).
 #
 # The rule pins the WRAPPER, not podman directly:
 #   - `sudo -i`/`sudo -iu` validates the login shell, not podman —
@@ -22,6 +26,14 @@
 # is a pure capability: "rebuild the hostile image," nothing else.
 lab ALL=(exp) NOPASSWD: /usr/local/sbin/labloop-exec *
 lab ALL=(exp) NOPASSWD: /usr/local/sbin/labloop-build
+
+# labloop-fault (deploy/labloop-fault): sanctioned fault injection
+# into the trusted zone — the ONLY mcp-grant to lab. Narrowed to a
+# root-owned wrapper with a hardcoded verb/name allowlist: the grant
+# is availability-shaped (suspend/kill/restart), never state access.
+# Faults self-limit through the fault-drill marker TTL + watchdog.
+# Both forms listed so a bare `labloop-fault` (usage) also resolves.
+lab ALL=(mcp) NOPASSWD: /usr/local/sbin/labloop-fault, /usr/local/sbin/labloop-fault *
 
 # labloop-export --all (deploy/labloop-export): the full lab-work export.
 # Arg-pinned to exactly `--all` — no additional arguments match, so the

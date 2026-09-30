@@ -40,13 +40,16 @@ PART A — happy path: channel observability
 
 PART B — NEGATIVE path via fault injection (best effort)
 
-5. Attempt to take one upstream DOWN briefly. Try, in order: a
-   labloop-fault or labloop-exec helper if present on the VM; kill by
-   pidfile under ~/.ml-<name>/run/ if readable; pkill -f on the server
-   process. Report every attempt verbatim. If the VM forbids all of
-   them (rc-5 found lab cannot signal mcp-owned processes), record
-   the refusal verbatim and mark Part B "blocked — no fault
-   injection", then continue at Part C.
+5. Take one upstream DOWN briefly via the sanctioned fault lever:
+   `sudo -u mcp /usr/local/sbin/labloop-fault kill anamnesis`
+   (zone-wide bounce — all five servers restart together; the quadlet
+   heals it). For a per-server busy/wedged shape instead, use
+   `labloop-fault freeze <srv>` / `labloop-fault thaw <srv>`. Check
+   `labloop-fault status` during the fault. On a VM predating the
+   lever the sudo call itself is refused — record the refusal
+   verbatim and mark Part B "blocked — no fault injection", then
+   continue at Part C. Never improvise: kill by pidfile and pkill -f
+   on mcp-owned processes are EPERM by design and count as refusals.
 6. If you got a channel down: check_invariants → the channel appears
    in upstream_connectivity.violations with a STABLE ref — a string
    like "channel:<name>" — plus fault attribution (last_error,

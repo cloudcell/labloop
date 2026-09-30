@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# labloop-fault — sanctioned fault-injection lever for the trusted zone.
+#
+# Invoked as:  sudo -u mcp /usr/local/sbin/labloop-fault <verb> [server]
+# (see deploy/labloop.sudoers). This is the ONLY grant lab holds against
+# the mcp account: a closed verb set over pinned server names — no shell,
+# no exec, no file path, no read of /srv/lab/mcp-state. The power it
+# confers is availability-shaped only: suspend, kill, restart.
+#
+# Fault shapes (the shared container runs all five servers under
+# `wait -n`, so per-server kill is impossible by design):
+#   freeze <srv>  SIGSTOP — port LISTENs, requests hang → probe: "busy"
+#                 (also freezes that server's GUI — same process)
+#   thaw <srv>    SIGCONT — heal in place
+#   kill <srv>    SIGKILL — one exit trips wait -n → whole-zone bounce
+#   zone-down/up  systemctl --user stop/start lab-cnt-mcp
+#   status        observed state report (never trusted from the marker)
+#   heal-all      CONT every frozen pid + clear the drill marker
+#
+# Marker contract (the watchdog reads this — deploy/labloop-mcp-watchdog):
+#   $XDG_STATE_HOME/labloop/fault-drill — mcp-owned, lab-invisible AND
+#   container-invisible (NOT /srv/lab/mcp-state, which is bind-mounted
+#   into the container as /state). One line per fault:
+#     mode=<m> ports="<list>"|ALL name=<srv> pids="<list>" by=<u> epoch=<s>
+#   mode=hold     suppress the listed ports only     (TTL 1200s)
+#   mode=bounce   suppress ALL ports                 (TTL 420s — covers
+#                 entrypoint's ~240s worst-case serial health-gating)
+#   mode=hold-all suppress ALL ports until zone-up   (no TTL — explicit
+#                 operator action ends it)
+#   Written BEFORE the signal is delivered — no unprotected wedge window.
+#   Stale or malformed lines are ignored by the watchdog: suppression is
+#   opt-in on valid markers and fails toward probing, never silence.
+
+set -uo pipefail
+
+export HOME=/home/mcp
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+export XDG_STATE_HOME="${HOME}/.local/state"
+export XDG_CONFIG_HOME="${HOME}/.config"
+cd /
+
+STATE_DIR="${XDG_STATE_HOME}/labloop"
+MARKER="${STATE_DIR}/fault-drill"
+LOCK="${STATE_DIR}/fault-drill.lock"
+PORTS_ENV="${XDG_CONFIG_HOME}/labloop/ports.env"
+
+audit() { logger -t labloop-fault -- "$*"; }
+die()   { audit "REFUSED $*"; echo "labloop-fault: $*" >&2; exit 2; }
+# audit EVERY call, including malformed ones and bare usage — the
+# journal line is the audit trail for the mcp grant
+audit "invoke args=\"$*\" by=${SUDO_USER:-self}"
+usage() {
+    cat >&2 <<'EOF'
+usage: labloop-fault <verb> [server]
+  freeze <srv>   SIGSTOP one server — port hangs → probe: "busy" (GUI too)
+  thaw <srv>     SIGCONT — heal in place
+  kill <srv>     SIGKILL — whole-zone bounce via wait -n + quadlet restart
+  zone-down      stop lab-cnt-mcp (marker: hold-all)
+  zone-up        start lab-cnt-mcp (marker: bounce, covers health-gating)
+  status         marker + observed process/port/container state
+  heal-all       CONT all frozen; zone-up if hold-all; health-gated clear if bounce
+  servers: agora arete zetesis episteme anamnesis
+EOF
+    exit 2
+}
+
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
+verb=$1; name=${2:-}
+by=${SUDO_USER:-self}
+
+case "$verb" in
+    freeze|thaw|kill)
+        [ -n "$name" ] || usage
+        case "$name" in
+            agora|arete|zetesis|episteme|anamnesis) ;;
+            *) die "unknown server: $name" ;;
+        esac ;;
+    zone-down|zone-up|status|heal-all)
+        [ -z "$name" ] || usage ;;
+    *) usage ;;
+esac
+
+# Ports from the same file the watchdog sources — never a hardcoded
+# table, so a ports.env move cannot desync suppression from probes.
+if [ -f "$PORTS_ENV" ]; then set -a; . "$PORTS_ENV"; set +a; fi
+
+# The ingest port shares episteme's process — a frozen episteme wedges
+# both, so its hold must suppress both or the watchdog fires on ingest.
+ports_for() {
+    case "$1" in
+        agora)     echo "${ML_AGORA_PORT:-}" ;;
+        arete)     echo "${ML_ARETE_PORT:-}" ;;
+        zetesis)   echo "${ML_ZETESIS_PORT:-}" ;;
+        episteme)  echo "${ML_EPISTEME_PORT:-} ${ML_EPISTEME_INGEST_PORT:-}" ;;
+        anamnesis) echo "${ML_ANAMNESIS_PORT:-}" ;;
+    esac
+}
+all_ports() {
+    echo "${ML_AGORA_PORT:-38050} ${ML_ARETE_PORT:-38060}" \
+         "${ML_ZETESIS_PORT:-38070} ${ML_EPISTEME_PORT:-38080}" \
+         "${ML_EPISTEME_INGEST_PORT:-38082} ${ML_ANAMNESIS_PORT:-38090}"
+}
+pids_for() { pgrep -f "ml-$1-mcp.*--transport http" 2>/dev/null || true; }
+
+mkdir -p "$STATE_DIR"
+exec 9>"$LOCK"; flock 9
+
+now_s() { date +%s; }
+
+# Replace the marker line for a server (re-freeze is idempotent).
+write_hold() { # <name> <ports> <pids>
+    { [ -f "$MARKER" ] && grep -v "^mode=hold .* name=$1 " "$MARKER" || true
+      echo "mode=hold ports=\"$2\" name=$1 pids=\"$3\" by=$by epoch=$(now_s)"
+    } > "${MARKER}.tmp"
+    mv "${MARKER}.tmp" "$MARKER"
+}
+write_mode() { # <mode> <name> <pids> — wholesale overwrite
+    echo "mode=$1 ports=ALL name=${2:-} pids=\"${3:-}\" by=$by epoch=$(now_s)" \
+        > "$MARKER"
+}
+drop_hold() { # <name>
+    [ -f "$MARKER" ] || return 0
+    grep -v "^mode=hold .* name=$1 " "$MARKER" > "${MARKER}.tmp" || true
+    if [ -s "${MARKER}.tmp" ]; then mv "${MARKER}.tmp" "$MARKER"
+    else rm -f "${MARKER}.tmp" "$MARKER"; fi
+}
+zone_up() {
+    local active
+    active=$(systemctl --user is-active lab-cnt-mcp 2>/dev/null || true)
+    if [ "$active" = active ]; then
+        echo "lab-cnt-mcp already active"
+        # a hold-all marker may still be outstanding — convert it so the
+        # health-gate window stays suppressed
+        grep -q '^mode=hold-all ' "$MARKER" 2>/dev/null || return 0
+    else
+        systemctl --user start lab-cnt-mcp \
+            || die "zone-up: systemctl start failed"
+        echo "lab-cnt-mcp start issued"
+    fi
+    write_mode bounce "" ""
+    echo "marker: bounce (covers entrypoint health-gating, TTL 420s)"
+}
+probe_port() { curl -m 3 -sf -o /dev/null "http://127.0.0.1:$1/health"; }
+
+case "$verb" in
+    freeze)
+        ports=$(ports_for "$name")
+        [ -n "${ports// }" ] || die "no port for $name in ports.env — refusing"
+        pids=$(pids_for "$name")
+        [ -n "$pids" ] || die "no ml-$name-mcp process — fault not applied"
+        pids=$(echo "$pids" | tr '\n' ' ' | sed 's/ $//')
+        write_hold "$name" "$ports" "$pids"
+        n=0
+        for p in $pids; do kill -STOP "$p" 2>/dev/null && n=$((n+1)); done
+        # a marker without a fault would suppress a healthy port —
+        # roll it back if nothing actually stopped
+        if [ "$n" -eq 0 ]; then drop_hold "$name"; die "SIGSTOP failed on every pid — marker rolled back"; fi
+        audit "freeze $name pids=\"$pids\" stopped=$n by=$by"
+        echo "frozen ml-$name-mcp ($n pids) — ports $ports will hang; GUI frozen too"
+        echo "watchdog suppressed on $ports for up to 1200s; heal: thaw $name | heal-all"
+        ;;
+    thaw)
+        # only HOLD lines carry live pids — a bounce line naming $name
+        # (from `kill`) points at dead processes and must not match
+        line=$(grep "^mode=hold .* name=$name " "$MARKER" 2>/dev/null || true)
+        [ -n "$line" ] || die "no hold recorded for $name"
+        pids=$(printf '%s\n' "$line" | sed -n 's/.*pids="\([^"]*\)".*/\1/p')
+        n=0; gone=0
+        for p in $pids; do
+            if [ -d "/proc/$p" ] && \
+               tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null \
+                   | grep -q "ml-$name-mcp"; then
+                kill -CONT "$p" 2>/dev/null && n=$((n+1))
+            else
+                gone=$((gone+1))
+            fi
+        done
+        drop_hold "$name"
+        audit "thaw $name cont=$n gone=$gone by=$by"
+        if [ "$gone" -gt 0 ]; then
+            echo "thawed $n pids; $gone recorded pids already gone (healed by restart)"
+        else
+            echo "thawed ml-$name-mcp ($n pids)"
+        fi
+        ;;
+    kill)
+        pids=$(pids_for "$name")
+        [ -n "$pids" ] || die "no ml-$name-mcp process — fault not applied"
+        pids=$(echo "$pids" | tr '\n' ' ' | sed 's/ $//')
+        write_mode bounce "$name" "$pids"
+        n=0
+        for p in $pids; do kill -KILL "$p" 2>/dev/null && n=$((n+1)); done
+        if [ "$n" -eq 0 ]; then rm -f "$MARKER"; die "SIGKILL failed on every pid — marker rolled back"; fi
+        audit "kill $name pids=\"$pids\" by=$by — zone bounce"
+        echo "killed ml-$name-mcp — wait -n exits the container; quadlet restarts"
+        echo "ALL ports down during restart; watchdog suppressed (bounce) up to 420s"
+        ;;
+    zone-down)
+        write_mode hold-all "" ""
+        systemctl --user stop lab-cnt-mcp \
+            || { rm -f "$MARKER"; die "zone-down: stop failed — marker rolled back"; }
+        audit "zone-down by=$by"
+        echo "lab-cnt-mcp stopped — watchdog suppressed (hold-all) until zone-up"
+        ;;
+    zone-up)
+        zone_up
+        audit "zone-up by=$by"
+        ;;
+    status)
+        echo "container: $(systemctl --user is-active lab-cnt-mcp 2>/dev/null || echo unknown)"
+        if [ -f "$MARKER" ]; then
+            echo "marker:"
+            while IFS= read -r l; do
+                m=$(printf '%s' "$l" | sed -n 's/^mode=\([a-z-]*\).*/\1/p')
+                e=$(printf '%s' "$l" | sed -n 's/.*epoch=\([0-9]*\).*/\1/p')
+                ps_=$(printf '%s' "$l" | sed -n 's/.*pids="\([^"]*\)".*/\1/p')
+                age=$(( $(now_s) - ${e:-0} ))
+                echo "  $l   (age ${age}s)"
+                for p in $ps_; do
+                    if [ -d "/proc/$p" ]; then
+                        st=$(ps -o stat= -p "$p" 2>/dev/null)
+                        comm=$(cat "/proc/$p/comm" 2>/dev/null)
+                        echo "    pid $p ($comm): state=$st"
+                    else
+                        echo "    pid $p: gone (healed by restart?)"
+                    fi
+                done
+                case "$m" in
+                    hold)    echo "    TTL: $((1200 - age))s remaining" ;;
+                    bounce)  echo "    TTL: $((420 - age))s remaining" ;;
+                    hold-all) echo "    no TTL — ends with zone-up" ;;
+                esac
+            done < "$MARKER"
+        else
+            echo "marker: none"
+        fi
+        echo "ports:"
+        for p in $(all_ports); do
+            if probe_port "$p"; then echo "  $p ok"
+            elif ss -ltn "sport = :$p" 2>/dev/null | grep -q LISTEN; then
+                echo "  $p LISTEN, no reply (wedged/frozen)"
+            else echo "  $p down"; fi
+        done
+        ;;
+    heal-all)
+        [ -f "$MARKER" ] || { echo "no fault marker — nothing to heal"; exit 0; }
+        if grep -q '^mode=hold-all ' "$MARKER"; then
+            zone_up
+        fi
+        # CONT every hold's recorded pids, then drop those lines
+        while IFS= read -r l; do
+            case "$l" in mode=hold\ *) ;; *) continue ;; esac
+            n_=$(printf '%s' "$l" | sed -n 's/.*name=\([a-z]*\).*/\1/p')
+            ps_=$(printf '%s' "$l" | sed -n 's/.*pids="\([^"]*\)".*/\1/p')
+            for p in $ps_; do
+                [ -d "/proc/$p" ] && kill -CONT "$p" 2>/dev/null || true
+            done
+            [ -n "$n_" ] && drop_hold "$n_"
+            echo "released hold on ${n_:-?}"
+        done < "$MARKER"
+        # a bounce line survives only while ports are still coming up —
+        # clear it only once every port answers, else it stays armed
+        if grep -q '^mode=bounce ' "$MARKER" 2>/dev/null; then
+            bad=0
+            for p in $(all_ports); do
+                probe_port "$p" || { bad=1; echo "  $p still down"; }
+            done
+            if [ "$bad" -eq 0 ]; then
+                rm -f "$MARKER"; echo "zone healthy — marker cleared"
+            else
+                echo "still booting — bounce marker retained (TTL 420s)"
+                exit 1
+            fi
+        else
+            if [ -s "$MARKER" ] 2>/dev/null; then
+                echo "holds released; unhandled marker lines remain:" >&2
+                cat "$MARKER" >&2
+            else
+                rm -f "$MARKER"
+                echo "all holds released — marker cleared"
+            fi
+        fi
+        audit "heal-all by=$by"
+        ;;
+esac

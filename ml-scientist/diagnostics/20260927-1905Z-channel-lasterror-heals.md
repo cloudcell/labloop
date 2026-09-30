@@ -36,10 +36,15 @@ PART A — baseline field semantics (no fault needed)
 
 PART B — induced fault → heal (the load-bearing part)
 
-4. Induce a fault on the anamnesis server process inside the
-   lab-cnt-mcp container (docker exec / kill / suspend — whatever
-   mechanism the VM exposes). If you have no fault-injection path,
-   mark Parts B–C SKIP and say why — baseline Part A still runs.
+4. Induce a fault on the anamnesis server via the sanctioned fault
+   lever: `sudo -u mcp /usr/local/sbin/labloop-fault kill anamnesis`.
+   The kill is zone-wide — all five servers share one container under
+   `wait -n`, so every dependent channel drops at once and the quadlet
+   restarts the zone; `labloop-fault status` reports the drill marker
+   and per-port state while it heals. For a bounded explicit outage
+   use `zone-down` / `zone-up`. If the sudo call is refused (VM
+   predates the lever), mark Parts B–C SKIP and say why — baseline
+   Part A still runs.
 5. Poll a dependent's claims/evidence channel until `state: "down"`;
    record `last_error` (leaf cause — NOT a TaskGroup repr),
    `last_failed_operation`, `last_failed_at` verbatim.
@@ -60,12 +65,15 @@ PART B — induced fault → heal (the load-bearing part)
 
 PART C — busy is not an error record (best-effort)
 
-8. If you can make a server unresponsive WITHOUT killing it
-   (SIGSTOP or saturation): a ping timeout leaves the channel up
-   with `probe: "busy"` — and must NOT record a `last_error` (busy
-   isn't a fault). Resume it and confirm `probe` returns to `"ok"`
-   with `last_error` still null. If you cannot induce busy, say so —
-   do not fake it.
+8. Make a server unresponsive WITHOUT killing it:
+   `labloop-fault freeze anamnesis` (SIGSTOP — port listens, replies
+   hang; the GUI freezes too since it shares the process). A ping
+   timeout leaves the channel up with `probe: "busy"` — and must NOT
+   record a `last_error` (busy isn't a fault). `labloop-fault thaw
+   anamnesis` resumes it; confirm `probe` returns to `"ok"` with
+   `last_error` still null. The freeze self-limits via a 1200s marker
+   TTL, but thaw it yourself — do not leave it suspended. If the
+   lever is absent, say so — do not fake busy.
 
 PART D — honest bookkeeping
 
@@ -82,6 +90,9 @@ While you work:
   directly — everything goes through MCP tools and health surfaces.
 - Do NOT edit server configuration mid-run.
 - Restart anything you killed before finishing — leave the lab up.
+  `labloop-fault heal-all` is the one-call cleanup: it thaws every
+  hold, zone-ups a downed zone, and clears the drill marker only
+  once every port answers /health.
 
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into

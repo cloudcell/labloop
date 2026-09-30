@@ -28,7 +28,7 @@ KVM boundary          the VM itself is disposable; the host is outside it
 
 | Zone    | User  | Container     | Trust level | May do                                          | Must NEVER do                                |
 | ------- | ----- | ------------- | ----------- | ----------------------------------------------- | -------------------------------------------- |
-| driver  | `lab` | host procs    | high        | author code, call MCP tools, drive labloop-exec | read `/srv/lab/mcp-state`, sudo into `mcp`   |
+| driver  | `lab` | host procs    | high        | author code, call MCP tools, drive labloop-exec | read `/srv/lab/mcp-state`, sudo into `mcp`¹  |
 | trusted | `mcp` | `lab-cnt-mcp` | highest     | serve MCP, hold scientific state                | be administered by anyone but root/install   |
 | hostile | `exp` | `lab-cnt-exp` | none        | run arbitrary code, install via the lanes (§5)  | reach trusted zone, gateway, private nets    |
 
@@ -37,9 +37,26 @@ not inconveniences to work around:
 
 1. **The trusted zone is reachable only through MCP tools** over
    loopback (`execute` → `tools.<server>.<tool>()`). Never `sqlite3`
-   the state DBs, never `sudo -u mcp`, never read `ingest.env`.
-   `mcp-state` is mode 700 owned by `mcp` — if you can read it,
-   something is broken; report it.
+   the state DBs, never read `ingest.env`. `sudo -u mcp` resolves
+   to exactly one binary — `labloop-fault` (see rule 1a) — every
+   other target demands a password. `mcp-state` is mode 700 owned
+   by `mcp` — if you can read it, something is broken; report it.
+
+1a. **The `labloop-fault` exception.** `lab` may run
+   `sudo -u mcp /usr/local/sbin/labloop-fault <verb> [server]` — a
+   root-owned wrapper with a hardcoded allowlist
+   (`freeze`/`thaw`/`kill`/`zone-down`/`zone-up`/`status`/`heal-all`
+   over the five server names only). It exists so diagnostics can
+   inject real trusted-zone faults (a wedged or down server) and
+   observe channel healing. The grant is availability-shaped: it can
+   interrupt trusted processes but can never read or write
+   `/srv/lab/mcp-state`, open a shell, or run an arbitrary command.
+   Every call is logged (`journalctl -t labloop-fault`), and faults
+   self-limit through a watchdog marker TTL — a forgotten `freeze`
+   heals itself. `heal-all` restores whatever a drill left.
+
+¹ The single sudo rule `lab ALL=(mcp) NOPASSWD: labloop-fault` —
+availability only, no state access.
 2. **The hostile zone is entered only through `labloop-exec`** —
    never `su exp`, `sudo -iu exp`, or direct `podman` as `exp`.
 3. **Artifacts crossing `/exchange` stay untrusted.** A PDF, dataset,

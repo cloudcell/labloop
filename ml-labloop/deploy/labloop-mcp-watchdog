@@ -68,6 +68,96 @@ PORTS=(
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# --- fault-drill marker ----------------------------------------------------
+# labloop-fault (deploy/labloop-fault, invoked via the single lab->mcp
+# sudo rule) writes a marker here BEFORE injecting a deliberate fault, so
+# a drilled-out port is not "healed" mid-drill. The file lives in this
+# script's own STATE_DIR — mcp-owned, invisible to lab AND to the
+# container (NOT /srv/lab/mcp-state, which is bind-mounted in as /state).
+#
+# Grammar, one line per fault:
+#   mode=<m> ports="<list>"|ALL name=<srv> pids="<list>" by=<u> epoch=<s>
+#   hold     suppress the listed ports only         TTL 1200s
+#   bounce   suppress ALL ports (zone restarting)   TTL 420s
+#   hold-all suppress ALL ports until zone-up       no TTL
+# Strict parse: a line missing mode/ports/epoch, an unknown mode, a hold
+# carrying port=ALL, or a stale epoch is IGNORED — suppression is opt-in
+# on valid markers and failure falls toward probing, never toward
+# silence. hold covers a PORT LIST because episteme serves both
+# ML_EPISTEME_PORT and ML_EPISTEME_INGEST_PORT from one process.
+HOLD_TTL=1200
+BOUNCE_TTL=420   # entrypoint can spend ~240s serially gating upstreams
+                 # on /health + container start — 300s races it
+MARKER="$STATE_DIR/fault-drill"
+suppress_all=0
+suppressed_ports=""
+if [ -f "$MARKER" ]; then
+    while IFS= read -r line; do
+        m=$(printf '%s' "$line" | sed -n 's/^mode=\([a-z-]*\)[[:space:]].*/\1/p')
+        pl=$(printf '%s' "$line" | sed -n 's/.*[[:space:]]ports=\("[^"]*"\|ALL\)[[:space:]].*/\1/p')
+        ep=$(printf '%s' "$line" | sed -n 's/.*[[:space:]]epoch=\([0-9][0-9]*\)[[:space:]]*$/\1/p')
+        if [ -z "$m" ] || [ -z "$pl" ] || [ -z "$ep" ]; then
+            log "fault marker: unparseable line ignored: $line"
+            continue
+        fi
+        age=$(( $(now) - ep ))
+        case "$m" in
+            hold)
+                [ "$pl" != ALL ] || {
+                    log "fault marker: hold with ports=ALL ignored"; continue; }
+                if [ "$age" -ge "$HOLD_TTL" ]; then
+                    log "fault marker: stale hold (${age}s) ignored"; continue
+                fi
+                # a hold whose recorded pids are ALL gone means the
+                # zone restarted under it — the freeze died with the
+                # old process; keeping the suppression would mask a
+                # real wedge on the replacement. Fail toward probing.
+                pids=$(printf '%s' "$line" \
+                    | sed -n 's/.*[[:space:]]pids="\([^"]*\)".*/\1/p')
+                if [ -n "$pids" ]; then
+                    live=0
+                    for fp in $pids; do
+                        [ -d "/proc/$fp" ] && live=$((live+1))
+                    done
+                    if [ "$live" -eq 0 ]; then
+                        log "fault marker: hold for dead pids ignored"; continue
+                    fi
+                fi
+                for sp in ${pl//\"/}; do
+                    case "$sp" in ''|*[!0-9]*) continue;; esac
+                    suppressed_ports="$suppressed_ports $sp "
+                done
+                log "fault drill: suppressing ${pl} (hold, age ${age}s)"
+                ;;
+            bounce)
+                if [ "$age" -ge "$BOUNCE_TTL" ]; then
+                    log "fault marker: stale bounce (${age}s) ignored"; continue
+                fi
+                suppress_all=1
+                log "fault drill: suppressing ALL ports (bounce, age ${age}s)"
+                ;;
+            hold-all)
+                suppress_all=1
+                log "fault drill: suppressing ALL ports (hold-all, age ${age}s)"
+                ;;
+            *)
+                log "fault marker: unknown mode '$m' ignored" ;;
+        esac
+    done < "$MARKER"
+fi
+if [ "$suppress_all" = 1 ]; then
+    log "fault drill active (zone-wide) — skipping probe round"
+    exit 0
+fi
+if [ -n "$suppressed_ports" ]; then
+    kept=()
+    for p in "${PORTS[@]}"; do
+        case "$suppressed_ports" in *" $p "*) ;; *) kept+=("$p");; esac
+    done
+    PORTS=("${kept[@]+"${kept[@]}"}")
+    [ "${#PORTS[@]}" -eq 0 ] && { log "all ports under hold — nothing to probe"; exit 0; }
+fi
+
 # --- boot grace -----------------------------------------------------------
 # Do not second-guess a container that is still coming up. entrypoint.sh gates
 # on up to 60s of /health per upstream, and the image pull alone can take

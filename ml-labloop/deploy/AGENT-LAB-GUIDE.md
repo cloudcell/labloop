@@ -149,8 +149,13 @@ If unsure which tools exist, call `search` inside the same sandbox:
 - **Never** read, copy, or edit `/srv/lab/mcp-state` or the `mcp`
   account's podman — the trusted zone is fenced from `lab` on purpose.
   Scientific state changes go through MCP tools only
-  (`execute` + `tools.<server>.<tool>()`). Do not try to `sudo` into
-  `mcp`, do not `sqlite3` the state DBs, do not work around the fence.
+  (`execute` + `tools.<server>.<tool>()`). Do not `sqlite3` the state
+  DBs, do not work around the fence. The ONE sudo path into `mcp` is
+  `sudo -u mcp /usr/local/sbin/labloop-fault <verb> [srv]` — an
+  audited, allowlisted fault-injection lever (freeze/thaw/kill/
+  zone-down/zone-up/status/heal-all) for connectivity diagnostics; it
+  can suspend or restart servers but can never touch state. Anything
+  else under `sudo -u mcp` still demands a password.
 - **Never** `su exp` / `sudo -iu exp` — use `labloop-exec`.
 - Inside the hostile zone: `HOME` is a writable tmpfs, `/tmp` is 2G
   tmpfs, `/exchange` + `/experiments` are the only persistent rw

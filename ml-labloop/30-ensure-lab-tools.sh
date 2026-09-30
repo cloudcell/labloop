@@ -166,7 +166,7 @@ ensure_vm() {
 
     note "pushing deploy files"
     for f in labloop-export labloop-exec labloop-build \
-             labloop-update-opencode \
+             labloop-fault labloop-update-opencode \
              labloop.sudoers labloop-tmpfiles.conf \
              security-battery.sh functional-battery.sh \
              GENESIS-RESEARCH-PROMPT.md DATA-MOVEMENT-MANUAL.md \
@@ -248,6 +248,7 @@ ensure_vm() {
         cmp -s /tmp/ensure-labloop-export /usr/local/sbin/labloop-export &&
         cmp -s /tmp/ensure-labloop-exec /usr/local/sbin/labloop-exec &&
         cmp -s /tmp/ensure-labloop-build /usr/local/sbin/labloop-build &&
+        cmp -s /tmp/ensure-labloop-fault /usr/local/sbin/labloop-fault &&
         cmp -s /tmp/ensure-labloop-update-opencode \
                /usr/local/sbin/labloop-update-opencode &&
         cmp -s /tmp/ensure-labloop.sudoers /etc/sudoers.d/labloop &&
@@ -308,6 +309,7 @@ ensure_vm() {
         install -m 0755 -o root -g root /tmp/ensure-labloop-export /usr/local/sbin/labloop-export &&
         install -m 0755 -o root -g root /tmp/ensure-labloop-exec /usr/local/sbin/labloop-exec &&
         install -m 0755 -o root -g root /tmp/ensure-labloop-build /usr/local/sbin/labloop-build &&
+        install -m 0755 -o root -g root /tmp/ensure-labloop-fault /usr/local/sbin/labloop-fault &&
         install -m 0755 -o root -g root /tmp/ensure-labloop-update-opencode \
             /usr/local/sbin/labloop-update-opencode &&
         install -m 0440 -o root -g root /tmp/ensure-labloop.sudoers /etc/sudoers.d/labloop &&
@@ -334,6 +336,8 @@ ensure_vm() {
             /srv/lab/workspace/ml-labloop/deploy/labloop-exec &&
         install -m 0755 -o lab -g lab /tmp/ensure-labloop-build \
             /srv/lab/workspace/ml-labloop/deploy/labloop-build &&
+        install -m 0755 -o lab -g lab /tmp/ensure-labloop-fault \
+            /srv/lab/workspace/ml-labloop/deploy/labloop-fault &&
         install -m 0755 -o lab -g lab /tmp/ensure-labloop-update-opencode \
             /srv/lab/workspace/ml-labloop/deploy/labloop-update-opencode &&
         install -m 0644 -o lab -g lab /tmp/ensure-security-battery.sh \
