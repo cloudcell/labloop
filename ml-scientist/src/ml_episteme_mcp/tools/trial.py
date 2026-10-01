@@ -1223,6 +1223,10 @@ def register(
                     "completes. Use get_trial_status to poll for the "
                     "result, or call record_observation once the trial "
                     "reaches 'completed'.",
+                    # The submit-window this response waited through —
+                    # the ~10 s settle the description promises is a
+                    # field, not prose (rc-15 F8).
+                    "submit_wait_seconds": _submit_wait,
                 })
             # The wait produced a terminal result — including
             # 'cancelled' (a tombstoned pre-dispatch cancel, or a
@@ -1345,7 +1349,8 @@ def register(
         amplification loop: a 60s wait replaces ~30 round-trips.
         """
         try:
-            timeout_seconds = min(float(timeout_seconds), 60.0)
+            requested_timeout = float(timeout_seconds)
+            timeout_seconds = min(requested_timeout, 60.0)
             poll_seconds = max(0.5, float(poll_seconds))
             deadline = time.monotonic() + timeout_seconds
             while True:
@@ -1362,6 +1367,10 @@ def register(
                     payload["timed_out"] = payload.get("status") not in (
                         "completed", "failed", "retryable", "abandoned",
                     )
+                    # Echo the clamp so a caller can tell "waited as
+                    # asked" from "granted less" (rc-15 F8).
+                    payload["timeout_seconds_requested"] = requested_timeout
+                    payload["timeout_seconds_applied"] = timeout_seconds
                     return ok(payload)
                 await asyncio.sleep(poll_seconds)
         except Exception as e:

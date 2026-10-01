@@ -103,7 +103,9 @@ def create_server(
     from .resources import topology as topology_resource
     from .tools import integrity as integrity_tools
 
-    status_resource.register(mcp, adaptors)
+    status_resource.register(
+        mcp, adaptors, tool_deadline_seconds=tool_deadline
+    )
     topology_resource.register(mcp, adaptors)
     status_prompts.register(mcp, adaptors)
     integrity_tools.register(

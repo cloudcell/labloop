@@ -75,12 +75,20 @@ def _build_stamp() -> dict | None:
             except (OSError, ValueError):
                 return None
             if isinstance(d, dict) and isinstance(d.get("rev"), str):
-                return {"rev": d["rev"],
-                        "dirty": bool(d.get("dirty", False))}
+                out = {"rev": d["rev"],
+                       "dirty": bool(d.get("dirty", False))}
+                if out["dirty"]:
+                    if isinstance(d.get("dirty_files"), list):
+                        out["dirty_files"] = d["dirty_files"]
+                    if isinstance(d.get("diff_sha256"), str):
+                        out["diff_sha256"] = d["diff_sha256"]
+                return out
             return None
     return None
 
-def status_digest(store: MemoryStore) -> dict:
+def status_digest(
+    store: MemoryStore, tool_deadline_seconds: float | None = None,
+) -> dict:
     """The claims-role status digest — the cross-server contract
     shape, emitted in capability posture."""
     _, total = store.list_claims(limit=1)
@@ -120,6 +128,9 @@ def status_digest(store: MemoryStore) -> dict:
         },
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        # The per-call response deadline — invisible in every digest
+        # before rc-15 F8.
+        "tool_deadline_seconds": tool_deadline_seconds,
         "build": _build_stamp(),
         "claims": {
             "total": total,
@@ -131,13 +142,21 @@ def status_digest(store: MemoryStore) -> dict:
     return digest
 
 
-def register(mcp, store: MemoryStore) -> None:
+def register(
+    mcp, store: MemoryStore,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the status digest resource."""
 
     @mcp.resource("claims://status")
     def get_status() -> str:
         """Capability status digest — claim counts, integrity."""
-        return json.dumps(status_digest(store), indent=2)
+        return json.dumps(
+            status_digest(
+                store, tool_deadline_seconds=tool_deadline_seconds
+            ),
+            indent=2,
+        )
 
     @mcp.resource("claims://constants")
     def get_constants() -> str:

@@ -327,6 +327,7 @@ Examples:
                 await ch["role_obj"].connect()
             except Exception as e:
                 ch["state"] = "down"
+                ch["probe"] = "down"
                 ch["last_error"] = describe_error(e)
                 print(
                     f"WARNING: claims adaptor unreachable "
@@ -338,6 +339,7 @@ Examples:
                 from .clients.adaptor import _utc_now
                 adaptor.set_claims(ch["role_obj"])
                 ch["state"] = "up"
+                ch["probe"] = "pending"  # unprobed until the first tick
                 ch["connected_at"] = _utc_now()
                 ch["last_error"] = None
                 print("claims adaptor connected", file=sys.stderr)

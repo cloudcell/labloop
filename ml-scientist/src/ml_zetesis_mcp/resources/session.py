@@ -106,7 +106,10 @@ def _get_open_investigations(store: SearchStore) -> list[dict]:
     ]
 
 
-def register(mcp, store: SearchStore, adaptors=None) -> None:
+def register(
+    mcp, store: SearchStore, adaptors=None,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the session protocol resource."""
 
     @mcp.resource("search://session")
@@ -128,6 +131,9 @@ def register(mcp, store: SearchStore, adaptors=None) -> None:
             # The actionable digest — same payload as
             # search://status, embedded so the recovery resource
             # stays self-sufficient.
-            "status": status_digest(store, adaptors),
+            "status": status_digest(
+                store, adaptors,
+                tool_deadline_seconds=tool_deadline_seconds,
+            ),
         }
         return json.dumps(payload, indent=2)

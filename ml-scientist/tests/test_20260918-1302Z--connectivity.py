@@ -184,12 +184,20 @@ async def test_call_failure_records_operation_and_cause():
     from ml_episteme_mcp.clients.mcp_adaptor import MCPClientAdaptor
 
     a = MCPClientAdaptor({"call_timeout_seconds": 1})
-    a._session = object()  # non-None gate — no _serve task needed
-    await a._result_queue.put((
-        "error", ExceptionGroup("TaskGroup", [OSError("pipe broke")])
-    ))
-    with pytest.raises(ExceptionGroup):
-        await a.call_tool("assert_claim", {"subject": "x"})
+
+    class _ErrSession:
+        async def call_tool(self, name, args):
+            raise ExceptionGroup("TaskGroup", [OSError("pipe broke")])
+
+    a._session = _ErrSession()
+    a._stop = asyncio.Event()
+    a._task = asyncio.create_task(a._serve())
+    try:
+        with pytest.raises(ExceptionGroup):
+            await a.call_tool("assert_claim", {"subject": "x"})
+    finally:
+        a._stop.set()
+        a._task.cancel()
     assert a.last_operation == "assert_claim"
     assert a.last_failed_operation == "assert_claim"
     assert a.last_error == "OSError: pipe broke"
@@ -444,7 +452,7 @@ async def test_ping_routes_through_serve_queue():
     a._session = object()  # non-None gate
 
     async def drive():
-        name, seq = await a._call_queue.get()
+        name, seq, _fut = await a._call_queue.get()
         assert name == "__ping__"
         # a stale answer to an earlier probe must be discarded
         await a._probe_queue.put(("ok", seq + 100))

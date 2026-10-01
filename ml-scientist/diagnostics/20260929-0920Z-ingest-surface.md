@@ -40,12 +40,17 @@ PART B — reachability honesty
    and mark Parts A's probes UNREACHABLE, not passed — a refused
    connection is not a tested 401. State clearly which outcome you
    observed.
-7. If a token IS provisioned on this lab (operator tells you, or
-   you find it in a sanctioned config surface — do NOT hunt
-   process env or files outside the exchange): repeat Parts A's
-   POST with the real token → 200 + the sha256 content address;
-   then GET and HEAD that hash → the bytes round-trip. Report
-   verbatim. Without a token this step is BLOCKED — say so.
+7. The template DOES provision a token — at
+   /srv/lab/mcp-state/ingest.env (mcp-side, mode 600, env-file for
+   the quadlet). It is deliberately outside your zone: do NOT try to
+   read mcp-state. The success path needs the OPERATOR to hand you
+   the token value through the exchange — ask for it in your
+   report's "blocked" section if absent. With a token: repeat Part
+   A's POST → 200 + the sha256 content address; then GET and HEAD
+   that hash → the bytes round-trip. Report verbatim. Without one
+   this step is BLOCKED (token exists but lives in the mcp zone —
+   provisioning reachability is the gap, not the endpoint) — say
+   exactly that.
 
 While you work:
 - When a tool call refuses, read the error and do exactly what it says.

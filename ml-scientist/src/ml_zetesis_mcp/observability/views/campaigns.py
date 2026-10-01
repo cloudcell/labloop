@@ -119,7 +119,7 @@ def render_campaign_detail(
 
     result_rows = "".join(
         f'<tr id="cres-{escape(r.id)}">'
-        f'<td><span class="mono">{escape(r.id)}</span></td>'
+        f"<td>{link_id(r.id, bases)}</td>"
         f'<td><span class="status status-{escape(r.arm.value)}">'
         f"{escape(r.arm.value)}</span></td>"
         f"<td>{link_id(r.programme_id, bases)}</td>"
@@ -134,7 +134,7 @@ def render_campaign_detail(
 
     spawn_rows = "".join(
         f'<tr id="spawn-{escape(s.id)}">'
-        f'<td><span class="mono">{escape(s.id)}</span></td>'
+        f"<td>{link_id(s.id, bases)}</td>"
         f'<td><span class="status status-{escape(s.arm.value)}">'
         f"{escape(s.arm.value)}</span></td>"
         f"<td>{link_id(s.programme_id, bases)}</td>"
@@ -169,12 +169,11 @@ def render_campaign_detail(
         if c.promotion_score is not None else ""
     )
     decision = (
-        f'<p>decision: <span class="mono">{escape(c.decision_id)}</span></p>'
+        f"<p>decision: {link_id(c.decision_id, bases)}</p>"
         if c.decision_id else ""
     )
     claim = (
-        f'<p class="muted">minted → <span class="mono">'
-        f"{escape(c.claim_id)}</span></p>"
+        f'<p class="muted">minted → {link_id(c.claim_id, bases)}</p>'
         if c.claim_id else ""
     )
     closed = (
@@ -235,7 +234,7 @@ def render_campaign_detail(
     <div class="card">
         <p>
             <span class="status status-{escape(c.status.value)}">{escape(c.status.value)}</span>
-            &nbsp;·&nbsp; contract <span class="mono">{escape(c.contract_id)}</span>
+            &nbsp;·&nbsp; contract {link_id(c.contract_id, bases)}
             &nbsp;·&nbsp; metric <b>{escape(c.primary_metric)}</b>
         </p>
         <p>

@@ -37,8 +37,14 @@ def _build_stamp() -> dict | None:
             except (OSError, ValueError):
                 return None
             if isinstance(d, dict) and isinstance(d.get("rev"), str):
-                return {"rev": d["rev"],
-                        "dirty": bool(d.get("dirty", False))}
+                out = {"rev": d["rev"],
+                       "dirty": bool(d.get("dirty", False))}
+                if out["dirty"]:
+                    if isinstance(d.get("dirty_files"), list):
+                        out["dirty_files"] = d["dirty_files"]
+                    if isinstance(d.get("diff_sha256"), str):
+                        out["diff_sha256"] = d["diff_sha256"]
+                return out
             return None
     return None
 
@@ -221,7 +227,9 @@ def _lab_next_actions(servers: dict[str, dict]) -> list[dict]:
     ]
 
 
-async def lab_status(adaptors) -> dict:
+async def lab_status(
+    adaptors, tool_deadline_seconds: float | None = None
+) -> dict:
     """The lab status aggregate — the cross-server contract shape."""
     servers: dict[str, dict] = {}
     for name in CHANNEL_ORDER:
@@ -262,18 +270,29 @@ async def lab_status(adaptors) -> dict:
             and own is not None,
             "revs_match": len(revs) <= 1,
         },
+        # The per-call response deadline — invisible in every digest
+        # before rc-15 F8 (upstream values live under each digest).
+        "tool_deadline_seconds": tool_deadline_seconds,
         "lab_next_actions": _lab_next_actions(servers),
     }
 
 
-def register(mcp, adaptors) -> None:
+def register(
+    mcp, adaptors, tool_deadline_seconds: float | None = None
+) -> None:
     """Register the lab status resource."""
 
     @mcp.resource("lab://status")
     async def get_status() -> str:
         """The lab status aggregate — per-server digests plus the
         ranked next-action list. Computed live on every read."""
-        return json.dumps(await lab_status(adaptors), indent=2)
+        return json.dumps(
+            await lab_status(
+                adaptors,
+                tool_deadline_seconds=tool_deadline_seconds,
+            ),
+            indent=2,
+        )
 
     @mcp.resource("lab://constants")
     def get_constants() -> str:

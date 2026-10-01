@@ -661,6 +661,7 @@ CREATE TABLE IF NOT EXISTS promotion_decisions (
     contract_id TEXT,
     verdict TEXT NOT NULL,
     evidence_refs_json TEXT NOT NULL,
+    unverified_refs_json TEXT,
     rationale TEXT NOT NULL,
     decided_by TEXT NOT NULL,
     declared_rung TEXT,
@@ -888,6 +889,14 @@ class StateStore:
         if "bf_2ln" not in dec_cols:
             self._conn.execute(
                 "ALTER TABLE promotion_decisions ADD COLUMN bf_2ln REAL"
+            )
+        # rc-15 F3: foreign refs were persisted with no record of
+        # whether they resolved — unverified_refs marks the opaque
+        # subset so fabricated residue is auditable.
+        if "unverified_refs_json" not in dec_cols:
+            self._conn.execute(
+                "ALTER TABLE promotion_decisions ADD COLUMN "
+                "unverified_refs_json TEXT"
             )
         self._conn.commit()
 
@@ -2023,15 +2032,16 @@ class StateStore:
         self._write(
             "INSERT INTO promotion_decisions "
             "(id, candidate_id, contract_id, verdict, evidence_refs_json, "
-            "rationale, decided_by, declared_rung, claimed_rung, "
-            "computed_rung, bf_2ln, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "unverified_refs_json, rationale, decided_by, declared_rung, "
+            "claimed_rung, computed_rung, bf_2ln, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 d.id,
                 d.candidate_id,
                 d.contract_id,
                 d.verdict.value,
                 json.dumps(d.evidence_refs),
+                json.dumps(d.unverified_refs),
                 d.rationale,
                 d.decided_by,
                 d.declared_rung,
@@ -2066,6 +2076,12 @@ class StateStore:
             contract_id=row["contract_id"],
             verdict=row["verdict"],
             evidence_refs=json.loads(row["evidence_refs_json"]),
+            unverified_refs=(
+                json.loads(row["unverified_refs_json"])
+                if "unverified_refs_json" in cols
+                and row["unverified_refs_json"]
+                else []
+            ),
             rationale=row["rationale"],
             decided_by=row["decided_by"],
             declared_rung=(
@@ -2854,6 +2870,31 @@ class StateStore:
                         if s.endswith(".py"):
                             observed.setdefault(s, {"write": False})
 
+        # Declared inputs are provenance at staging time, not only
+        # when the trace saw an open (rc-15 F7): data_paths /
+        # data_ref_paths resolved for the run must earn a manifest
+        # row even if the trial touched the file through a syscall
+        # outside the trace filter — or deleted it before finalize.
+        # An absent-then row records sha256: null + a missing-file
+        # reason rather than vanishing silently.
+        if trial is not None:
+            try:
+                trial_cfg = (
+                    json.loads(trial.config_json)
+                    if getattr(trial, "config_json", None) else {}
+                )
+            except (ValueError, TypeError):
+                trial_cfg = {}
+            for cfg_key in ("data_paths", "data_ref_paths"):
+                vals = trial_cfg.get(cfg_key) or {}
+                if isinstance(vals, dict):
+                    vals = vals.values()
+                for dp in vals:
+                    if isinstance(dp, str):
+                        observed.setdefault(
+                            dp, {"write": False}
+                        )["declared"] = True
+
         def _digest_or_reason(
             rp: Path,
         ) -> tuple[str | None, int | None, str | None]:
@@ -3004,10 +3045,32 @@ class StateStore:
                     captured.append(entry)
                     continue
                 if not rp.is_file():
+                    if flags.get("declared"):
+                        captured.append({
+                            "path": str(rp),
+                            "role": "input_data",
+                            "declared": True,
+                            "sha256": None,
+                            "size_bytes": None,
+                            "reason": "declared input missing at "
+                                      "finalize — deleted or renamed "
+                                      "mid-run",
+                        })
                     continue
                 try:
                     code_hash = self.capture_code_from_path(str(rp))
                 except (FileNotFoundError, OSError, UnicodeDecodeError):
+                    if flags.get("declared"):
+                        captured.append({
+                            "path": str(rp),
+                            "role": "input_data",
+                            "declared": True,
+                            "sha256": None,
+                            "size_bytes": None,
+                            "reason": "declared input missing at "
+                                      "finalize — deleted or renamed "
+                                      "mid-run",
+                        })
                     continue
                 captured.append({
                     "path": str(rp),
@@ -3028,12 +3091,24 @@ class StateStore:
             else:
                 role = "other" if flags["write"] else "input_data"
             entry = {"path": str(rp), "role": role}
+            if flags.get("declared"):
+                entry["declared"] = True
             if role == "directory":
                 entry["sha256"] = None
                 entry["size_bytes"] = None
                 entry["reason"] = "directory — not digested"
             else:
                 sha, size, reason = _digest_or_reason(rp)
+                if (
+                    flags.get("declared")
+                    and not flags.get("read_ok")
+                    and reason is not None
+                    and "FileNotFoundError" in reason
+                ):
+                    reason = (
+                        "declared input missing at finalize — "
+                        "deleted or renamed mid-run"
+                    )
                 entry["sha256"] = sha
                 entry["size_bytes"] = size
                 if reason is not None:

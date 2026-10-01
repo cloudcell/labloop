@@ -84,11 +84,19 @@ def _render(digest: dict) -> str:
     return "\n".join(lines)
 
 
-def register(mcp, store: StateStore, adaptor=None) -> None:
+def register(
+    mcp, store: StateStore, adaptor=None,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the status_report prompt."""
 
     @mcp.prompt()
     def status_report() -> str:
         """Where the loop stands and what to do next — read at
         session start and after any context compaction."""
-        return _render(status_digest(store, adaptor))
+        return _render(
+            status_digest(
+                store, adaptor,
+                tool_deadline_seconds=tool_deadline_seconds,
+            )
+        )

@@ -119,7 +119,17 @@ async def _mint_decision_claim(
     edges_created = 0
     minted_basis = None
     if adaptors.claims is None:
-        return None, "disabled", None, 0, None
+        # "disabled" must name the cause — unwired and down are
+        # different operational stories (rc-15 F5).
+        spec = getattr(adaptors, "_channels", {}).get("claims")
+        if spec is None:
+            claim_error = "claims channel not configured"
+        else:
+            claim_error = (
+                "claims channel down"
+                + (f": {spec.last_error}" if spec.last_error else "")
+            )
+        return None, "disabled", claim_error, 0, None
     try:
         upstream_ids: set[str] = set()
         for eref_id in decision.evidence_refs:

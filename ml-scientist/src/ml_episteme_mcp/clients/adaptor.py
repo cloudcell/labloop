@@ -307,6 +307,11 @@ class MCPAdaptor:
                 "in_flight_operation": None,
                 "in_flight_since": None,
                 "connected_at": None,
+                # The per-channel response deadline — was invisible
+                # in every digest (rc-15 F8).
+                "call_timeout_seconds": cfg.get(
+                    "call_timeout_seconds"
+                ),
             })
         ch = self._claims_channel
         if ch is not None:
@@ -339,6 +344,9 @@ class MCPAdaptor:
                     src, "in_flight_since", None
                 ),
                 "connected_at": ch["connected_at"],
+                "call_timeout_seconds": getattr(
+                    src, "config", {}
+                ).get("call_timeout_seconds"),
             })
         return report
 
@@ -459,6 +467,9 @@ async def run_claims_supervisor(
                     pass
                 adaptor.set_claims(None)
                 ch["state"] = "down"
+                # A dead channel has no liveness — a lingering
+                # "busy"/"ok" probe contradicts state=down (rc-15 F4).
+                ch["probe"] = "down"
                 op = getattr(live, "in_flight_operation", None) or getattr(
                     live, "last_failed_operation", None
                 )
@@ -510,10 +521,13 @@ async def run_claims_supervisor(
             await ch["role_obj"].connect()
         except Exception as e:
             ch["state"] = "down"
+            ch["probe"] = "down"
             ch["last_error"] = describe_error(e)
             continue
         adaptor.set_claims(ch["role_obj"])
         ch["state"] = "up"
+        # Freshly connected — unprobed until the next tick's ping.
+        ch["probe"] = "pending"
         ch["connected_at"] = _utc_now()
         ch["last_error"] = None
         log("claims adaptor connected")

@@ -419,11 +419,24 @@ def _check_upstream_connectivity(connectivity) -> dict:
         for c in connectivity
         if c.get("state") != "up"
     ]
+    # Busy-but-up is not a violation (the channel may recover — only
+    # a down channel gates), but it must surface in the summary:
+    # "all up" next to a probe-busy channel is the self-contradicting
+    # payload rc-15 flagged.
+    busy = sum(
+        1 for c in connectivity
+        if c.get("state") == "up" and c.get("probe") == "busy"
+    )
+    parts = []
+    if violations:
+        parts.append(f"{len(violations)} down")
+    if busy:
+        parts.append(f"{busy} busy")
     res = _res(
         "upstream_connectivity",
         violations,
         f"{len(connectivity)} channel(s) configured; "
-        + (f"{len(violations)} down" if violations else "all up"),
+        + (", ".join(parts) if parts else "all up"),
     )
     # Full per-channel state (probe, busy, last_op, error attribution)
     # rides the payload — reachable from check_invariants, /health/deep,

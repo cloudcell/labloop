@@ -56,12 +56,19 @@ def _check_upstream_connectivity(connectivity) -> dict:
         }
         for e in down
     ]
+    # Busy-but-up is not a violation, but the one-line detail must not
+    # claim "M up" while a channel is unresponsive (rc-15 F4).
+    busy = sum(
+        1 for e in connectivity
+        if e.get("state") == "up" and e.get("probe") == "busy"
+    )
     return {
         "name": "upstream_connectivity",
         "ok": not violations,
         "detail": (
             f"{len(connectivity)} channel(s) configured; "
             f"{len(connectivity) - len(down)} up"
+            + (f", {busy} busy" if busy else "")
             if not violations
             else f"{len(down)} channel(s) down"
         ),

@@ -67,6 +67,15 @@ REMEDY_TOOLS = {
     "campaigns_awaiting_verdict": {
         "pull_campaign_evidence", "record_promotion_verdict",
     },
+    # The check names its own exits: fill the missing arm (spawn +
+    # record its result) or abandon. All must pass the gate or the
+    # violation is unfixable — acknowledge is not the only exit
+    # (rc-15 F2). close_campaign stays reachable so its own, more
+    # precise precondition refusal fires instead of the gate's.
+    "incomplete_campaigns": {
+        "spawn_arm_programme", "spawn_campaign_programme",
+        "record_campaign_result", "close_campaign", "abandon_campaign",
+    },
     "campaign_results_have_campaign": set(),
     "campaign_spawns_have_campaign": set(),
     "results_spawn_scoped": set(),
@@ -236,6 +245,11 @@ class RecurrenceTracker:
             "action": top.get("action"),
             "tool": top.get("tool"),
             "reason": top.get("reason"),
+            # The digest's recommendations are server-global — injected
+            # into entity-scoped payloads they read as per-entity
+            # advice (rc-15 F8). Mark the scope and carry the refs.
+            "scope": "server",
+            "entity_refs": top.get("entity_refs") or [],
             "blockers": len(self.digest.get("blockers") or []),
         }
 
@@ -385,7 +399,7 @@ def violation_ack(
     )
     remaining = open_violations(store)
     matched = (check_name, object_ref) in open_before
-    return {
+    out = {
         "ack_id": ack_id,
         # The ack row is recorded either way (insert-only ledger —
         # the attempt itself is a governance event), but the status
@@ -394,3 +408,12 @@ def violation_ack(
         "matched_open_violation": matched,
         "open_violations": len(remaining),
     }
+    if not matched:
+        # A typo'd object_ref otherwise reads identically to a valid
+        # ack of an already-cleared violation — surface the live open
+        # refs so the caller can see what it should have said (rc-15).
+        out["open_refs"] = [
+            {"check": v["check"], "object_ref": v["object_ref"]}
+            for v in remaining[:20]
+        ]
+    return out

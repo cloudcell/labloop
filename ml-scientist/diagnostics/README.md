@@ -25,6 +25,13 @@ agent to:
    ```
 
 3. Report the staged export path, byte count and sha256 verbatim.
+4. **Staging discipline.** Every scratch/fixture dir the run creates
+   lives under `diagnostics-out/<slug>/` (or a namespaced
+   `diagnostics-out/<slug>/work/`) — never loose `diag-*` dirs at the
+   exchange root. `--all` exports carry `/srv/lab/exchange` wholesale,
+   so root-level staging pollutes every subsequent extraction (rc-15
+   shipped ~15 stale `diag-*` dirs this way). If a run needs scratch
+   outside its slug dir, it must remove it before the export.
 
 `labloop-export` (installed at `/usr/local/sbin/labloop-export`,
 nopasswd-free for `lab`) freezes the staged set into a manifest +

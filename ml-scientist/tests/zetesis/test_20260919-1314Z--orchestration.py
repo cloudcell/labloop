@@ -369,6 +369,37 @@ class TestSpawnScopedResults:
         spawns = search_store.list_campaign_spawns(camp)
         assert spawns[0].status.value == "completed"
 
+    async def test_upstream_attribution_divergence_rejected(
+        self, zetesis_server, adaptors
+    ):
+        """The upstream-attribution negative branch is unmanufacturable
+        through real upstreams — spawn stamps candidate_version_id from
+        the arm, so a genuine mismatch can't be constructed through the
+        tools. The fake adaptor is the seam: spawn-scope passes (the
+        programme IS spawn-bound to this campaign and arm) while the
+        upstream pull returns an attribution set that lacks it."""
+        _wire(adaptors)
+        camp = await _open_campaign(zetesis_server)
+        spawn = await call_tool(
+            zetesis_server, "spawn_campaign_programme", {
+                "campaign_id": camp, "arm": "challenger",
+                **_spawn_args(),
+            }
+        )
+        prog = spawn["programme_id"]
+        adaptors.evidence.payloads["list_programmes"] = json.dumps({
+            "programmes": [{"programme_id": "prog-someone-else"}]
+        })
+        r = await call_tool(
+            zetesis_server, "record_campaign_result", {
+                "campaign_id": camp, "arm": "challenger",
+                "programme_id": prog,
+                "metrics": {"val_ppl": 1.0},
+            }
+        )
+        assert "error" in r
+        assert "not" in r["error"] and "attributed" in r["error"]
+
 
 class TestWhitelist:
     def test_create_programme_whitelisted(self):

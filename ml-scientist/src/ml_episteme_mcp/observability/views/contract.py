@@ -5,6 +5,7 @@ from __future__ import annotations
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id
 from ..templates import (
     escape,
     format_timestamp,
@@ -42,7 +43,7 @@ def render_contract_detail(store: StateStore, contract_id: str) -> HTMLResponse:
     <div class="section">
         <h2>Overview</h2>
         <table>
-            <tr><th>ID</th><td class="mono">{escape(c.id)}</td></tr>
+            <tr><th>ID</th><td class="mono">{link_id(c.id)}</td></tr>
             <tr><th>programme</th><td>
                 <a href="/programme/{escape(c.programme_id)}" class="mono">
                     {escape(c.programme_id)}</a></td></tr>

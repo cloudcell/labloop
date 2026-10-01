@@ -31,6 +31,7 @@ def episteme_client(tmp_path):
         Bundle,
         CandidateVersion,
         Conclusion,
+        DataRef,
         EvaluationContract,
         Hypothesis,
         Observation,
@@ -48,7 +49,8 @@ def episteme_client(tmp_path):
         id="prog-test1", goal="minimize val perplexity",
         constraints={}, allowed_variables=["depth"],
         budget_max_trials=10, budget_max_wall_time_hours=5.0,
-        metric_direction="minimize"))
+        metric_direction="minimize",
+        candidate_version_id="cand-test1"))
     store.create_hypothesis(Hypothesis(
         id="hyp-test1", programme_id="prog-test1",
         statement="depth improves generalization",
@@ -61,7 +63,13 @@ def episteme_client(tmp_path):
     store.create_bundle(Bundle(
         id="bundle-test1", trial_id="trial-test1",
         code_ref="/tmp/quick.py", env_ref="env:test",
-        seeds_json="[1]", splits_json="{}"))
+        seeds_json="[1]", splits_json="{}",
+        data_refs_json='["data-ref-test1"]',
+        baseline_ref="data-ref-test1"))
+    store.create_data_ref(DataRef(
+        id="data-ref-test1", split="validation", regime="captured",
+        source_uri="file:///tmp/val.jsonl",
+        content_hash="sha256:testdata"))
     store.create_observation(Observation(
         id="obs-test1", trial_id="trial-test1",
         metrics_json='{"val_perplexity": 11.03}',
@@ -612,3 +620,144 @@ class TestUpstreamLinkMaps:
         from ml_agora_mcp.observability.links import entity_url
 
         assert entity_url(entity_id, self.GUI_BASES) == expected
+
+
+# ------------------------------------------------------------------
+# Hyperlinked ids — every rendered <name>-<id> is a link where a
+# detail surface exists (the links.py convention, all five GUIs)
+# ------------------------------------------------------------------
+
+
+class TestEntityIdLinks:
+    """Entity ids rendered in tables/cards link to their owning page
+    — not just row titles or page headings."""
+
+    # --- episteme: local ids link through its own shortcut routes ---
+
+    def test_trial_page_links_observation(self, episteme_client):
+        """The reported gap: obs-* cells on the trial page."""
+        r = episteme_client.get(
+            "/programme/prog-test1/trial/trial-test1")
+        assert r.status_code == 200
+        assert 'href="/observation/obs-test1"' in r.text
+
+    def test_trial_page_links_bundle_and_hypothesis(
+        self, episteme_client
+    ):
+        r = episteme_client.get(
+            "/programme/prog-test1/trial/trial-test1")
+        assert 'href="/bundle/bundle-test1"' in r.text
+        assert 'href="/hypothesis/hyp-test1"' in r.text
+
+    def test_trial_page_links_baseline_and_data_refs(
+        self, episteme_client
+    ):
+        """baseline_ref and the data-provenance rows are data-ref-*
+        ids — both must resolve through /dataref/."""
+        r = episteme_client.get(
+            "/programme/prog-test1/trial/trial-test1")
+        assert r.text.count('href="/dataref/data-ref-test1"') >= 2
+
+    def test_conclusions_page_links_conclusion_id(
+        self, episteme_client
+    ):
+        r = episteme_client.get("/programme/prog-test1/conclusions")
+        assert 'href="/conclusion/conc-test1"' in r.text
+
+    def test_belief_page_links_belief_id(self, episteme_client):
+        r = episteme_client.get("/programme/prog-test1/belief")
+        assert 'href="/belief/belief-test1"' in r.text
+
+    def test_contract_page_links_its_id(self, episteme_client):
+        r = episteme_client.get("/contract/contract-test1")
+        assert 'href="/contract/contract-test1"' in r.text
+
+    def test_dataref_page_links_its_id(self, episteme_client):
+        r = episteme_client.get("/dataref/data-ref-test1")
+        assert 'href="/dataref/data-ref-test1"' in r.text
+
+    def test_programme_page_links_its_id(self, episteme_client):
+        r = episteme_client.get("/programme/prog-test1")
+        assert 'href="/programme/prog-test1"' in r.text
+
+    def test_candidate_page_renders(self, episteme_client):
+        """cand-* ids are episteme-minted (register_candidate) — they
+        get a local detail page, not a zetesis hop."""
+        r = episteme_client.get("/candidate/cand-test1")
+        assert r.status_code == 200
+        assert "cand-test1" in r.text
+        assert "test-model" in r.text
+        assert 'href="/programme/prog-test1"' in r.text
+
+    def test_decision_links_candidate_locally(self, episteme_client):
+        r = episteme_client.get("/decision/decision-test1")
+        assert 'href="/candidate/cand-test1"' in r.text
+
+    def test_peer_id_links_when_gui_configured(self, monkeypatch):
+        """Peer-minted ids (claims, zetesis rows) link only when the
+        peer GUI is configured — never a guessed address."""
+        from ml_episteme_mcp.observability import links
+
+        monkeypatch.setattr(
+            links, "PEER_GUI_URLS",
+            {"anamnesis": "http://ana.gui", "zetesis": "http://zet.gui"},
+        )
+        assert (
+            links.entity_url("claim-x") == "http://ana.gui/claim/claim-x")
+        assert links.entity_url("camp-x") == "http://zet.gui/campaign/camp-x"
+
+    def test_peer_id_unlinked_without_gui_config(self, monkeypatch):
+        from ml_episteme_mcp.observability import links
+
+        monkeypatch.setattr(links, "PEER_GUI_URLS", {})
+        assert links.entity_url("claim-x") is None
+        assert links.entity_url("camp-x") is None
+
+    def test_entity_url_local_and_fallback(self):
+        from ml_episteme_mcp.observability.links import entity_url
+
+        assert entity_url("trial-x") == "/trial/trial-x"
+        assert entity_url("data-ref-x") == "/dataref/data-ref-x"
+        assert entity_url("cand-x") == "/candidate/cand-x"
+        # Unmapped prefixes and non-ids render unlinked, never guessed.
+        assert entity_url("vack-x") is None
+        assert entity_url("sha256:abc") is None
+
+    def test_linkify_links_ids_in_prose(self, monkeypatch):
+        """Free-text fields citing ids (evidence summaries, rationales)
+        get inline links — surrounding text stays escaped."""
+        from ml_episteme_mcp.observability import links
+
+        monkeypatch.setattr(links, "PEER_GUI_URLS", {})
+        html = links.linkify(
+            'trial-t1abc2 supported <injection> "attempt"')
+        assert 'href="/trial/trial-t1abc2"' in html
+        assert "&lt;injection&gt;" in html
+        assert "&quot;attempt&quot;" in html
+
+    # --- zetesis: context-bound ids link to their resolvers ---
+
+    def test_campaign_page_links_result_and_spawn_ids(
+        self, zetesis_client
+    ):
+        r = zetesis_client.get("/campaign/camp-test1")
+        assert 'href="/campaign-result/cres-test1"' in r.text
+        assert 'href="/spawn/spawn-test1"' in r.text
+
+    # --- arete: lineage + context ids link ---
+
+    def test_improver_page_links_parent_decision_policy(
+        self, arete_client
+    ):
+        r = arete_client.get("/improver/imp-cand")
+        assert 'href="/improver/imp-parent"' in r.text
+        assert 'href="/decision/mdec-test1"' in r.text
+        assert 'href="/policy/pol-test1"' in r.text
+
+    def test_improver_list_links_parent(self, arete_client):
+        r = arete_client.get("/")
+        assert 'href="/improver/imp-parent"' in r.text
+
+    def test_tournament_page_links_result_id(self, arete_client):
+        r = arete_client.get("/tournament/tourn-test1")
+        assert 'href="/result/tres-test1"' in r.text

@@ -8,6 +8,7 @@ are insert-only: immutability is enforced by surface, not by a flag.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -20,6 +21,7 @@ from ..state.store import StateStore
 from .. import _grounded_constants as _gc
 from ..clients.adaptor import MCPAdaptor
 from ..enforcement.commitments import (
+    FOREIGN_ID_PREFIXES,
     check_candidate_parent_exists,
     check_contract_metrics,
     check_contract_programme_exists,
@@ -33,6 +35,36 @@ from .schemas import coerce_json, fail, ok, CandidateScorecardOut, RegisterCandi
 from typing import Annotated, Literal
 from pydantic import Field
 from mcp.types import CallToolResult
+
+
+async def _classify_unverified_refs(
+    adaptor: MCPAdaptor, evidence_refs: list[str]
+) -> list[str]:
+    """Foreign-prefix refs this server cannot verify, marked honestly.
+
+    ``check_decision_valid`` resolves Loop-0 ids against the store and
+    refuses invented prefixes, but refs minted by a peer loop pass
+    through opaquely — the owner lives on another server. ``claim-``
+    ids are probed over the claims channel when wired; a failed or
+    missing channel leaves them unverified. Prefixes with no wired
+    channel at all (eref-, camp-, mdec-, …) are unverifiable by
+    construction — they are still accepted (zetesis legitimately
+    forwards erefs into record_promotion_decision) but land in the
+    record's unverified_refs so fabricated residue stays auditable.
+    """
+    claims = getattr(adaptor, "claims", None)
+    unverified = []
+    for ref in evidence_refs:
+        if not any(ref.startswith(p) for p in FOREIGN_ID_PREFIXES):
+            continue  # Loop-0 id — existence already enforced upstream
+        if ref.startswith("claim-") and claims is not None:
+            try:
+                await asyncio.wait_for(claims.get_claim(ref), timeout=5.0)
+                continue  # resolved on the owning server
+            except Exception:
+                pass  # not found, or channel error — mark, never guess
+        unverified.append(ref)
+    return unverified
 
 
 def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
@@ -207,6 +239,7 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
                         "contract_id": d.contract_id,
                         "verdict": d.verdict,
                         "evidence_refs": d.evidence_refs,
+                        "unverified_refs": d.unverified_refs,
                         "rationale": d.rationale,
                         "decided_by": d.decided_by,
                         "declared_rung": d.declared_rung,
@@ -407,7 +440,7 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             return fail(json.dumps({"error": str(e)}))
 
     @mcp.tool()
-    def record_promotion_decision(
+    async def record_promotion_decision(
         candidate_id: Annotated[str, Field(description='Candidate the verdict applies to; must exist.')],
         verdict: Annotated[Literal['promote', 'reject', 'hold', 'rollback'], Field(description="promote | reject | hold | rollback — insert-only; reversal is a new 'rollback' decision.")],
         evidence_refs: Annotated[list[str] | str, Field(description='Evidence_ref IDs (from pull_evidence) the decision cites — ≥1 required; may be a JSON-encoded list.')],
@@ -437,6 +470,17 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
             )
             if err:
                 return fail(json.dumps({"error": err}))
+
+            # Foreign-prefix refs are accepted opaquely (their owner
+            # is another loop's server) — but whether a ref ever
+            # resolved must be auditable, not silent (rc-15 F3).
+            # claim- ids are probed on the claims channel when wired;
+            # everything else is marked unverified rather than
+            # guessed at. Zetesis legitimately forwards eref- ids —
+            # refusal is not the fix, honest marking is.
+            unverified_refs = await _classify_unverified_refs(
+                adaptor, evidence_refs
+            )
 
             # Declared-vs-claimed rung (plan-20260929-1641Z W4): a
             # promote under a rung-declaring contract must claim an
@@ -489,6 +533,7 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
                 contract_id=contract_id,
                 verdict=verdict,
                 evidence_refs=evidence_refs,
+                unverified_refs=unverified_refs,
                 rationale=rationale,
                 decided_by=decided_by,
                 declared_rung=declared_rung,
@@ -503,6 +548,7 @@ def register(mcp, store: StateStore, adaptor: MCPAdaptor) -> None:
                 "declared_rung": declared_rung,
                 "claimed_rung": claimed_rung,
                 "computed_rung": computed_rung,
+                "unverified_refs": unverified_refs,
             })
         except Exception as e:
             return fail(json.dumps({"error": str(e)}))

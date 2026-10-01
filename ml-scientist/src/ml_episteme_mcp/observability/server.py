@@ -26,6 +26,7 @@ from .views import belief as belief_views
 from .views import conclusion as conclusion_views
 from .views import dataref as dataref_views
 from .views import contract as contract_views
+from .views import candidate as candidate_views
 from .views import integrity as integrity_views
 from .templates import render_base, render_error
 
@@ -262,6 +263,15 @@ def create_observability_app(
 
         return decision_views.render_decision_detail(
             store, request.path_params["decision_id"]
+        )
+
+    def candidate_detail(request: Request) -> HTMLResponse:
+        """Candidate detail — the researcher spec, lineage, and the
+        programmes attributed to it. cand- ids are minted here by
+        register_candidate (zetesis adopts them into its roster), so
+        they resolve locally."""
+        return candidate_views.render_candidate_detail(
+            store, request.path_params["candidate_id"]
         )
 
     def health(request: Request) -> Response:
@@ -554,6 +564,7 @@ def create_observability_app(
         Route("/observation/{observation_id}", observation_shortcut),
         Route("/belief/{belief_id}", belief_shortcut),
         Route("/decision/{decision_id}", decision_detail),
+        Route("/candidate/{candidate_id}", candidate_detail),
         Route("/programme/{programme_id}/trial/{trial_id}/artifact/{filename:path}", trial_artifact_file),
         Route("/programme/{programme_id}/belief", belief_detail),
         Route("/programme/{programme_id}/belief/summary", programme_belief_partial),

@@ -339,81 +339,91 @@ def register(
             # conclusion (the verdict record), supports->observations
             # (the grounding data items). A claims outage must never
             # block a verdict — failures are reported, not raised.
-            if adaptor.claims is not None:
-                if verdict not in VERDICT_FINDING:
-                    result["claim_status"] = "skipped"
-                else:
-                    try:
-                        hypothesis = store.get_hypothesis(hypothesis_id)
-                        completed = [
-                            t for t in store.list_trials(programme_id)
-                            if t.hypothesis_id == hypothesis_id
-                            and t.status.value == "completed"
-                        ]
-                        regime = ", ".join(
-                            sorted({t.config_json for t in completed})
-                        )
-                        observation_ids = [
-                            o.id
-                            for t in completed
-                            for o in store.list_observations(t.id)
-                        ]
-                        finding = VERDICT_FINDING[verdict]
-                        # Bounded call: a claims outage must never block
-                        # a verdict — not even by hanging. A dead server
-                        # can leave the MCP read pending indefinitely.
-                        # No confidence crosses the wire
-                        # (plan-20260930-0240Z): a conclusion mint has
-                        # no likelihood — the evidence edges derive
-                        # weakly_grounded server-side, NULL confidence.
-                        minted = await asyncio.wait_for(
-                            adaptor.claims.assert_claim(
-                            content=(
-                                f"{hypothesis.statement} — {finding} "
-                                f"under {regime}: {evidence_summary}"
-                            ),
-                            type="empirical",
-                            evidence=[
+            if verdict not in VERDICT_FINDING:
+                result["claim_status"] = "skipped"
+            elif adaptor.claims is None:
+                # "disabled" must name the cause — unwired and down
+                # are different operational stories (rc-15 F5).
+                result["claim_status"] = "disabled"
+                ch = getattr(adaptor, "_claims_channel", None)
+                result["claim_error"] = (
+                    "claims channel not configured"
+                    if ch is None
+                    else "claims channel down"
+                    + (f": {ch['last_error']}" if ch.get("last_error") else "")
+                )
+            else:
+                try:
+                    hypothesis = store.get_hypothesis(hypothesis_id)
+                    completed = [
+                        t for t in store.list_trials(programme_id)
+                        if t.hypothesis_id == hypothesis_id
+                        and t.status.value == "completed"
+                    ]
+                    regime = ", ".join(
+                        sorted({t.config_json for t in completed})
+                    )
+                    observation_ids = [
+                        o.id
+                        for t in completed
+                        for o in store.list_observations(t.id)
+                    ]
+                    finding = VERDICT_FINDING[verdict]
+                    # Bounded call: a claims outage must never block
+                    # a verdict — not even by hanging. A dead server
+                    # can leave the MCP read pending indefinitely.
+                    # No confidence crosses the wire
+                    # (plan-20260930-0240Z): a conclusion mint has
+                    # no likelihood — the evidence edges derive
+                    # weakly_grounded server-side, NULL confidence.
+                    minted = await asyncio.wait_for(
+                        adaptor.claims.assert_claim(
+                        content=(
+                            f"{hypothesis.statement} — {finding} "
+                            f"under {regime}: {evidence_summary}"
+                        ),
+                        type="empirical",
+                        evidence=[
+                            {
+                                "to_ref": conclusion.id,
+                                "ref_type": "conclusion",
+                                "relation": "derived_from",
+                            },
+                            {
+                                "to_ref": hypothesis.id,
+                                "ref_type": "hypothesis",
+                                "relation": "derived_from",
+                            },
+                            *[
                                 {
-                                    "to_ref": conclusion.id,
-                                    "ref_type": "conclusion",
-                                    "relation": "derived_from",
-                                },
-                                {
-                                    "to_ref": hypothesis.id,
-                                    "ref_type": "hypothesis",
-                                    "relation": "derived_from",
-                                },
-                                *[
-                                    {
-                                        "to_ref": t.id,
-                                        "ref_type": "trial",
-                                        "relation": "tested_by",
-                                    }
-                                    for t in completed
-                                ],
-                                *[
-                                    {
-                                        "to_ref": o,
-                                        "ref_type": "observation",
-                                        "relation": "supports",
-                                    }
-                                    for o in observation_ids
-                                ],
+                                    "to_ref": t.id,
+                                    "ref_type": "trial",
+                                    "relation": "tested_by",
+                                }
+                                for t in completed
                             ],
-                            # source_id names the producing record
-                            # (arete's source_id=decision.id is the
-                            # convention) — the conclusion is the
-                            # epistemic record this claim summarizes.
-                            source_id=conclusion.id,
-                            ),
-                            timeout=_claims_call_timeout,
-                        )
-                        result["claim_id"] = minted["claim_id"]
-                        result["claim_status"] = "minted"
-                    except Exception as e:
-                        result["claim_status"] = "failed"
-                        result["claim_error"] = str(e)
+                            *[
+                                {
+                                    "to_ref": o,
+                                    "ref_type": "observation",
+                                    "relation": "supports",
+                                }
+                                for o in observation_ids
+                            ],
+                        ],
+                        # source_id names the producing record
+                        # (arete's source_id=decision.id is the
+                        # convention) — the conclusion is the
+                        # epistemic record this claim summarizes.
+                        source_id=conclusion.id,
+                        ),
+                        timeout=_claims_call_timeout,
+                    )
+                    result["claim_id"] = minted["claim_id"]
+                    result["claim_status"] = "minted"
+                except Exception as e:
+                    result["claim_status"] = "failed"
+                    result["claim_error"] = str(e)
 
             return ok(result)
         except Exception as e:

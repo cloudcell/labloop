@@ -49,11 +49,19 @@ def _render(digest: dict) -> str:
     return "\n".join(lines)
 
 
-def register(mcp, store: MemoryStore) -> None:
+def register(
+    mcp, store: MemoryStore,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the status_report prompt."""
 
     @mcp.prompt()
     def status_report() -> str:
         """Capability status — claim counts, integrity. This server
         has no workflow; the consuming loops determine next actions."""
-        return _render(status_digest(store))
+        return _render(
+            status_digest(
+                store,
+                tool_deadline_seconds=tool_deadline_seconds,
+            )
+        )

@@ -492,6 +492,15 @@ class PromotionDecision(BaseModel):
     evidence_refs: list[str] = Field(
         ..., description="Trial/observation/archive references supporting the verdict"
     )
+    # Foreign-prefix refs are accepted opaquely (the owner is another
+    # loop's server) — but which ones were never verified must be
+    # auditable, not silent (rc-15 F3). Any ref not positively
+    # resolved at write time lands here.
+    unverified_refs: list[str] = Field(
+        default_factory=list,
+        description="Subset of evidence_refs accepted without verification "
+                    "(unreachable owner or failed probe)",
+    )
     rationale: str = Field(..., description="Why this verdict was reached")
     decided_by: str = Field(
         ..., description="Attribution: 'human', operator id, or role ref"

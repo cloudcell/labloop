@@ -724,11 +724,13 @@ class TestClaimMinting:
 
     @pytest.mark.asyncio
     async def test_no_claims_adaptor_no_claim_fields(self, client, store):
-        """Absent claims role → conclusion succeeds with no claim fields."""
+        """Absent claims role → conclusion succeeds; rc-15 F5 —
+        claim_status reports 'disabled' with the cause named."""
         async with client:
             result, pid, hid, tid = await _drive_to_conclusion(client, store)
         assert result["verdict"] == "accepted"
-        assert "claim_status" not in result
+        assert result["claim_status"] == "disabled"
+        assert result["claim_error"] == "claims channel not configured"
         assert "claim_id" not in result
 
 

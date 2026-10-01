@@ -53,6 +53,10 @@ class ChannelSpec:
 
     def mark_up(self) -> None:
         self.state = "up"
+        # Freshly connected — unprobed until the supervisor's next
+        # ping answers. A stale "ok"/"busy" from the previous session
+        # must not ride the report as current liveness (rc-15 F4).
+        self.probe = "pending"
         self.last_error = None
         self.connected_at = datetime.now(
             timezone.utc
@@ -60,6 +64,9 @@ class ChannelSpec:
 
     def mark_down(self, error: str | None) -> None:
         self.state = "down"
+        # A dead channel has no liveness — a lingering "busy"/"ok"
+        # probe state contradicts state=down in the same payload.
+        self.probe = "down"
         self.last_error = error
 
 
@@ -129,6 +136,9 @@ class Adaptors:
                     src, "in_flight_since", None
                 ),
                 "connected_at": spec.connected_at,
+                "call_timeout_seconds": getattr(
+                    src, "config", {}
+                ).get("call_timeout_seconds"),
             })
         return report
 
@@ -148,96 +158,105 @@ async def run_connectivity_supervisor(
     back to the registry; a down channel gets a fresh ``connect()``.
     Runs until cancelled.
     """
-    while True:
-        await asyncio.sleep(interval_seconds)
-        for name, spec in adaptors._channels.items():
-            live = getattr(adaptors, name, None)
-            if live is not None:
-                dead = getattr(live, "session_dead", None)
-                if dead is not None and dead():
+    async def _tick(name: str, spec: ChannelSpec) -> None:
+        live = getattr(adaptors, name, None)
+        if live is not None:
+            dead = getattr(live, "session_dead", None)
+            if dead is not None and dead():
+                try:
+                    await live.disconnect()
+                except Exception:
+                    pass
+                setattr(adaptors, name, None)
+                op = getattr(
+                    live, "in_flight_operation", None
+                ) or getattr(live, "last_failed_operation", None)
+                if op:
+                    spec.last_failed_operation = op
+                    spec.last_failed_at = datetime.now(
+                        timezone.utc
+                    ).isoformat(timespec="seconds")
+                spec.mark_down(
+                    f"upstream session ended during {op}"
+                    if op
+                    else "upstream session ended"
+                )
+                log(
+                    f"WARNING: {name} ({spec.role}) channel lost — "
+                    "will retry"
+                )
+                return
+            # Passive detection is blind on an idle channel — a
+            # dead peer's session only dies when the channel does
+            # I/O. One protocol ping per tick is the least
+            # intrusive liveness signal: transport error → the
+            # peer is gone (drop and retry); timeout → alive but
+            # unresponsive (busy — keep the session, reconnecting
+            # would not help).
+            ping = getattr(live, "ping", None)
+            if ping is not None:
+                try:
+                    await ping(probe_timeout_seconds)
+                except ProbeTimeout:
+                    spec.probe = "busy"
+                    spec.last_probe_at = datetime.now(
+                        timezone.utc
+                    ).isoformat(timespec="seconds")
+                    log(
+                        f"WARNING: {name} ({spec.role}) channel "
+                        "alive but not answering (ping timeout) — "
+                        "busy, not down"
+                    )
+                except Exception as e:
                     try:
                         await live.disconnect()
                     except Exception:
                         pass
                     setattr(adaptors, name, None)
-                    op = getattr(
-                        live, "in_flight_operation", None
-                    ) or getattr(live, "last_failed_operation", None)
-                    if op:
-                        spec.last_failed_operation = op
-                        spec.last_failed_at = datetime.now(
-                            timezone.utc
-                        ).isoformat(timespec="seconds")
                     spec.mark_down(
-                        f"upstream session ended during {op}"
-                        if op
-                        else "upstream session ended"
+                        f"ping failed: {describe_error(e)}"
                     )
                     log(
-                        f"WARNING: {name} ({spec.role}) channel lost — "
-                        "will retry"
+                        f"WARNING: {name} ({spec.role}) channel "
+                        "lost — will retry"
                     )
-                    continue
-                # Passive detection is blind on an idle channel — a
-                # dead peer's session only dies when the channel does
-                # I/O. One protocol ping per tick is the least
-                # intrusive liveness signal: transport error → the
-                # peer is gone (drop and retry); timeout → alive but
-                # unresponsive (busy — keep the session, reconnecting
-                # would not help).
-                ping = getattr(live, "ping", None)
-                if ping is not None:
-                    try:
-                        await ping(probe_timeout_seconds)
-                    except ProbeTimeout:
-                        spec.probe = "busy"
-                        spec.last_probe_at = datetime.now(
-                            timezone.utc
-                        ).isoformat(timespec="seconds")
-                        log(
-                            f"WARNING: {name} ({spec.role}) channel "
-                            "alive but not answering (ping timeout) — "
-                            "busy, not down"
-                        )
-                    except Exception as e:
-                        try:
-                            await live.disconnect()
-                        except Exception:
-                            pass
-                        setattr(adaptors, name, None)
-                        spec.probe = "down"
-                        spec.mark_down(
-                            f"ping failed: {describe_error(e)}"
-                        )
-                        log(
-                            f"WARNING: {name} ({spec.role}) channel "
-                            "lost — will retry"
-                        )
-                    else:
-                        spec.probe = "ok"
-                        spec.last_probe_at = datetime.now(
-                            timezone.utc
-                        ).isoformat(timespec="seconds")
-                continue
-            spec.attempts += 1
-            try:
-                # The handshake must be deadline-bounded: a peer that
-                # listens but never answers (a wedged event loop looks
-                # exactly like this) would park the supervisor mid-
-                # connect forever — 'down' never reached, recovery
-                # never noticed.
-                await asyncio.wait_for(
-                    spec.adaptor.connect(), probe_timeout_seconds
-                )
-            except TimeoutError:
-                spec.mark_down(
-                    "connect timed out — upstream listening but "
-                    "not answering"
-                )
-                continue
-            except Exception as e:
-                spec.mark_down(describe_error(e))
-                continue
-            setattr(adaptors, name, spec.adaptor)
-            spec.mark_up()
-            log(f"{name} ({spec.role}) adaptor connected")
+                else:
+                    spec.probe = "ok"
+                    spec.last_probe_at = datetime.now(
+                        timezone.utc
+                    ).isoformat(timespec="seconds")
+            return
+        spec.attempts += 1
+        try:
+            # The handshake must be deadline-bounded: a peer that
+            # listens but never answers (a wedged event loop looks
+            # exactly like this) would park the supervisor mid-
+            # connect forever — 'down' never reached, recovery
+            # never noticed.
+            await asyncio.wait_for(
+                spec.adaptor.connect(), probe_timeout_seconds
+            )
+        except TimeoutError:
+            spec.mark_down(
+                "connect timed out — upstream listening but "
+                "not answering"
+            )
+            return
+        except Exception as e:
+            spec.mark_down(describe_error(e))
+            return
+        setattr(adaptors, name, spec.adaptor)
+        spec.mark_up()
+        log(f"{name} ({spec.role}) adaptor connected")
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        # Channels tick concurrently — a wedged peer's probe/connect
+        # wait must not serialize behind another channel's timeout
+        # (rc-15 F4: hung-peer detection stacked ~310 s serially).
+        await asyncio.gather(
+            *(
+                _tick(name, spec)
+                for name, spec in adaptors._channels.items()
+            )
+        )

@@ -3,60 +3,82 @@ You are driving a scientific-experiment lab exposed as five MCP servers
 agora :38050). Your standing duty: consult status before acting and act
 on what it tells you.
 
-This session verifies the rc-11 **per-tool deadline**
-(`[server] tool_deadline_seconds`, default 120 s): a call that
-outlives the deadline returns `deadline_exceeded` to the client —
-but the deadline is a RESPONSE bound, not an abort. The handler is
-shielded: the trial keeps running server-side and completes on its
-own clock. Proving only the client-facing timeout would miss the
-point — you must also prove the work finished.
+This session verifies the lab's **response-deadline surface** as it
+actually exists on this build. There are two distinct knobs:
+
+- `[server] tool_deadline_seconds` (default 120 s) — a per-call
+  RESPONSE bound implemented as an `asyncio.wait_for` shielded wrapper
+  around every tool. On expiry the client gets a named error
+  (`deadline_exceeded`) while the handler keeps running server-side.
+  NOTE: with `run_trial` dispatch-first-async (returns `running` in
+  ~10 s), NO reachable tool call outlives 120 s on a healthy lab —
+  this deadline is only observable under a wedge. Do not fake it.
+- `wait_trial`'s server-side cap — `timeout_seconds` clamps to 60 s.
+  This one IS reachable, and since rc-15 the response echoes
+  `timeout_seconds_requested` / `timeout_seconds_applied` so a caller
+  can tell "waited as asked" from "granted less".
+- `run_trial` discloses `submit_wait_seconds` — the ~10 s settle
+  window that used to exist only in the tool's description prose.
+- Per-channel upstream deadline — each channel row in the digests
+  now carries `call_timeout_seconds` (default 30 s).
 
 Marker tag: `diag-deadline`. Report every refusal verbatim — errors
 are data.
 
-Requires a build carrying the rc-11 deadline wrapper — fingerprint
-first.
+PART A — fingerprint + disclosure
 
-PART A — fingerprint + a trial designed to outlive the deadline
+1. Read `protocol://status` on episteme. Record
+   `tool_deadline_seconds` verbatim — the configured per-call
+   deadline is now a digest field (previously only a startup-banner
+   line). Also record `upstream_summary.channels[].call_timeout_seconds`
+   for every channel — the per-channel upstream deadline must be
+   disclosed as a number, not absent. If either field is missing or
+   null, the disclosure regressed — FAIL.
+2. Cross-check `lab://status` on agora — its `tool_deadline_seconds`
+   and each upstream digest's value should all appear. Report the
+   per-server values verbatim.
 
-1. Read the episteme tool list — run_trial and wait_trial present.
-   Record the server start banner if visible (the deadline value is
-   logged) — otherwise proceed on the 120 s default and time your
-   calls.
-2. create_programme → design_experiment → run_trial a script that
-   sleeps ~150 s then prints a metric — long enough to cross 120 s,
-   short enough to stay under the executor's own 300 s bound. Note
-   the wall-clock time you issued the call.
+PART B — the reachable deadline: wait_trial's clamp
 
-PART B — the deadline fires, and the work still completes
+3. Episteme: create_programme → formulate_hypothesis →
+   design_experiment. Write a stub `/tmp/diag-deadline/slow.py`
+   exposing `def run_training(config):` with
+   `import time; time.sleep(90); return {"metrics": {"accuracy":
+   0.5}, "variance": {}}`. capture_bundle → run_trial.
+4. Record `run_trial`'s response verbatim — it must carry
+   `submit_wait_seconds` as a field (the settle cost, previously
+   prose-only; absence is a FAIL) and return `status: "running"`
+   around that many seconds after the call.
+5. While the trial runs: `wait_trial` with
+   `timeout_seconds: 150` (above the 60 s cap) — the response must
+   come back near ~60 s with `timed_out: true`, `status: "running"`,
+   `timeout_seconds_requested: 150`,
+   `timeout_seconds_applied: 60`. A silent clamp (response at 60 s
+   but no requested/applied echo, or applied ≠ 60) is a FAIL —
+   a polling client cannot tell "waited as asked" from "granted
+   less" without the echo. Record the elapsed wall time.
+6. Repeat `wait_trial` with `timeout_seconds: 5` — it must return
+   ~5 s, `timed_out: true`, requested 5 / applied 5 (no clamp when
+   under the cap). Then keep polling until the stub finishes (~95 s
+   total) and confirm `status: "completed"` — the trial continued
+   server-side past every response bound; nothing was aborted by a
+   client-facing limit.
 
-3. The run_trial call returns `{"error": "deadline_exceeded — …"}`
-   (or the transport-level timeout your client surfaces) around the
-   120 s mark — record the elapsed time AND the verbatim error
-   text. If the call instead hangs past ~150 s with no response,
-   the deadline did not fire — FAIL, report observed behaviour.
-4. Now prove the handler was shielded, not cancelled: poll
-   wait_trial / get_trial_status until the trial reaches a terminal
-   state. Expect `completed` with your metric observed — the trial
-   finished server-side AFTER the client-facing deadline fired.
-   Record the trial's status, finished_at, and executor record
-   verbatim. A trial left `running` forever or marked failed-by-
-   deadline contradicts the shield semantics — report it.
-5. While the trial was still running past the deadline, other calls
-   must still answer: issue list_programmes against episteme and
-   claims://status on anamnesis DURING the wait window — report
-   that the server stayed responsive (the wedged call did not
-   block the loop).
+PART C — the unreachable deadline, classified honestly
 
-PART C — boundary honesty
+7. `tool_deadline_seconds` (120 s) cannot be crossed by any reachable
+   call on a healthy lab — `run_trial` is async, `wait_trial` clamps
+   at 60 s. State that plainly: the wrapper's existence is disclosed
+   by the digest field (step 1); its firing branch is unverifiable
+   without wedging a tool — classify this clause UNREACHABLE-BY-
+   DESIGN, not PASS, and note that the shield semantics are instead
+   proven by part B (the trial completing past response bounds).
 
-6. If the lab's deadline differs from 120 s (a shorter configured
-   value fires early — your 150 s trial may never reach it if the
-   executor kills first, or a longer one means your trial completes
-   before the deadline): report what you OBSERVED — the configured
-   deadline, the elapsed time at response, the final trial state —
-   and classify the outcome honestly (PASS / BLOCKED / UNREACHABLE),
-   not by assumption.
+PART D — boundary honesty
+
+8. If the lab's `tool_deadline_seconds` differs from 120 s (shorter —
+   reachable; longer — even less reachable), adapt and report what
+   you OBSERVED, not the default you assumed.
 
 While you work:
 - When a tool call refuses, read the error and do exactly what it says.
@@ -68,8 +90,10 @@ While you work:
 DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
    /srv/lab/exchange/diagnostics-out/deadline-exceeded/
-   — report.md (call start/elapsed times, the verbatim deadline
-   error, the trial's final record, the concurrent-call probes)
+   — report.md (the digest's deadline fields verbatim, both
+   wait_trial payloads with elapsed times, run_trial's
+   submit_wait_seconds, the trial's final terminal record, and the
+   UNREACHABLE-BY-DESIGN classification for the 120 s wrapper)
    plus evidence files (tool result JSON per step).
 2. Stage it for host retrieval:
       labloop-export /srv/lab/exchange/diagnostics-out/deadline-exceeded

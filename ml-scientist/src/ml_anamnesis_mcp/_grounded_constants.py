@@ -353,10 +353,17 @@ CHECK_INTERVAL_SECONDS = GroundedConstant(
 
 STALLED_MARGIN_SECONDS = GroundedConstant(
     name="STALLED_MARGIN_SECONDS",
-    value=300,
+    value=30,
     cls="C3", status="OPERATIONAL", scoring_path=False,
     citation=None, locator=None, source_key=None, procedure=None,
-    rationale="Margin before a running trial is flagged stalled. Deployment preference.",
+    rationale=(
+        "Post-deadline grace before a running trial is flagged stalled "
+        "(check is deadline-relative: timeout + margin). Was 300 — "
+        "equal to the executor timeout — so a wedged kill stayed "
+        "invisible for a second full deadline (rc-15 F8). The executor "
+        "kills at the deadline; finalize finishes in seconds, so 30 s "
+        "absorbs reap/finalize slack while still detecting a wedge."
+    ),
     decision_load=False,
 )
 

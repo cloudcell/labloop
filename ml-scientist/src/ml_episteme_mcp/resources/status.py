@@ -71,7 +71,11 @@ def _upstream_summary(adaptor) -> dict:
         "up": up,
         "down": down,
         "busy": busy,
-        "verdict": "ok" if down == 0 else "violations",
+        # Busy is degraded, not ok — an unresponsive channel must not
+        # let the summary read "ok" (rc-15 F4).
+        "verdict": (
+            "violations" if down else "degraded" if busy else "ok"
+        ),
         "channels": report,
     }
 
@@ -416,8 +420,14 @@ def _build_stamp() -> dict | None:
             except (OSError, ValueError):
                 return None
             if isinstance(d, dict) and isinstance(d.get("rev"), str):
-                return {"rev": d["rev"],
-                        "dirty": bool(d.get("dirty", False))}
+                out = {"rev": d["rev"],
+                       "dirty": bool(d.get("dirty", False))}
+                if out["dirty"]:
+                    if isinstance(d.get("dirty_files"), list):
+                        out["dirty_files"] = d["dirty_files"]
+                    if isinstance(d.get("diff_sha256"), str):
+                        out["diff_sha256"] = d["diff_sha256"]
+                return out
             return None
     return None
 
@@ -425,6 +435,7 @@ def status_digest(
     store: StateStore, adaptor=None,
     stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value,
     archive_seal_warn_hours: float = _gc.ARCHIVE_SEAL_WARN_HOURS.value,
+    tool_deadline_seconds: float | None = None,
 ) -> dict:
     """The Loop-0 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(
@@ -454,6 +465,9 @@ def status_digest(
         "upstream_summary": _upstream_summary(adaptor),
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        # The per-call response deadline — the *deadline* regex on this
+        # digest used to find nothing (rc-15 F8).
+        "tool_deadline_seconds": tool_deadline_seconds,
         "build": _build_stamp(),
     }
     # Consultation-duty watermark — every digest consumer (status
@@ -466,6 +480,7 @@ def register(
     mcp, store: StateStore, adaptor=None,
     stale_programme_hours: float = _gc.STALE_PROGRAMME_HOURS.value,
     archive_seal_warn_hours: float = _gc.ARCHIVE_SEAL_WARN_HOURS.value,
+    tool_deadline_seconds: float | None = None,
 ) -> None:
     """Register the status digest resource."""
 
@@ -475,7 +490,7 @@ def register(
         return json.dumps(
             status_digest(
                 store, adaptor, stale_programme_hours,
-                archive_seal_warn_hours,
+                archive_seal_warn_hours, tool_deadline_seconds,
             ),
             indent=2,
         )

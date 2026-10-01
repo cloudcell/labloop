@@ -8,6 +8,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id
 from ..templates import escape, format_timestamp, render_base, render_json_pretty
 
 
@@ -49,7 +50,7 @@ def render_belief_detail(store: StateStore, programme_id: str) -> HTMLResponse:
         <table>
             <thead><tr><th>ID</th><th>Updated</th></tr></thead>
             <tbody>
-                {''.join(f'<tr><td>{escape(b.id)}</td><td>{format_timestamp(b.updated_at)}</td></tr>' for b in beliefs)
+                {''.join(f'<tr id="belief-{escape(b.id)}"><td>{link_id(b.id)}</td><td>{format_timestamp(b.updated_at)}</td></tr>' for b in beliefs)
                  if beliefs else '<tr><td colspan="2" class="muted">No beliefs recorded.</td></tr>'}
             </tbody>
         </table>

@@ -88,6 +88,9 @@ async def test_registered_channel_reports_down_until_connected():
         "in_flight_operation": None,
         "in_flight_since": None,
         "connected_at": None,
+        # Disclosed per-channel deadline (rc-15 F8) — the fake
+        # declares none, so the row reports null rather than hiding it.
+        "call_timeout_seconds": None,
     }]
     # Unconfigured channels are absent — supported standalone mode,
     # not a violation.

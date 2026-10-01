@@ -60,7 +60,11 @@ def _upstream_summary(adaptors) -> dict:
         "up": up,
         "down": down,
         "busy": busy,
-        "verdict": "ok" if down == 0 else "violations",
+        # Busy is degraded, not ok — an unresponsive channel must not
+        # let the summary read "ok" (rc-15 F4).
+        "verdict": (
+            "violations" if down else "degraded" if busy else "ok"
+        ),
         "channels": report,
     }
 
@@ -247,12 +251,21 @@ def _build_stamp() -> dict | None:
             except (OSError, ValueError):
                 return None
             if isinstance(d, dict) and isinstance(d.get("rev"), str):
-                return {"rev": d["rev"],
-                        "dirty": bool(d.get("dirty", False))}
+                out = {"rev": d["rev"],
+                       "dirty": bool(d.get("dirty", False))}
+                if out["dirty"]:
+                    if isinstance(d.get("dirty_files"), list):
+                        out["dirty_files"] = d["dirty_files"]
+                    if isinstance(d.get("diff_sha256"), str):
+                        out["diff_sha256"] = d["diff_sha256"]
+                return out
             return None
     return None
 
-def status_digest(store: SearchStore, adaptors=None) -> dict:
+def status_digest(
+    store: SearchStore, adaptors=None,
+    tool_deadline_seconds: float | None = None,
+) -> dict:
     """The Loop-1 status digest — the cross-server contract shape."""
     open_work, facts = _collect_open_work(store)
     blockers = _blockers(adaptors) + _violation_blockers(store)
@@ -268,19 +281,31 @@ def status_digest(store: SearchStore, adaptors=None) -> dict:
         "upstream_summary": _upstream_summary(adaptors),
         "integrity_summary": _integrity_summary(store),
         "constants": _gc.constants_block(),
+        # The per-call response deadline — invisible in every digest
+        # before rc-15 F8.
+        "tool_deadline_seconds": tool_deadline_seconds,
         "build": _build_stamp(),
     }
     TRACKER.mark_status_read(digest)
     return digest
 
 
-def register(mcp, store: SearchStore, adaptors=None) -> None:
+def register(
+    mcp, store: SearchStore, adaptors=None,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the status digest resource."""
 
     @mcp.resource("search://status")
     def get_status() -> str:
         """Compact status digest — open work, blockers, next action."""
-        return json.dumps(status_digest(store, adaptors), indent=2)
+        return json.dumps(
+            status_digest(
+                store, adaptors,
+                tool_deadline_seconds=tool_deadline_seconds,
+            ),
+            indent=2,
+        )
 
     @mcp.resource("search://constants")
     def get_constants() -> str:

@@ -411,6 +411,7 @@ class RecordPromotionDecisionOut(TypedDict, total=False):
     declared_rung: str | None
     claimed_rung: str | None
     computed_rung: str | None
+    unverified_refs: list[str] | None
 
 
 class UpdateMetricDirectionOut(TypedDict, total=False):

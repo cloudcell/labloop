@@ -9,6 +9,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id
 from ..templates import (
     escape,
     format_timestamp,
@@ -154,7 +155,7 @@ def render_trial_detail(
 
         obs_rows.append(f"""
         <tr id="obs-{escape(obs.id)}">
-            <td>{escape(obs.id)}</td>
+            <td>{link_id(obs.id)}</td>
             <td>{escape(metrics_str)}</td>
             <td>{escape(variance_str)}</td>
             <td>{escape(obs.spatiotemporal_region or '—')}</td>
@@ -212,13 +213,14 @@ def render_trial_detail(
         <div class="section" id="bundle">
             <h2>Bundle{data_refs_badge}</h2>
             <table>
+                <tr><th>bundle_id</th><td>{link_id(bundle.id)}</td></tr>
                 <tr><th>code_hash</th><td><a href="#code-{escape((bundle.code_hash or '')[:12])}"><span class="hash-prefix">{escape(bundle.code_hash or '—')}</span></a></td></tr>
                 {extra_hash_row}
                 <tr><th>code_ref</th><td><span class="muted" title="Provenance: original carrier path at capture time">{escape(bundle.code_ref)}</span></td></tr>
                 <tr><th>env_ref</th><td>{escape(bundle.env_ref)}</td></tr>
                 <tr><th>seeds</th><td>{escape(seeds)}</td></tr>
                 <tr><th>splits</th><td>{render_json_pretty(splits)}</td></tr>
-                <tr><th>baseline_ref</th><td>{escape(bundle.baseline_ref or '—')}</td></tr>
+                <tr><th>baseline_ref</th><td>{link_id(bundle.baseline_ref)}</td></tr>
             </table>
         </div>"""
 
@@ -380,6 +382,7 @@ def render_trial_detail(
     <h1>Trial {escape(trial_id)}</h1>
     <div class="muted" style="margin-bottom: 1rem">
         programme: <a href="/programme/{escape(programme_id)}">{escape(programme_id)}</a>
+        &nbsp;·&nbsp; hypothesis: {link_id(trial.hypothesis_id)}
     </div>
 
     <div class="section">

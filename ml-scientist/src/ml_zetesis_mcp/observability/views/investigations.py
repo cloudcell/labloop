@@ -8,7 +8,7 @@ from starlette.responses import HTMLResponse
 
 from ...state.models import Investigation
 from ...state.store import SearchStore
-from ..links import link_ids
+from ..links import link_id, link_ids
 from ..templates import (
     escape,
     format_timestamp,
@@ -37,7 +37,7 @@ def _inv_row(inv: Investigation, store: SearchStore) -> str:
     return (
         "<tr>"
         f'<td><a href="/investigation/{escape(inv.id)}">{escape(short)}</a></td>'
-        f'<td><span class="mono muted">{escape(inv.id)}</span></td>'
+        f"<td>{link_id(inv.id, {})}</td>"
         f'<td><span class="status status-{escape(inv.status.value)}">'
         f"{escape(inv.status.value)}</span></td>"
         f"<td>{escape(verdict)}</td>"
@@ -143,8 +143,8 @@ def render_investigation_detail(
             for r in grounding
         ) or '<span class="muted">no evidence refs — prior-level</span>'
         claim_line = (
-            f'<p class="muted">minted → <span class="mono">'
-            f"{escape(f.claim_id)}</span></p>"
+            f'<p class="muted">minted → '
+            f"{link_id(f.claim_id, gui_bases or {})}</p>"
             if f.claim_id else ""
         )
         finding_cards += f"""

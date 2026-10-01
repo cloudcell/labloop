@@ -440,6 +440,7 @@ def register(
     stale_programme_hours: float = STALE_PROGRAMME_HOURS,
     adaptor=None,
     require_candidate_attribution: bool = False,
+    tool_deadline_seconds: float | None = None,
 ) -> None:
     """Register the session protocol resource.
 
@@ -486,7 +487,8 @@ def register(
             # protocol://status, embedded so the recovery resource
             # stays self-sufficient (one read after compaction).
             "status": status_digest(
-                store, adaptor, stale_programme_hours
+                store, adaptor, stale_programme_hours,
+                tool_deadline_seconds=tool_deadline_seconds,
             ),
         }
         return json.dumps(protocol, indent=2)

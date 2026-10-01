@@ -511,13 +511,33 @@ printf '# ml-scientist\n\nMCP runtime sources (documentation stripped).\n' \
 # identical on surface). "unknown"/dirty=true when the source is not
 # a clean checkout.
 rev=$(git -C "$ML_SCIENTIST" rev-parse HEAD 2>/dev/null || echo unknown)
-if [ -n "$(git -C "$ML_SCIENTIST" status --porcelain 2>/dev/null | head -1)" ]; then
+porcelain=$(git -C "$ML_SCIENTIST" status --porcelain 2>/dev/null)
+if [ -n "$(printf '%s\n' "$porcelain" | head -1)" ]; then
     dirty=true
 else
     dirty=false
 fi
-printf '{"rev": "%s", "dirty": %s}\n' "$rev" "$dirty" \
-    > "$WORK/mcp/ml-scientist/BUILD_REV"
+# A dirty stamp alone doesn't identify the running bytes — rc-15's
+# five `dirty: true` stamps were attributable to a rev but not to a
+# tree state. Record the dirty file list and a hash of the full diff
+# (staged + unstaged + untracked names) so a dirty build still pins
+# what actually shipped. BUILD_REV is strict JSON — the servers'
+# _build_rev() json.loads() it.
+if [ "$dirty" = true ]; then
+    diff_sha=$({
+        printf '%s\n' "$porcelain"
+        git -C "$ML_SCIENTIST" diff HEAD -- 2>/dev/null
+    } | sha256sum | cut -d' ' -f1)
+    files_json=$(printf '%s\n' "$porcelain" \
+        | python3 -c 'import json,sys; print(json.dumps(
+            [l for l in sys.stdin.read().splitlines() if l.strip()]))')
+    printf '{"rev": "%s", "dirty": true, "dirty_files": %s, "diff_sha256": "%s"}\n' \
+        "$rev" "$files_json" "$diff_sha" \
+        > "$WORK/mcp/ml-scientist/BUILD_REV"
+else
+    printf '{"rev": "%s", "dirty": false}\n' "$rev" \
+        > "$WORK/mcp/ml-scientist/BUILD_REV"
+fi
 cp "$REPO/containers/mcp/Containerfile" \
    "$REPO/containers/mcp/entrypoint.sh" "$WORK/mcp/"
 tar -C "$WORK/mcp" -cf "$WORK/mcp-ctx.tar" .

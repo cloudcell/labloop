@@ -100,6 +100,7 @@ class ConcludeInvestigationOut(TypedDict, total=False):
     verdict: str | None
     claim_ids: list[str] | None
     claim_status: str | None
+    claim_error: str | None
     findings_minted: int | None
     edges_created: int | None
     implications: dict | None
@@ -199,6 +200,7 @@ class RecordPromotionVerdictOut(TypedDict, total=False):
     decision_id: str | None
     claim_id: str | None
     claim_status: str | None
+    claim_error: str | None
     declared_rung: str | None
     claimed_rung: str | None
     computed_rung: str | None

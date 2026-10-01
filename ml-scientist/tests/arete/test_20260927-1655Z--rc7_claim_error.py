@@ -81,9 +81,11 @@ class TestClaimError:
         d = improver_store.get_meta_decision(dec["decision_id"])
         assert "anamnesis refused" in d.claim_error
 
-    async def test_disabled_claims_has_no_error(
+    async def test_disabled_claims_names_cause(
         self, arete_server, adaptors, improver_store
     ):
+        """rc-15 F5: a disabled claims channel must name the cause —
+        'not configured' — so a dropped mint is never silent."""
         adaptors.claims = None
         cand, tourn, eref = await _tourn_with_eref(
             arete_server, improver_store
@@ -94,7 +96,7 @@ class TestClaimError:
         )
         assert "error" not in dec, dec
         assert dec["claim_status"] == "disabled"
-        assert dec["claim_error"] is None
+        assert dec["claim_error"] == "claims channel not configured"
 
     async def test_minted_claim_has_no_error(
         self, arete_server, adaptors, improver_store

@@ -791,7 +791,9 @@ def check_decision_valid(
     # Existence is validated only for ids this loop mints — a ref
     # with a Loop-0 prefix naming nothing here is fabricated.
     # Other-loop prefixes (eref-, mdec-, claim-, camp-, ...) are
-    # opaque references per the protocol convention and pass through.
+    # opaque references per the protocol convention and pass through,
+    # but the record marks them unverified (candidate.py's
+    # _classify_unverified_refs) so fabricated residue stays auditable.
     # A ref matching NO ecosystem minter (e.g. evr-…) is refused —
     # the prefix itself must name a real minting surface.
     if evidence_refs:

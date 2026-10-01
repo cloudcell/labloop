@@ -9,7 +9,7 @@ from starlette.responses import HTMLResponse
 from ... import _grounded_constants as _gc
 from ...state.models import Tournament, TournamentArm
 from ...state.store import ImproverStore
-from ..links import entity_url
+from ..links import entity_url, link_id, link_ids
 from ..templates import (
     escape,
     format_timestamp,
@@ -28,7 +28,7 @@ def _link_id(entity_id: str, gui_bases: dict) -> str:
 def _result_rows(results) -> str:
     return "".join(
         f'<tr id="tres-{escape(r.id)}">'
-        f'<td class="mono">{escape(r.id)}'
+        f"<td>{link_id(r.id, {})}"
         + (f' <span class="muted" title="'
            f'{escape(json.dumps(r.corrections))}">✎{len(r.corrections)}'
            "</span>" if r.corrections else "")
@@ -141,7 +141,7 @@ def render_tournament_detail(
         f"{escape(e.id)}</a></td>"
         f"<td>{escape(e.source.value)}</td>"
         f'<td class="mono">{escape(e.tool)}</td>'
-        f'<td class="mono muted">{escape(", ".join(e.ref_ids) or "—")}</td>'
+        f'<td class="mono">{link_ids(e.ref_ids, gui_bases or {})}</td>'
         f"<td>{format_timestamp(e.created_at)}</td>"
         "</tr>"
         for e in refs
@@ -223,7 +223,8 @@ def render_tournament_detail(
 
 
 def render_proposal_detail(
-    store: ImproverStore, proposal_id: str
+    store: ImproverStore, proposal_id: str,
+    gui_bases: dict | None = None,
 ) -> HTMLResponse:
     """Proposal detail: the typed delta, admission verdict, trail."""
     from ...enforcement.checks import classify_class_map
@@ -252,7 +253,7 @@ def render_proposal_detail(
         f"{escape(e.id)}</a></td>"
         f"<td>{escape(e.source.value)}</td>"
         f'<td class="mono">{escape(e.tool)}</td>'
-        f'<td class="mono muted">{escape(", ".join(e.ref_ids) or "—")}</td>'
+        f'<td class="mono">{link_ids(e.ref_ids, gui_bases or {})}</td>'
         f"<td>{format_timestamp(e.created_at)}</td>"
         "</tr>"
         for e in refs

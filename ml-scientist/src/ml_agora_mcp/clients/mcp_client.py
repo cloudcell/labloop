@@ -59,7 +59,6 @@ class MCPClientAdaptor:
         self._stop: asyncio.Event | None = None
         self._error: Exception | None = None
         self._call_queue: asyncio.Queue = asyncio.Queue()
-        self._result_queue: asyncio.Queue = asyncio.Queue()
         # Fault attribution — which operation was in flight when the
         # channel faulted, and the unwrapped cause. Surfaced through
         # connectivity_report → upstream_connectivity → the status
@@ -116,7 +115,7 @@ class MCPClientAdaptor:
         """Process queued read ops until stopped."""
         while not self._stop.is_set():
             try:
-                op, payload = await asyncio.wait_for(
+                op, payload, fut = await asyncio.wait_for(
                     self._call_queue.get(), timeout=0.1
                 )
             except asyncio.TimeoutError:
@@ -125,30 +124,33 @@ class MCPClientAdaptor:
             label = "ping" if op == "__ping__" else f"{op}:{payload}"
             self.in_flight_operation = label
             self.in_flight_since = _utc_now()
+            # Results resolve through the op's own Future — never a
+            # shared FIFO — so a late answer to a timed-out read lands
+            # on a cancelled future and cannot desync the next read.
             try:
                 if op == "__ping__":
                     await self._session.send_ping()
                     await self._probe_queue.put(("ok", payload))
+                    continue
                 elif op == "resource":
                     result = await self._session.read_resource(payload)
                     contents = getattr(result, "contents", None) or []
                     if contents and hasattr(contents[0], "text"):
-                        await self._result_queue.put(
-                            ("ok", contents[0].text)
-                        )
+                        out = ("ok", contents[0].text)
                     else:
-                        await self._result_queue.put(
-                            ("ok", str(contents[0]) if contents else None)
+                        out = (
+                            "ok",
+                            str(contents[0]) if contents else None,
                         )
                 else:
-                    await self._result_queue.put(
-                        ("error", RuntimeError(f"unknown op {op!r}"))
-                    )
+                    out = ("error", RuntimeError(f"unknown op {op!r}"))
             except Exception as e:
-                await self._result_queue.put(("error", e))
+                out = ("error", e)
             finally:
                 self.in_flight_operation = None
                 self.in_flight_since = None
+            if not fut.done():
+                fut.set_result(out)
 
     async def connect(self) -> None:
         """Connect to the upstream MCP server.
@@ -160,9 +162,8 @@ class MCPClientAdaptor:
         self._session = None
         self._ready = asyncio.Event()
         self._stop = asyncio.Event()
-        for q in (self._call_queue, self._result_queue):
-            while not q.empty():
-                q.get_nowait()
+        while not self._call_queue.empty():
+            self._call_queue.get_nowait()
         self._task = asyncio.create_task(self._run())
         await self._ready.wait()
         if self._error:
@@ -204,7 +205,7 @@ class MCPClientAdaptor:
         self._probe_seq += 1
         seq = self._probe_seq
         start = time.monotonic()
-        await self._call_queue.put(("__ping__", seq))
+        await self._call_queue.put(("__ping__", seq, None))
         deadline = start + timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -248,11 +249,10 @@ class MCPClientAdaptor:
             raise RuntimeError("Not connected; call connect() first")
         timeout = self.config.get("call_timeout_seconds", 30)
         self.last_operation = f"resource:{uri}"
-        await self._call_queue.put(("resource", uri))
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        await self._call_queue.put(("resource", uri, fut))
         try:
-            status, result = await asyncio.wait_for(
-                self._result_queue.get(), timeout=timeout
-            )
+            status, result = await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             e = RuntimeError(
                 f"Upstream resource {uri} did not answer within "

@@ -53,7 +53,11 @@ from ..state.models import (
 )
 from ..state.store import SearchStore
 from .. import _grounded_constants as _gc
-from .investigation import _extract_ref_ids, _ref_type_for
+from .investigation import (
+    _claims_down_reason,
+    _extract_ref_ids,
+    _ref_type_for,
+)
 from mcp.types import CallToolResult
 from .schemas import coerce_json, fail, ok, AbandonCampaignOut, CloseCampaignOut, GetCampaignOut, ListCampaignsOut, ListSearchPoliciesOut, OpenCampaignOut, PullCampaignEvidenceOut, RecordCampaignResultOut, RecordPromotionVerdictOut, RefreshRosterOut, RegisterChallengerOut, RegisterSearchPolicyOut, SpawnCampaignProgrammeOut, GetIncumbentOut, ListCandidatesOut
 from typing import Annotated, Literal
@@ -1657,9 +1661,13 @@ def register(
                 }
             claim_id = None
             claim_status = "skipped"
+            claim_error = None
             confidence_basis = None
             if adaptors.claims is None:
                 claim_status = "disabled"
+                # "disabled" must name the cause — unwired and down
+                # are different operational stories (rc-15 F5).
+                claim_error = _claims_down_reason(adaptors)
             else:
                 try:
                     consulted = {
@@ -1706,8 +1714,9 @@ def register(
                     confidence_basis = minted.get("confidence_basis")
                     store.set_campaign_claim(campaign_id, claim_id)
                     claim_status = "minted"
-                except Exception:
+                except Exception as e:
                     claim_status = "failed"
+                    claim_error = str(e)
 
             return ok({
                 "campaign_id": campaign_id,
@@ -1715,6 +1724,7 @@ def register(
                 "decision_id": decision_id,
                 "claim_id": claim_id,
                 "claim_status": claim_status,
+                "claim_error": claim_error,
                 "declared_rung": declared_rung,
                 "claimed_rung": claimed_rung,
                 "computed_rung": computed_rung,

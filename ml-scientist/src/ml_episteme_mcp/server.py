@@ -155,6 +155,7 @@ def create_server(
         stale_programme_hours=stale_hours,
         adaptor=adaptor,
         require_candidate_attribution=require_attribution,
+        tool_deadline_seconds=tool_deadline,
     )
     from .resources import status as status_resources
 
@@ -163,6 +164,7 @@ def create_server(
         archive_seal_warn_hours=float(
             (session_config or {}).get("archive_seal_warn_hours", _gc.ARCHIVE_SEAL_WARN_HOURS.value)
         ),
+        tool_deadline_seconds=tool_deadline,
     )
     from .resources import graph as graph_resource
 
@@ -173,7 +175,9 @@ def create_server(
     from .prompts import workflows
 
     workflows.register(mcp)
-    status_prompts.register(mcp, store, adaptor)
+    status_prompts.register(
+        mcp, store, adaptor, tool_deadline_seconds=tool_deadline
+    )
 
     # Health endpoint — liveness probe for the MCP HTTP server.
     # The SDK's custom_route decorator is explicitly intended for health

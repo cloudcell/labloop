@@ -107,11 +107,19 @@ def create_server(
     integrity_tools.register(
         mcp, store, adaptors, integrity_config=integrity_config
     )
-    session_resource.register(mcp, store, adaptors)
-    status_resource.register(mcp, store, adaptors)
+    session_resource.register(
+        mcp, store, adaptors,
+        tool_deadline_seconds=tool_deadline,
+    )
+    status_resource.register(
+        mcp, store, adaptors, tool_deadline_seconds=tool_deadline
+    )
     graph_resource.register(mcp, store)
     workflows.register(mcp)
-    status_prompts.register(mcp, store, adaptors)
+    status_prompts.register(
+        mcp, store, adaptors,
+        tool_deadline_seconds=tool_deadline,
+    )
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> JSONResponse:

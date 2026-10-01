@@ -8,6 +8,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id, linkify
 from ..templates import escape, format_timestamp, render_base, render_status_badge
 
 
@@ -41,9 +42,9 @@ def render_conclusion_view(store: StateStore, programme_id: str) -> HTMLResponse
         cards.append(f"""
         <div class="card" id="conc-{escape(c.id)}" style="margin-bottom: 1rem">
             <h3>{render_status_badge(c.verdict.value)}</h3>
-            <div class="muted" style="margin-bottom: 0.5rem">{escape(c.id)}</div>
-            <p style="margin-bottom: 0.5rem"><strong>Hypothesis:</strong> {escape(hyp_statement)}</p>
-            <p style="margin-bottom: 0.5rem"><strong>Evidence:</strong> {escape(c.evidence_summary)}</p>
+            <div class="muted" style="margin-bottom: 0.5rem">{link_id(c.id)}</div>
+            <p style="margin-bottom: 0.5rem"><strong>Hypothesis:</strong> <a href="/hypothesis/{escape(c.hypothesis_id)}">{escape(hyp_statement)}</a></p>
+            <p style="margin-bottom: 0.5rem"><strong>Evidence:</strong> {linkify(c.evidence_summary)}</p>
             <p class="muted" style="font-size: 0.8rem">{format_timestamp(c.created_at)}</p>
         </div>""")
 

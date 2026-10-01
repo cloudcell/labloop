@@ -8,6 +8,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id, linkify
 from ..templates import (
     escape,
     format_timestamp,
@@ -471,16 +472,20 @@ def render_programme_detail(
     for c in conclusions:
         conc_rows.append(f"""
         <tr>
-            <td>{escape(c.id)}</td>
+            <td><a href="/conclusion/{escape(c.id)}">{escape(c.id)}</a></td>
             <td>{render_status_badge(c.verdict.value)}</td>
-            <td>{escape(c.evidence_summary[:150])}{'...' if len(c.evidence_summary) > 150 else ''}</td>
+            <td>{linkify(c.evidence_summary[:150])}{'...' if len(c.evidence_summary) > 150 else ''}</td>
             <td>{format_timestamp(c.created_at)}</td>
         </tr>""")
 
     body = f"""
     {archive_banner}
     <h1>{escape(programme.goal)}</h1>
-    <div class="muted" style="margin-bottom: 1rem">{escape(programme_id)}</div>
+    <div class="muted" style="margin-bottom: 1rem">
+        {link_id(programme_id)}
+        {(f'&nbsp;·&nbsp; candidate: {link_id(programme.candidate_version_id)}')
+         if getattr(programme, "candidate_version_id", None) else ""}
+    </div>
 
     <div class="grid grid-2" style="margin-bottom: 1.5rem">
         <div class="card">

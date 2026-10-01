@@ -212,7 +212,10 @@ def _get_state_summary(store: ImproverStore) -> dict:
     }
 
 
-def register(mcp, store: ImproverStore, adaptors=None) -> None:
+def register(
+    mcp, store: ImproverStore, adaptors=None,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the session protocol resource."""
 
     @mcp.resource("improver://session")
@@ -236,6 +239,9 @@ def register(mcp, store: ImproverStore, adaptors=None) -> None:
             # The actionable digest — same payload as
             # improver://status, embedded so the recovery resource
             # stays self-sufficient.
-            "status": status_digest(store, adaptors),
+            "status": status_digest(
+                store, adaptors,
+                tool_deadline_seconds=tool_deadline_seconds,
+            ),
         }
         return json.dumps(payload, indent=2)

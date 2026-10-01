@@ -12,6 +12,7 @@ from starlette.responses import HTMLResponse
 
 from ...archive import Archiver
 from ...state.store import StateStore
+from ..links import link_id, link_ids, linkify
 from ..templates import (
     escape,
     format_timestamp,
@@ -209,7 +210,7 @@ def render_archived_programme_detail(
     for h in hypotheses:
         hyp_rows.append(f"""
         <tr id="hyp-{escape(h['id'])}">
-            <td><a href="#hyp-{escape(h['id'])}">{escape(h['id'])}</a></td>
+            <td>{link_id(h['id'])}</td>
             <td>{escape(h['statement'][:200])}{'...' if len(h['statement']) > 200 else ''}</td>
             <td>{render_status_badge(h['status'])}</td>
         </tr>""")
@@ -293,7 +294,7 @@ def render_archived_programme_detail(
         metrics_html = render_json_pretty(metrics) if metrics else "—"
         belief_rows.append(f"""
         <tr>
-            <td>{escape(b['id'])}</td>
+            <td>{link_id(b['id'])}</td>
             <td>{best_html}</td>
             <td>{metrics_html}</td>
             <td>{format_timestamp(b.get('updated_at'))}</td>
@@ -318,10 +319,10 @@ def render_archived_programme_detail(
         hyp_link = f'<a href="{base_url}#hyp-{escape(hyp_id)}">{escape(hyp_id)}</a>' if hyp_id else "—"
         conc_rows.append(f"""
         <tr id="conc-{escape(c['id'])}">
-            <td>{escape(c['id'])}</td>
+            <td><a href="/conclusion/{escape(c['id'])}">{escape(c['id'])}</a></td>
             <td>{render_status_badge(c['verdict'])}</td>
             <td>{hyp_link}</td>
-            <td>{escape(c.get('evidence_summary', ''))}</td>
+            <td>{linkify(c.get('evidence_summary'))}</td>
             <td>{format_timestamp(c.get('created_at'))}</td>
         </tr>""")
     conc_section = f"""
@@ -351,7 +352,7 @@ def render_archived_programme_detail(
         bundle_rows.append(f"""
         <tr>
             <td><a href="{base_url}/trial/{escape(b['trial_id'])}">{escape(b['trial_id'])}</a></td>
-            <td>{escape(b['id'])}</td>
+            <td><a href="{base_url}/trial/{escape(b['trial_id'])}#bundle"><span class="mono">{escape(b['id'])}</span></a></td>
             <td>{code_cell}</td>
             <td>{escape(b.get('env_ref', '—'))}</td>
             <td><span class="muted" title="Provenance: original carrier path at capture time">{escape(code_ref)}</span></td>
@@ -375,7 +376,7 @@ def render_archived_programme_detail(
         content_hash_short = content_hash[:20] + "..." if len(content_hash) > 20 else content_hash
         ref_rows.append(f"""
         <tr>
-            <td>{escape(d['id'])}</td>
+            <td>{link_id(d['id'])}</td>
             <td>{escape(d.get('split', '—'))}</td>
             <td>{escape(d.get('regime', '—'))}</td>
             <td><span class="hash-prefix">{escape(content_hash_short)}</span></td>
@@ -433,7 +434,7 @@ def render_archived_programme_detail(
     <div class="status status-completed">Archived</div>
     <p class="muted">This programme is archived and read-only. It cannot be modified or restored.</p>
     <table>
-        <tr><th>Programme ID</th><td><code>{escape(pid)}</code></td></tr>
+        <tr><th>Programme ID</th><td>{link_id(pid)}</td></tr>
         <tr><th>Status</th><td>{render_status_badge(status)}</td></tr>
         <tr><th>Direction</th><td>{escape(direction)}</td></tr>
         <tr><th>Created</th><td>{format_timestamp(created_at)}</td></tr>
@@ -506,7 +507,7 @@ def render_archived_trial_detail(
             variance = {}
         obs_rows.append(f"""
         <tr id="obs-{escape(o['id'])}">
-            <td>{escape(o['id'])}</td>
+            <td>{link_id(o['id'])}</td>
             <td>{render_json_pretty(metrics)}</td>
             <td>{render_json_pretty(variance)}</td>
             <td>{escape(o.get('spatiotemporal_region', '—'))}</td>
@@ -544,15 +545,15 @@ def render_archived_trial_detail(
             extra_hash_html = f'<tr><th>Extra Code Hashes</th><td>{", ".join(extra_links)}</td></tr>'
         bundle_html += f"""
         <table id="bundle">
-            <tr><th>Bundle ID</th><td><code>{escape(b['id'])}</code></td></tr>
+            <tr><th>Bundle ID</th><td><a href="#bundle"><code>{escape(b['id'])}</code></a></td></tr>
             <tr><th>Code Hash</th><td><a href="#code-{escape((b.get('code_hash') or '')[:12])}"><span class="hash-prefix">{escape(b.get('code_hash', '—'))}</span></a></td></tr>
             {extra_hash_html}
             <tr><th>Code Ref</th><td><span class="muted" title="Provenance: original carrier path at capture time">{escape(b.get('code_ref', '—'))}</span></td></tr>
             <tr><th>Env Ref</th><td>{escape(b.get('env_ref', '—'))}</td></tr>
             <tr><th>Seeds</th><td>{escape(str(seeds))}</td></tr>
             <tr><th>Splits</th><td>{render_json_pretty(splits)}</td></tr>
-            <tr><th>Data Refs</th><td>{escape(', '.join(data_ref_ids) if data_ref_ids else '—')}</td></tr>
-            <tr><th>Baseline</th><td>{escape(b.get('baseline_ref', '—'))}</td></tr>
+            <tr><th>Data Refs</th><td>{link_ids(data_ref_ids)}</td></tr>
+            <tr><th>Baseline</th><td>{link_id(b.get('baseline_ref'))}</td></tr>
         </table>"""
 
     # Data refs
@@ -561,7 +562,7 @@ def render_archived_trial_detail(
     for d in data_refs:
         ref_rows.append(f"""
         <tr>
-            <td>{escape(d['id'])}</td>
+            <td>{link_id(d['id'])}</td>
             <td>{escape(d.get('split', '—'))}</td>
             <td>{escape(d.get('regime', '—'))}</td>
             <td><span class="hash-prefix">{escape((d.get('content_hash') or '—')[:20])}</span></td>
@@ -604,9 +605,9 @@ def render_archived_trial_detail(
     <div class="status status-completed">Archived</div>
     <p class="muted"><a href="{base_url}">← Back to programme</a></p>
     <table>
-        <tr><th>Trial ID</th><td><code>{escape(trial_id)}</code></td></tr>
+        <tr><th>Trial ID</th><td>{link_id(trial_id)}</td></tr>
         <tr><th>Programme</th><td><a href="{base_url}">{escape(programme_id)}</a></td></tr>
-        <tr><th>Hypothesis</th><td>{escape(trial.get('hypothesis_id', '—'))}</td></tr>
+        <tr><th>Hypothesis</th><td>{link_id(trial.get('hypothesis_id'))}</td></tr>
         <tr><th>Status</th><td>{render_status_badge(trial.get('status', '—'))}</td></tr>
         <tr><th>Duration</th><td>{trial.get('duration_seconds') or '—'}</td></tr>
         <tr><th>Created</th><td>{format_timestamp(trial.get('created_at'))}</td></tr>

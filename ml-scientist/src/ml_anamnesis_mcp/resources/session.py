@@ -43,7 +43,10 @@ BOUNDARY_NOTE = (
 )
 
 
-def register(mcp, store: MemoryStore) -> None:
+def register(
+    mcp, store: MemoryStore,
+    tool_deadline_seconds: float | None = None,
+) -> None:
     """Register the session protocol resource."""
 
     @mcp.resource("claims://session")
@@ -62,6 +65,9 @@ def register(mcp, store: MemoryStore) -> None:
             "tool_catalog": TOOL_CATALOG,
             "boundary": BOUNDARY_NOTE,
             # The uniform status digest — capability posture.
-            "status": status_digest(store),
+            "status": status_digest(
+                store,
+                tool_deadline_seconds=tool_deadline_seconds,
+            ),
         }
         return json.dumps(payload, indent=2)

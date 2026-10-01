@@ -46,8 +46,8 @@ url = "http://localhost:38090/mcp"
 # opt-down to trace-only semantics (open succeeds; the exclusion is
 # recorded, not enforced).
 # Example (lab VM holdouts):
-# sealed_path_patterns = ["/exchange/*/holdout*"]
-# sealed_enforcement = "deny"    # deny|audit — default deny
+sealed_path_patterns = ["/exchange/*/holdout*"]
+sealed_enforcement = "deny"    # deny|audit — default deny
 # Extra host caches shared rw under full — beyond the built-in
 # HF_HOME / XDG_CACHE_HOME / TRITON_CACHE_DIR. An existing dir is
 # bind-mounted at its real path; a missing one is skipped and reported

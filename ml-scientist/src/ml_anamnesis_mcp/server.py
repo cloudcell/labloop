@@ -92,10 +92,16 @@ def create_server(
 
     claims.register(mcp, store)
     integrity_tools.register(mcp, store, integrity_config=integrity_config)
-    session_resource.register(mcp, store)
-    status_resource.register(mcp, store)
+    session_resource.register(
+        mcp, store, tool_deadline_seconds=tool_deadline,
+    )
+    status_resource.register(
+        mcp, store, tool_deadline_seconds=tool_deadline
+    )
     graph_resource.register(mcp, store)
-    status_prompts.register(mcp, store)
+    status_prompts.register(
+        mcp, store, tool_deadline_seconds=tool_deadline,
+    )
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> JSONResponse:

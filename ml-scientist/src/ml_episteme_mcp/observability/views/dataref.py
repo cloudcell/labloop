@@ -9,6 +9,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 
 from ...state.store import StateStore
+from ..links import link_id
 from ..templates import (
     escape,
     format_timestamp,
@@ -91,7 +92,7 @@ def render_dataref_detail(store: StateStore, data_ref_id: str) -> HTMLResponse:
     <div class="section">
         <h2>Overview</h2>
         <table>
-            <tr><th>ID</th><td class="data-ref-link">{escape(ref.id)}</td></tr>
+            <tr><th>ID</th><td class="data-ref-link">{link_id(ref.id)}</td></tr>
             <tr><th>split</th><td>{escape(ref.split)}</td></tr>
             <tr><th>regime</th><td>{escape(ref.regime)}</td></tr>
             <tr><th>content_hash</th><td class="hash-prefix">{escape(ref.content_hash or '—')}</td></tr>

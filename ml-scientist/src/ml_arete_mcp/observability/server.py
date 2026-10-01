@@ -55,7 +55,8 @@ def create_observability_app(
 
     def improver_detail(request: Request) -> HTMLResponse:
         return imp_views.render_improver_detail(
-            store, request.path_params["improver_id"]
+            store, request.path_params["improver_id"],
+            gui_bases=upstream_gui_bases or {},
         )
 
     def tournament_detail(request: Request) -> HTMLResponse:
@@ -66,7 +67,8 @@ def create_observability_app(
 
     def proposal_detail(request: Request) -> HTMLResponse:
         return tourn_views.render_proposal_detail(
-            store, request.path_params["proposal_id"]
+            store, request.path_params["proposal_id"],
+            gui_bases=upstream_gui_bases or {},
         )
 
     def campaign_link_detail(request: Request) -> HTMLResponse:

@@ -355,9 +355,10 @@ def register(mcp, store: ImproverStore, adaptors) -> None:
                     return fail(json.dumps({
                         "error": "corrected metrics must carry the "
                         f"contract's primary_metric '{primary}' — a "
-                        "correction that drops the scored metric "
-                        "leaves a row the recursive_gain computation "
-                        "cannot read."
+                        "correction that drops it leaves a row the "
+                        "recursive_gain computation cannot read "
+                        f"(recursive_gain is computed over "
+                        f"'{primary}')."
                     }))
             seed_src = metrics if metrics is not None else descendant_spec
             seed = (seed_src or {}).get("seed")

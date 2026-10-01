@@ -90,6 +90,19 @@ def _extract_ref_ids(payload: str) -> list[str]:
     return list(seen)
 
 
+def _claims_down_reason(adaptors) -> str:
+    """Why a claim mint was skipped — 'disabled' must name the cause
+    (rc-15 F5): a caller shouldn't have to cross-reference the
+    blockers list to learn whether claims was unwired or just down."""
+    spec = getattr(adaptors, "_channels", {}).get("claims")
+    if spec is None:
+        return "claims channel not configured"
+    return (
+        "claims channel down"
+        + (f": {spec.last_error}" if spec.last_error else "")
+    )
+
+
 def _ref_type_for(ref_id: str) -> str:
     for prefix, ref_type in _REF_TYPE_BY_PREFIX.items():
         if ref_id.startswith(prefix):
@@ -377,6 +390,7 @@ def register(
             claim_ids: list[str] = []
             edges_created = 0
             claim_status = "skipped"
+            claim_error = None
 
             if verdict == InvestigationVerdict.findings.value:
                 provisional = store.list_findings(
@@ -384,6 +398,9 @@ def register(
                 )
                 if adaptors.claims is None:
                     claim_status = "disabled"
+                    # "disabled" must name the cause — unwired and
+                    # down are different operational stories (rc-15 F5).
+                    claim_error = _claims_down_reason(adaptors)
                 else:
                     try:
                         for f in provisional:
@@ -431,8 +448,9 @@ def register(
                                 f.id, FindingStatus.asserted
                             )
                         claim_status = "minted"
-                    except Exception:
+                    except Exception as e:
                         claim_status = "failed"
+                        claim_error = str(e)
 
             with store.transaction():
                 store.conclude_investigation(
@@ -448,6 +466,7 @@ def register(
                 "verdict": verdict,
                 "claim_ids": claim_ids,
                 "claim_status": claim_status,
+                "claim_error": claim_error,
                 "findings_minted": len(claim_ids),
                 "edges_created": edges_created,
                 "implications": implications,

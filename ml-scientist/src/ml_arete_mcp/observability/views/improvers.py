@@ -9,6 +9,7 @@ from starlette.responses import HTMLResponse
 
 from ...state.models import ImproverVersion
 from ...state.store import ImproverStore
+from ..links import link_id
 from ..templates import (
     escape,
     format_timestamp,
@@ -32,7 +33,7 @@ def _champion_card(store: ImproverStore) -> str:
               class="mono">{escape(champion.id)}</a>
            &nbsp;·&nbsp; model <b>{escape(champion.model_ref)}</b>
            &nbsp;·&nbsp; parent
-           <span class="mono muted">{escape(champion.parent_id or '—')}</span>
+           {link_id(champion.parent_id, {})}
         </p>
         <p class="muted">digest {escape(champion.code_artifact_digest[:24])}…
            &nbsp;·&nbsp; promoted into place {format_timestamp(champion.created_at)}</p>
@@ -49,9 +50,9 @@ def _imp_row(imp: ImproverVersion) -> str:
         "<tr>"
         f'<td><a href="/improver/{escape(imp.id)}" class="mono">'
         f"{escape(imp.id)}</a>{badge}</td>"
-        f'<td class="mono muted">{escape(imp.parent_id or "—")}</td>'
+        f"<td>{link_id(imp.parent_id, {})}</td>"
         f"<td>{escape(imp.model_ref)}</td>"
-        f'<td class="mono muted">{escape(imp.proposal_id or "—")}</td>'
+        f"<td>{link_id(imp.proposal_id, {})}</td>"
         f"<td>{format_timestamp(imp.created_at)}</td>"
         "</tr>"
     )
@@ -78,7 +79,7 @@ def _proposal_row(p) -> str:
         "<tr>"
         f'<td><a href="/proposal/{escape(p.id)}" class="mono">'
         f"{escape(p.id)}</a></td>"
-        f'<td class="mono muted">{escape(p.proposer_improver_id)}</td>'
+        f"<td>{link_id(p.proposer_improver_id, {})}</td>"
         f'<td><span class="status status-{_status_class(p.status.value)}">'
         f"{escape(p.status.value)}</span></td>"
         f"<td>{len(p.class_map)}</td>"
@@ -144,8 +145,8 @@ def render_improver_list(
         "<tr>"
         f'<td><a href="/tournament/{escape(t.id)}" class="mono">'
         f"{escape(t.id)}</a></td>"
-        f'<td class="mono muted">{escape(t.parent_improver_id)} → '
-        f"{escape(t.candidate_improver_id)}</td>"
+        f"<td>{link_id(t.parent_improver_id, {})} → "
+        f"{link_id(t.candidate_improver_id, {})}</td>"
         f'<td><span class="status status-{_status_class2(t.status.value)}">'
         f"{escape(t.status.value)}</span></td>"
         f"<td>{escape(f'{t.recursive_gain:.3f}' if t.recursive_gain is not None else '—')}</td>"
@@ -191,9 +192,11 @@ def _status_class2(status: str) -> str:
 
 
 def render_improver_detail(
-    store: ImproverStore, improver_id: str
+    store: ImproverStore, improver_id: str,
+    gui_bases: dict | None = None,
 ) -> HTMLResponse:
     """Improver detail: record + lineage + decisions + policies."""
+    bases = gui_bases or {}
     imp = store.get_improver(improver_id)
     if imp is None:
         return HTMLResponse(
@@ -212,7 +215,7 @@ def render_improver_detail(
         )
         + "</td>"
         f"<td>{escape(i.model_ref)}</td>"
-        f'<td class="mono muted">{escape(i.parent_id or "—")}</td>'
+        f"<td>{link_id(i.parent_id, bases)}</td>"
         f"<td>{format_timestamp(i.created_at)}</td>"
         "</tr>"
         for i in chain
@@ -223,10 +226,10 @@ def render_improver_detail(
         f'<tr id="mdec-{escape(d.id)}">'
         f'<td><span class="status status-{_status_class(d.verdict.value)}">'
         f"{escape(d.verdict.value)}</span></td>"
-        f'<td class="mono muted">{escape(d.id)}</td>'
+        f"<td>{link_id(d.id, bases)}</td>"
         f"<td>{escape(d.decided_by)}</td>"
         f'<td class="muted">{escape(d.rationale[:140])}</td>'
-        f'<td class="mono muted">{escape(d.claim_id or "—")}</td>'
+        f"<td>{link_id(d.claim_id, bases)}</td>"
         f"<td>{format_timestamp(d.created_at)}</td>"
         "</tr>"
         for d in decisions
@@ -238,10 +241,10 @@ def render_improver_detail(
     policies = store.list_policy_versions(improver_id)
     policy_rows = "".join(
         f'<tr id="pol-{escape(p.id)}">'
-        f'<td class="mono">{escape(p.id)}</td>'
+        f"<td>{link_id(p.id, bases)}</td>"
         f'<td><span class="status status-{_status_class(p.status.value)}">'
         f"{escape(p.status.value)}</span></td>"
-        f'<td class="mono muted">{escape(p.decision_id)}</td>'
+        f"<td>{link_id(p.decision_id, bases)}</td>"
         f"<td>{format_timestamp(p.created_at)}</td>"
         "</tr>"
         for p in policies
@@ -272,16 +275,16 @@ def render_improver_detail(
     <h1><span class="mono">{escape(imp.id)}</span>{badge}</h1>
     <div class="card">
         <p>model <b>{escape(imp.model_ref)}</b> &nbsp;·&nbsp; parent
-           <span class="mono">{escape(imp.parent_id or '— (genesis)')}</span>
+           {link_id(imp.parent_id, bases)}
            &nbsp;·&nbsp; proposal
-           <span class="mono">{escape(imp.proposal_id or '—')}</span></p>
+           {link_id(imp.proposal_id, bases)}</p>
         <p class="muted">code digest
            <span class="mono">{escape(imp.code_artifact_digest)}</span></p>
         {(f'<p class="muted">harness digest <span class="mono">'
           f'{escape(imp.harness_artifact_digest)}</span></p>')
          if imp.harness_artifact_digest else ""}
-        {(f'<p class="muted">search policy ref <span class="mono">'
-          f'{escape(imp.search_policy_ref)}</span></p>')
+        {(f'<p class="muted">search policy ref '
+          f'{link_id(imp.search_policy_ref, bases)}</p>')
          if imp.search_policy_ref else ""}
         <p class="muted">capability profile:</p>
         <pre>{escape(json.dumps(imp.capability_profile, indent=2))}</pre>

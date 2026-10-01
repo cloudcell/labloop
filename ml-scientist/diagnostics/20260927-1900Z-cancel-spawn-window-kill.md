@@ -59,13 +59,16 @@ PART B — the spawn-window cancel (the bug's exact shape)
    `duration_seconds`, `artifact_path`, `retry_reason` as KEYS in the
    payload (null values are honest; ABSENT keys are the R2 bug —
    FAIL).
-5. Process liveness (best-effort): if you have shell access into the
-   lab-cnt-mcp container (docker exec / nsenter / whatever the VM
-   exposes), `pgrep -f <trial_id>` ~10 s after each mark — the
-   trial's wrapper filename carries the id; nothing must be alive.
-   An agent operating as `lab` on the VM has no in-guest shell and
-   CANNOT run this — mark the step BLOCKED and rely on steps 6–7.
-   Do not fake a process check.
+5. Process liveness — the MCP-reachable probe (an agent as `lab`
+   has no in-guest shell): ~10 s after each mark_retryable, call
+   check_invariants on episteme and report `orphaned_running_trials`
+   and `terminal_with_live_executor` verbatim — they consult the
+   executor's live task table, which is the sanctioned liveness
+   surface (a cancelled trial whose subprocess lives is exactly
+   what they catch). A trial that stays clean here AND clean at
+   step 6's duration check is the pass shape. If you DO have a
+   container shell, `pgrep -f <trial_id>` is welcome corroboration —
+   but never fabricate it.
 6. Wait past the stub's natural end (~95 s after run_trial).
    get_trial_status each trial again → still "retryable", same full
    field set, same retry_reason. If `executor_output` is present, its
@@ -85,14 +88,17 @@ PART C — mid-run cancel (the non-racy path must still work)
    `failed` with `cancelled: true`. `failed` here records the
    cancellation act, not a scientific failure — the docstring says so;
    report the payload verbatim.
-9. pgrep for that trial id — nothing alive. get_trial_status →
-   `failed`, terminal fields intact.
+9. Liveness again via check_invariants (same probe as step 5 —
+   `terminal_with_live_executor` must not flag the cancelled id);
+   if you have a container shell, `pgrep -f <trial_id>` → nothing
+   alive. get_trial_status → `failed`, terminal fields intact.
 
 PART D — honest bookkeeping
 
 10. Report verbatim: every get_trial_status poll (timestamped), the
     mark_retryable / cancel_trial payloads and measured latencies,
-    pgrep outputs (or the BLOCKED note), the full check_invariants
+    the step-5/9 check_invariants liveness probes (and pgrep output
+    if a container shell was available), the full check_invariants
     array.
 11. check_invariants at the end — acknowledge any violation you
     caused with an honest disposition. A retried trial is a
@@ -112,7 +118,8 @@ DELIVERABLE — produce an exportable artifact.
 1. Write your findings into
    /srv/lab/exchange/diagnostics-out/cancel-spawn-window-kill/
    — report.md (the per-trial cancel latencies, every status poll
-   verbatim, pgrep evidence or BLOCKED note, the full check array)
+   verbatim, the check_invariants liveness evidence, the full check
+   array)
    plus evidence files (tool result JSON per step).
 2. Stage it for host retrieval:
       labloop-export /srv/lab/exchange/diagnostics-out/cancel-spawn-window-kill
