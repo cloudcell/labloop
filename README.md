@@ -3,6 +3,8 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
 [![Discord](https://img.shields.io/discord/903850592957517835?logo=discord&label=Discord)](https://discord.com/invite/v9JVtpVuUT)
 
+Part of the [GnosisLab](https://github.com/cloudcell/gnosislab) project.
+
 ## A persistent scientific loop for AI agents
 
 Most AI agents can reason, call tools and run code. LabLoop gives them something more durable: a **persistent scientific loop** in which hypotheses, experiments, evidence, belief updates and research memory survive individual runs and inform what happens next.
