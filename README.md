@@ -1,3 +1,15 @@
+> [!CAUTION]
+> ### ⚠️ LabLoop has moved to GnosisLab and GnosisLab-VM
+>
+> **This is the legacy LabLoop repository.** The project has been renamed and separated into two repositories:
+>
+> - **[GnosisLab-VM](https://github.com/cloudcell/gnosislab-vm)** — the virtualized, protected GnosisLab environment, using KVM/libvirt and isolated execution zones for running scientific workflows and experiments.
+> - **[GnosisLab](https://github.com/cloudcell/gnosislab)** — the scientific-method runtime and MCP services for managing hypotheses, experiments, execution evidence, research decisions, and reproducibility. It can run without the VM.
+>
+> **For the current VM implementation, installation instructions, updates, and issues, visit [cloudcell/gnosislab-vm](https://github.com/cloudcell/gnosislab-vm).** The README below describes the original LabLoop project and retains historical names, paths, and commands.
+
+---
+
 # LabLoop: your AI scientist
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](https://github.com/cloudcell/labloop/LICENSE)
